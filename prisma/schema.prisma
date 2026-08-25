@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  NGO
+  FIREFIGHTER
+  COORDINATOR
+  VOLUNTEER
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum ResourceStatus {
+  AVAILABLE
+  RESERVED
+  IN_USE
+  DEPLETED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  passwordHash  String
+  role          Role      @default(VOLUNTEER)
+  organization  String?
+  phone         String?
+  gminaId       String?
+  gmina         Gmina?    @relation(fields: [gminaId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  alertsCreated Alert[]
+}
+
+model Gmina {
+  id           String     @id @default(cuid())
+  name         String     @unique
+  powiat       String
+  voivodeship  String
+  latitude     Float?
+  longitude    Float?
+  contactEmail String?
+  contactPhone String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  users        User[]
+  alerts       Alert[]
+  resources    Resource[]
+}
+
+model ResourceCategory {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  icon        String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  resources   Resource[]
+}
+
+model Resource {
+  id          String           @id @default(cuid())
+  name        String
+  description String?
+  quantity    Int              @default(0)
+  unit        String           @default("szt")
+  status      ResourceStatus   @default(AVAILABLE)
+  location    String?
+  categoryId  String
+  category    ResourceCategory @relation(fields: [categoryId], references: [id])
+  gminaId     String
+  gmina       Gmina            @relation(fields: [gminaId], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Alert {
+  id          String      @id @default(cuid())
+  title       String
+  description String
+  severity    Severity    @default(MEDIUM)
+  status      AlertStatus @default(ACTIVE)
+  location    String?
+  authorId    String?
+  author      User?       @relation(fields: [authorId], references: [id])
+  gminaId     String
+  gmina       Gmina       @relation(fields: [gminaId], references: [id])
+  expiresAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
