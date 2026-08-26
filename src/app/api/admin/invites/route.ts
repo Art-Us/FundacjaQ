@@ -9,7 +9,7 @@ import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
-const ROLES = ['ADMIN', 'NGO', 'FIREFIGHTER', 'COORDINATOR', 'VOLUNTEER'] as const;
+const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 
 const createInviteSchema = z.object({
   email: z.string().email(),
@@ -92,5 +92,5 @@ export async function POST(req: NextRequest) {
   const inviteUrl = `${process.env.NEXTAUTH_URL}/invite/${rawToken}`;
   await sendInviteEmail(email, inviteUrl);
 
-  return NextResponse.json({ message: 'Zaproszenie wysłane.' });
+  return NextResponse.json({ message: 'Zaproszenie wysłane.', inviteUrl });
 }

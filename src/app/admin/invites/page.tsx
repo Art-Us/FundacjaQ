@@ -11,10 +11,21 @@ export default async function AdminInvitesPage() {
     redirect('/');
   }
 
-  const invites = await prisma.inviteToken.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-  });
+  const isAdmin = session.user.role === 'ADMIN';
+  const gminaFilter = isAdmin || !session.user.gminaId ? {} : { gminaId: session.user.gminaId };
+
+  const [invites, users] = await Promise.all([
+    prisma.inviteToken.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
+    prisma.user.findMany({
+      where: gminaFilter,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: { gmina: true },
+    }),
+  ]);
 
   return (
     <main className="flex-1 px-4 py-16 container mx-auto">
@@ -52,6 +63,32 @@ export default async function AdminInvitesPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <h2 className="text-xl font-bold text-slate-100 mt-16 mb-6">Użytkownicy</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left text-slate-300">
+          <thead className="text-slate-500 border-b border-slate-800">
+            <tr>
+              <th className="py-2 pr-4">Email</th>
+              <th className="py-2 pr-4">Nazwa</th>
+              <th className="py-2 pr-4">Rola</th>
+              <th className="py-2 pr-4">Gmina</th>
+              <th className="py-2 pr-4">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id} className="border-b border-slate-900">
+                <td className="py-2 pr-4">{user.email}</td>
+                <td className="py-2 pr-4">{user.name ?? '—'}</td>
+                <td className="py-2 pr-4">{user.role}</td>
+                <td className="py-2 pr-4">{user.gmina?.name ?? '—'}</td>
+                <td className="py-2 pr-4">{user.isActive ? 'Aktywny' : 'Nieaktywny'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </main>
   );

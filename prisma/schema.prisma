@@ -9,8 +9,6 @@ datasource db {
 
 enum Role {
   ADMIN
-  NGO
-  FIREFIGHTER
   COORDINATOR
   VOLUNTEER
 }

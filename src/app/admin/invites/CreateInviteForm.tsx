@@ -4,19 +4,23 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
-const ROLES = ['ADMIN', 'NGO', 'FIREFIGHTER', 'COORDINATOR', 'VOLUNTEER'] as const;
+const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 
 export function CreateInviteForm() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<typeof ROLES[number]>('VOLUNTEER');
   const [message, setMessage] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+    setInviteUrl(null);
+    setCopied(false);
 
     const res = await fetch('/api/admin/invites', {
       method: 'POST',
@@ -29,8 +33,15 @@ export function CreateInviteForm() {
 
     if (res.ok) {
       setEmail('');
+      setInviteUrl(data.inviteUrl ?? null);
       router.refresh();
     }
+  }
+
+  async function handleCopy() {
+    if (!inviteUrl) return;
+    await navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
   }
 
   return (
@@ -69,6 +80,24 @@ export function CreateInviteForm() {
       <Button type="submit" disabled={loading} className="w-full">
         {loading ? 'Wysyłanie…' : 'Wyślij zaproszenie'}
       </Button>
+      {inviteUrl && (
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
+          <p className="text-xs text-slate-500 mb-2">
+            Wiadomość e-mail nie jest jeszcze skonfigurowana — oto link zaproszenia do przekazania ręcznie:
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={inviteUrl}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 rounded-md bg-slate-950 border border-slate-800 px-2 py-1.5 text-xs text-slate-300 focus:outline-none"
+            />
+            <Button type="button" variant="secondary" size="sm" onClick={handleCopy}>
+              {copied ? 'Skopiowano!' : 'Kopiuj'}
+            </Button>
+          </div>
+        </div>
+      )}
     </form>
   );
 }
