@@ -37,19 +37,69 @@ enum ResourceStatus {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  passwordHash  String
-  role          Role      @default(VOLUNTEER)
-  organization  String?
-  phone         String?
-  gminaId       String?
-  gmina         Gmina?    @relation(fields: [gminaId], references: [id])
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  name              String?
+  email             String    @unique
+  passwordHash      String
+  role              Role      @default(VOLUNTEER)
+  organization      String?
+  phone             String?
+  gminaId           String?
+  gmina             Gmina?    @relation(fields: [gminaId], references: [id])
+  emailVerified     DateTime?
+  isActive          Boolean   @default(true)
+  failedAttempts    Int       @default(0)
+  lockedUntil       DateTime?
+  passwordChangedAt DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  alertsCreated Alert[]
+  alertsCreated       Alert[]
+  invitesCreated      InviteToken[]
+  passwordResetTokens PasswordResetToken[]
+  loginAttempts       LoginAttempt[]
+}
+
+model InviteToken {
+  id          String    @id @default(cuid())
+  email       String
+  role        Role
+  gminaId     String?
+  gmina       Gmina?    @relation(fields: [gminaId], references: [id])
+  tokenHash   String    @unique
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  success   Boolean
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
 }
 
 model Gmina {
@@ -67,6 +117,7 @@ model Gmina {
   users        User[]
   alerts       Alert[]
   resources    Resource[]
+  inviteTokens InviteToken[]
 }
 
 model ResourceCategory {
