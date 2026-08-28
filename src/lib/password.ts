@@ -18,6 +18,11 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
+// Computed once at startup so a login for a nonexistent email still pays the
+// full bcrypt cost — otherwise the missing user short-circuits verifyPassword
+// and the response time itself reveals whether the account exists.
+export const DUMMY_PASSWORD_HASH = bcrypt.hashSync('timing-attack-mitigation', BCRYPT_COST);
+
 /**
  * Checks the password against the HIBP k-Anonymity range API without ever
  * sending the full password or its full hash. Fails open (returns false,

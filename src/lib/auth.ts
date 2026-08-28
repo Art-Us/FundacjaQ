@@ -1,7 +1,7 @@
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from './prisma';
-import { verifyPassword } from './password';
+import { verifyPassword, DUMMY_PASSWORD_HASH } from './password';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
 import { consumeLimit, loginLimiter } from './rateLimit';
 
@@ -72,9 +72,12 @@ export const authOptions: NextAuthOptions = {
 
         const user = await prisma.user.findUnique({ where: { email } });
 
-        // Same generic failure for "no such user" and "wrong password" so the
-        // response never reveals which one it was.
-        if (!user || !user.isActive || !(await verifyPassword(password, user.passwordHash))) {
+        // Always run bcrypt, even for a nonexistent user (against a dummy
+        // hash), so the response time doesn't leak whether the account
+        // exists. Same generic failure for "no such user" and "wrong
+        // password" so the message doesn't reveal which one it was either.
+        const validPassword = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+        if (!user || !user.isActive || !validPassword) {
           await recordFailedAttempt(email);
           await logAttempt(email, user?.id ?? null, false, ip, userAgent);
           throw new Error('Nieprawidłowy email lub hasło.');
