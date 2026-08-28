@@ -18,6 +18,10 @@ vi.mock('@/lib/attemptTracker', () => ({
 vi.mock('@/lib/captcha', () => ({
   verifyCaptcha: vi.fn(),
 }));
+vi.mock('@/lib/ipLockout', () => ({
+  checkIpBlock: vi.fn(),
+  IP_BLOCKED_MESSAGE: 'Zbyt wiele nieudanych prób logowania z tego adresu IP. Spróbuj ponownie później.',
+}));
 vi.mock('next/headers', () => ({
   headers: vi.fn(),
 }));
@@ -27,6 +31,7 @@ import { consumeLimit } from '@/lib/rateLimit';
 import { isPasswordPwned } from '@/lib/password';
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
+import { checkIpBlock } from '@/lib/ipLockout';
 import { headers } from 'next/headers';
 import { hashToken } from '@/lib/tokens';
 import { acceptInvite } from './actions';
@@ -60,6 +65,7 @@ beforeEach(() => {
   vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
   vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
   vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
+  vi.mocked(checkIpBlock).mockReset().mockResolvedValue({ blocked: false, until: null });
   vi.mocked(headers).mockReset().mockReturnValue(new Headers({ 'x-forwarded-for': '10.0.0.1' }) as any);
   prisma.user.findUnique.mockResolvedValue(null);
 });
@@ -211,5 +217,18 @@ describe('captcha gate', () => {
 
     expect(result.ok).toBe(true);
     expect(verifyCaptcha).toHaveBeenCalledWith('valid-token', '10.0.0.1');
+  });
+});
+
+describe('IP lockout', () => {
+  it('rejects before touching the database when the IP is escalating-blocked', async () => {
+    vi.mocked(checkIpBlock).mockResolvedValue({ blocked: true, until: new Date(Date.now() + 60_000) });
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('adresu IP');
+    expect(consumeLimit).not.toHaveBeenCalled();
+    expect(prisma.inviteToken.findUnique).not.toHaveBeenCalled();
   });
 });

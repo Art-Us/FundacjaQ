@@ -19,12 +19,17 @@ vi.mock('@/lib/attemptTracker', () => ({
 vi.mock('@/lib/captcha', () => ({
   verifyCaptcha: vi.fn(),
 }));
+vi.mock('@/lib/ipLockout', () => ({
+  checkIpBlock: vi.fn(),
+  IP_BLOCKED_MESSAGE: 'Zbyt wiele nieudanych prób logowania z tego adresu IP. Spróbuj ponownie później.',
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
+import { checkIpBlock } from '@/lib/ipLockout';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -44,6 +49,7 @@ beforeEach(() => {
   vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
   vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
   vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
+  vi.mocked(checkIpBlock).mockReset().mockResolvedValue({ blocked: false, until: null });
 });
 
 describe('POST /api/auth/forgot-password', () => {
@@ -183,5 +189,19 @@ describe('captcha gate', () => {
 
     expect(recordAttempt).toHaveBeenCalledWith('pwd-reset-account', 'nobody@example.com');
     expect(recordAttempt).toHaveBeenCalledWith('pwd-reset-ip', '1.2.3.4');
+  });
+});
+
+describe('IP lockout', () => {
+  it('rejects with 429 before touching the database when the IP is escalating-blocked', async () => {
+    vi.mocked(checkIpBlock).mockResolvedValue({ blocked: true, until: new Date(Date.now() + 60_000) });
+
+    const res = await POST(makeRequest({ email: 'user@example.com' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(body.error).toContain('adresu IP');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(consumeLimit).not.toHaveBeenCalled();
   });
 });

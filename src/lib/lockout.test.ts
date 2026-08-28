@@ -88,7 +88,7 @@ describe('recordFailedAttempt', () => {
   });
 
   it('locks the account in both Postgres and Redis once the threshold is reached', async () => {
-    prisma.user.update.mockResolvedValueOnce({ failedAttempts: 5 } as any).mockResolvedValueOnce({} as any);
+    prisma.user.update.mockResolvedValueOnce({ failedAttempts: 20 } as any).mockResolvedValueOnce({} as any);
 
     await recordFailedAttempt('user@example.com');
 

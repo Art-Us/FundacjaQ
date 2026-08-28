@@ -8,6 +8,12 @@ vi.mock('./lockout', () => ({
   recordFailedAttempt: vi.fn(),
   resetAttempts: vi.fn(),
 }));
+vi.mock('./ipLockout', () => ({
+  checkIpBlock: vi.fn(),
+  recordFailedLoginByIp: vi.fn(),
+  clearIpFailures: vi.fn(),
+  IP_BLOCKED_MESSAGE: 'Zbyt wiele nieudanych prób logowania z tego adresu IP. Spróbuj ponownie później.',
+}));
 vi.mock('./rateLimit', () => ({
   consumeLimit: vi.fn(),
   loginLimiter: {},
@@ -23,6 +29,7 @@ vi.mock('./captcha', () => ({
 
 import { prisma as prismaImport } from './prisma';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
+import { checkIpBlock, recordFailedLoginByIp, clearIpFailures } from './ipLockout';
 import { consumeLimit } from './rateLimit';
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
@@ -49,6 +56,9 @@ beforeEach(() => {
   vi.mocked(checkLockout).mockReset().mockResolvedValue({ locked: false, until: null });
   vi.mocked(recordFailedAttempt).mockReset().mockResolvedValue(undefined);
   vi.mocked(resetAttempts).mockReset().mockResolvedValue(undefined);
+  vi.mocked(checkIpBlock).mockReset().mockResolvedValue({ blocked: false, until: null });
+  vi.mocked(recordFailedLoginByIp).mockReset().mockResolvedValue(undefined);
+  vi.mocked(clearIpFailures).mockReset().mockResolvedValue(undefined);
   vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
   vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
   vi.mocked(clearAttempts).mockReset().mockResolvedValue(undefined);
@@ -139,6 +149,16 @@ describe('authorize()', () => {
     expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: maliciousEmail.toLowerCase() } });
   });
 
+  it('rejects before touching the database when the IP is blocked', async () => {
+    vi.mocked(checkIpBlock).mockResolvedValue({ blocked: true, until: new Date(Date.now() + 60_000) });
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow(
+      'Zbyt wiele nieudanych prób logowania z tego adresu IP. Spróbuj ponownie później.'
+    );
+    expect(consumeLimit).not.toHaveBeenCalled();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
   it('rejects before touching the database when the rate limit is exceeded', async () => {
     vi.mocked(consumeLimit).mockResolvedValue(false);
 
@@ -158,12 +178,13 @@ describe('authorize()', () => {
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('records a failed attempt and logs it on bad credentials', async () => {
+  it('records a failed attempt (account, IP counter, and audit log) on bad credentials', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
     await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow();
 
     expect(recordFailedAttempt).toHaveBeenCalledWith('user@example.com');
+    expect(recordFailedLoginByIp).toHaveBeenCalledWith('1.2.3.4');
     expect(prisma.loginAttempt.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ success: false }) })
     );
@@ -171,7 +192,7 @@ describe('authorize()', () => {
 });
 
 describe('captcha gate', () => {
-  it('does not require captcha (and never calls verifyCaptcha) below the attempt thresholds', async () => {
+  it('does not require captcha (and never calls verifyCaptcha) below the account attempt threshold', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
     await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow(
@@ -181,7 +202,7 @@ describe('captcha gate', () => {
   });
 
   it('rejects with CAPTCHA_REQUIRED once the account has reached its attempt threshold and no valid token is supplied', async () => {
-    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-account' ? 3 : 0));
+    vi.mocked(getAttemptCount).mockResolvedValue(3);
     vi.mocked(verifyCaptcha).mockResolvedValue(false);
 
     await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow('CAPTCHA_REQUIRED');
@@ -190,16 +211,9 @@ describe('captcha gate', () => {
     expect(recordFailedAttempt).toHaveBeenCalledWith('user@example.com');
   });
 
-  it('rejects with CAPTCHA_REQUIRED once the IP alone has reached its attempt threshold', async () => {
-    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-ip' ? 5 : 0));
-    vi.mocked(verifyCaptcha).mockResolvedValue(false);
-
-    await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow('CAPTCHA_REQUIRED');
-  });
-
   it('proceeds past the captcha gate with a valid token once required', async () => {
     const passwordHash = await hashPassword('CorrectPassword123!');
-    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-account' ? 3 : 0));
+    vi.mocked(getAttemptCount).mockResolvedValue(3);
     vi.mocked(verifyCaptcha).mockResolvedValue(true);
     prisma.user.findUnique.mockResolvedValue({
       id: 'u1',
@@ -220,7 +234,7 @@ describe('captcha gate', () => {
     expect(verifyCaptcha).toHaveBeenCalledWith('valid-token', '1.2.3.4');
   });
 
-  it('clears the account attempt counter on a successful login', async () => {
+  it('clears the account attempt counter and the IP failure counter on a successful login', async () => {
     const passwordHash = await hashPassword('CorrectPassword123!');
     prisma.user.findUnique.mockResolvedValue({
       id: 'u1',
@@ -235,6 +249,7 @@ describe('captcha gate', () => {
     await authorize({ email: 'user@example.com', password: 'CorrectPassword123!' }, REQ);
 
     expect(clearAttempts).toHaveBeenCalledWith('login-account', 'user@example.com');
+    expect(clearIpFailures).toHaveBeenCalledWith('1.2.3.4');
   });
 });
 

@@ -6,6 +6,7 @@ import { sendPasswordResetEmail } from '@/lib/email';
 import { consumeLimit, passwordResetLimiter, passwordResetPerAccountLimiter } from '@/lib/rateLimit';
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
+import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,13 @@ export async function POST(req: NextRequest) {
 
   const email = parsed.data.email.toLowerCase().trim();
   const ip = getClientIp(req);
+
+  // An IP escalating-blocked for too many wrong login passwords (see
+  // ipLockout.ts) is locked out of this action too, not just login.
+  const ipBlock = await checkIpBlock(ip);
+  if (ipBlock.blocked) {
+    return NextResponse.json({ error: IP_BLOCKED_MESSAGE }, { status: 429 });
+  }
 
   // Rate-limited both by IP+email and by email alone, and the response is
   // identical whether or not the account exists, to prevent email

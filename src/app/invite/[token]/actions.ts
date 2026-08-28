@@ -7,6 +7,7 @@ import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { consumeLimit, inviteAcceptLimiter } from '@/lib/rateLimit';
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
+import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
 
 export interface AcceptInviteResult {
   ok: boolean;
@@ -30,6 +31,13 @@ export async function acceptInvite(
   captchaToken?: string
 ): Promise<AcceptInviteResult> {
   const ip = getClientIp();
+
+  // An IP escalating-blocked for too many wrong login passwords (see
+  // ipLockout.ts) is locked out of this action too, not just login.
+  const ipBlock = await checkIpBlock(ip);
+  if (ipBlock.blocked) {
+    return { ok: false, error: IP_BLOCKED_MESSAGE };
+  }
 
   const allowed = await consumeLimit(inviteAcceptLimiter, `${rawToken}:${ip}`);
   if (!allowed) {

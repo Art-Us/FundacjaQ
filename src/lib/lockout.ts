@@ -1,8 +1,8 @@
 import { prisma } from './prisma';
 import { redis } from './redis';
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_SECONDS = 15 * 60;
+const MAX_FAILED_ATTEMPTS = 20;
+const LOCKOUT_SECONDS = 60 * 60; // 1h
 
 function lockKey(email: string): string {
   return `lockout:${email.toLowerCase()}`;

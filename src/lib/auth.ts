@@ -3,6 +3,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from './prisma';
 import { verifyPassword, DUMMY_PASSWORD_HASH } from './password';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
+import { checkIpBlock, recordFailedLoginByIp, clearIpFailures, IP_BLOCKED_MESSAGE } from './ipLockout';
 import { consumeLimit, loginLimiter } from './rateLimit';
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
@@ -10,13 +11,11 @@ import { verifyCaptcha } from './captcha';
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 const isProd = process.env.NODE_ENV === 'production';
 
-// Captcha kicks in earlier than the hard defenses (5-attempt account lockout,
-// 5-attempts/15min IP+email rate limit) so a script gets challenged before it
-// ever reaches those walls. The IP threshold is higher because IPs are often
-// shared (NAT, office networks) and shouldn't challenge every user on them
-// after a couple of unrelated failed logins from someone else.
+// A softer, earlier nudge than the 20-attempt/1h account lockout in
+// lockout.ts — this challenges a script before it ever reaches that wall.
+// There's no IP-side captcha threshold anymore: wrong passwords from an IP
+// are now handled by the harder, escalating block in ipLockout.ts instead.
 const CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD = 3;
-const CAPTCHA_IP_ATTEMPT_THRESHOLD = 5;
 
 function getClientIp(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string {
   const forwarded = req?.headers?.['x-forwarded-for'];
@@ -40,7 +39,7 @@ async function recordFailure(email: string, userId: string | null, ip: string, u
   await Promise.all([
     recordFailedAttempt(email),
     recordAttempt('login-account', email),
-    recordAttempt('login-ip', ip),
+    recordFailedLoginByIp(ip),
     logAttempt(email, userId, false, ip, userAgent),
   ]);
 }
@@ -81,6 +80,11 @@ export const authOptions: NextAuthOptions = {
 
         if (!email || !password) return null;
 
+        const ipBlock = await checkIpBlock(ip);
+        if (ipBlock.blocked) {
+          throw new Error(IP_BLOCKED_MESSAGE);
+        }
+
         const allowed = await consumeLimit(loginLimiter, `${email}:${ip}`);
         if (!allowed) {
           throw new Error('Za dużo prób logowania. Spróbuj ponownie później.');
@@ -91,12 +95,8 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Konto tymczasowo zablokowane. Spróbuj ponownie później.');
         }
 
-        const [accountAttempts, ipAttempts] = await Promise.all([
-          getAttemptCount('login-account', email),
-          getAttemptCount('login-ip', ip),
-        ]);
-        const captchaRequired =
-          accountAttempts >= CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD || ipAttempts >= CAPTCHA_IP_ATTEMPT_THRESHOLD;
+        const accountAttempts = await getAttemptCount('login-account', email);
+        const captchaRequired = accountAttempts >= CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD;
 
         if (captchaRequired && !(await verifyCaptcha(captchaToken, ip))) {
           await recordFailure(email, null, ip, userAgent);
@@ -120,6 +120,7 @@ export const authOptions: NextAuthOptions = {
 
         await resetAttempts(email);
         await clearAttempts('login-account', email);
+        await clearIpFailures(ip);
         await logAttempt(email, user.id, true, ip, userAgent);
 
         return {
