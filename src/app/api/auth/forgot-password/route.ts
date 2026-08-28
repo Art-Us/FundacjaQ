@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, RESET_TOKEN_TTL_MS } from '@/lib/tokens';
 import { sendPasswordResetEmail } from '@/lib/email';
-import { consumeLimit, passwordResetLimiter } from '@/lib/rateLimit';
+import { consumeLimit, passwordResetLimiter, passwordResetPerAccountLimiter } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -28,10 +28,13 @@ export async function POST(req: NextRequest) {
   const email = parsed.data.email.toLowerCase().trim();
   const ip = getClientIp(req);
 
-  // Rate-limited by IP+email either way, and the response is identical
-  // whether or not the account exists, to prevent email enumeration.
-  const allowed = await consumeLimit(passwordResetLimiter, `${email}:${ip}`);
-  if (!allowed) {
+  // Rate-limited both by IP+email and by email alone, and the response is
+  // identical whether or not the account exists, to prevent email
+  // enumeration. The email-only limiter stops an attacker from rotating IPs
+  // to flood a victim's inbox with reset emails past the per-IP limit.
+  const allowedByIp = await consumeLimit(passwordResetLimiter, `${email}:${ip}`);
+  const allowedByAccount = await consumeLimit(passwordResetPerAccountLimiter, email);
+  if (!allowedByIp || !allowedByAccount) {
     return genericResponse();
   }
 

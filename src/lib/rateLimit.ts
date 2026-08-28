@@ -27,6 +27,16 @@ export const passwordResetLimiter = new RateLimiterRedis({
   blockDuration: 60 * 60,
 });
 
+// Keyed by email alone (no IP) so an attacker can't bypass the per-IP limit
+// above by rotating IPs and flood a victim's inbox with reset emails.
+export const passwordResetPerAccountLimiter = new RateLimiterRedis({
+  storeClient: redis,
+  keyPrefix: 'rl:pwd-reset-acct',
+  points: 10,
+  duration: 60 * 60,
+  blockDuration: 60 * 60,
+});
+
 export const inviteCreateLimiter = new RateLimiterRedis({
   storeClient: redis,
   keyPrefix: 'rl:invite-create',

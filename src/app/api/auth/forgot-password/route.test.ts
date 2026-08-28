@@ -7,6 +7,7 @@ vi.mock('@/lib/prisma');
 vi.mock('@/lib/rateLimit', () => ({
   consumeLimit: vi.fn(),
   passwordResetLimiter: {},
+  passwordResetPerAccountLimiter: {},
 }));
 vi.mock('@/lib/email', () => ({
   sendPasswordResetEmail: vi.fn(),
@@ -90,6 +91,26 @@ describe('POST /api/auth/forgot-password', () => {
 
   it('still returns the generic message (not a distinguishable status) when rate-limited', async () => {
     vi.mocked(consumeLimit).mockResolvedValue(false);
+
+    const res = await POST(makeRequest({ email: 'user@example.com' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.message).toContain('Jeśli podany adres istnieje');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('checks both the per-IP+email limit and a separate email-only limit (so rotating IPs cannot bypass it)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'user@example.com', isActive: true } as any);
+
+    await POST(makeRequest({ email: 'user@example.com' }));
+
+    expect(consumeLimit).toHaveBeenCalledWith(expect.anything(), 'user@example.com:1.2.3.4');
+    expect(consumeLimit).toHaveBeenCalledWith(expect.anything(), 'user@example.com');
+  });
+
+  it('blocks and returns the generic message when only the email-only limit is exhausted', async () => {
+    vi.mocked(consumeLimit).mockImplementation(async (_limiter, key: string) => key.includes(':'));
 
     const res = await POST(makeRequest({ email: 'user@example.com' }));
     const body = await res.json();
