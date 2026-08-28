@@ -2,11 +2,12 @@ const isProd = process.env.NODE_ENV === 'production';
 
 const csp = [
   "default-src 'self'",
-  "script-src 'self'" + (isProd ? '' : " 'unsafe-eval' 'unsafe-inline'"),
+  "script-src 'self' https://www.google.com https://www.gstatic.com" + (isProd ? '' : " 'unsafe-eval' 'unsafe-inline'"),
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' https://www.google.com",
+  "frame-src https://www.google.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

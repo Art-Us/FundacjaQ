@@ -4,9 +4,19 @@ import { prisma } from './prisma';
 import { verifyPassword, DUMMY_PASSWORD_HASH } from './password';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
 import { consumeLimit, loginLimiter } from './rateLimit';
+import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
+import { verifyCaptcha } from './captcha';
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 const isProd = process.env.NODE_ENV === 'production';
+
+// Captcha kicks in earlier than the hard defenses (5-attempt account lockout,
+// 5-attempts/15min IP+email rate limit) so a script gets challenged before it
+// ever reaches those walls. The IP threshold is higher because IPs are often
+// shared (NAT, office networks) and shouldn't challenge every user on them
+// after a couple of unrelated failed logins from someone else.
+const CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD = 3;
+const CAPTCHA_IP_ATTEMPT_THRESHOLD = 5;
 
 function getClientIp(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string {
   const forwarded = req?.headers?.['x-forwarded-for'];
@@ -24,6 +34,15 @@ async function logAttempt(
   await prisma.loginAttempt
     .create({ data: { email, userId, success, ipAddress, userAgent } })
     .catch((err) => console.error('[auth] failed to log login attempt:', err));
+}
+
+async function recordFailure(email: string, userId: string | null, ip: string, userAgent: string): Promise<void> {
+  await Promise.all([
+    recordFailedAttempt(email),
+    recordAttempt('login-account', email),
+    recordAttempt('login-ip', ip),
+    logAttempt(email, userId, false, ip, userAgent),
+  ]);
 }
 
 export const authOptions: NextAuthOptions = {
@@ -51,10 +70,12 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
+        captchaToken: { label: 'Captcha', type: 'text' },
       },
       async authorize(credentials, req) {
         const email = credentials?.email?.toLowerCase().trim();
         const password = credentials?.password;
+        const captchaToken = credentials?.captchaToken;
         const ip = getClientIp(req);
         const userAgent = (req?.headers?.['user-agent'] as string) ?? 'unknown';
 
@@ -70,6 +91,21 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Konto tymczasowo zablokowane. Spróbuj ponownie później.');
         }
 
+        const [accountAttempts, ipAttempts] = await Promise.all([
+          getAttemptCount('login-account', email),
+          getAttemptCount('login-ip', ip),
+        ]);
+        const captchaRequired =
+          accountAttempts >= CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD || ipAttempts >= CAPTCHA_IP_ATTEMPT_THRESHOLD;
+
+        if (captchaRequired && !(await verifyCaptcha(captchaToken, ip))) {
+          await recordFailure(email, null, ip, userAgent);
+          // Distinct sentinel (not a Polish message) so the client can
+          // reliably detect this case and render the captcha widget, without
+          // it doubling as a user-facing string.
+          throw new Error('CAPTCHA_REQUIRED');
+        }
+
         const user = await prisma.user.findUnique({ where: { email } });
 
         // Always run bcrypt, even for a nonexistent user (against a dummy
@@ -78,12 +114,12 @@ export const authOptions: NextAuthOptions = {
         // password" so the message doesn't reveal which one it was either.
         const validPassword = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
         if (!user || !user.isActive || !validPassword) {
-          await recordFailedAttempt(email);
-          await logAttempt(email, user?.id ?? null, false, ip, userAgent);
+          await recordFailure(email, user?.id ?? null, ip, userAgent);
           throw new Error('Nieprawidłowy email lub hasło.');
         }
 
         await resetAttempts(email);
+        await clearAttempts('login-account', email);
         await logAttempt(email, user.id, true, ip, userAgent);
 
         return {

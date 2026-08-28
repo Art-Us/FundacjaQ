@@ -2,11 +2,14 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Captcha } from '@/components/ui/Captcha';
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -14,10 +17,14 @@ export function ForgotPasswordForm() {
     const res = await fetch('/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, captchaToken }),
     });
     const data = await res.json();
     setLoading(false);
+
+    if (data.captchaRequired) {
+      setCaptchaRequired(true);
+    }
     setMessage(data.message ?? data.error ?? 'Coś poszło nie tak.');
   }
 
@@ -37,8 +44,9 @@ export function ForgotPasswordForm() {
           className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
         />
       </div>
+      {captchaRequired && <Captcha onToken={setCaptchaToken} />}
       {message && <p className="text-sm text-slate-300">{message}</p>}
-      <Button type="submit" disabled={loading} className="w-full">
+      <Button type="submit" disabled={loading || (captchaRequired && !captchaToken)} className="w-full">
         {loading ? 'Wysyłanie…' : 'Wyślij link resetujący'}
       </Button>
     </form>

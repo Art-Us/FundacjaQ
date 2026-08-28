@@ -50,3 +50,18 @@ ADMIN_EMAIL="admin@example.com" ADMIN_PASSWORD="ZmienTeHaslo123456" npm run pris
 
 Dopóki nie skonfigurujesz prawdziwego dostawcy email (`src/lib/email.ts`), linki zaproszeń
 i resetu hasła są tylko logowane do konsoli serwera deweloperskiego.
+
+## Captcha (reCAPTCHA v2)
+
+Logowanie, reset hasła i akceptacja zaproszenia dodatkowo wymagają rozwiązania captchy,
+gdy z jednego konta/tokenu albo z jednego adresu IP przyjdzie zbyt wiele prób w krótkim czasie
+(niezależnie od twardych limitów opisanych w `src/lib/rateLimit.ts`).
+
+Bez skonfigurowanych kluczy captcha jest pomijana (fail-open po stronie klucza, żeby środowisko
+deweloperskie działało od razu). Aby ją włączyć, utwórz klucze na
+[https://www.google.com/recaptcha/admin/create](https://www.google.com/recaptcha/admin/create)
+(typ reCAPTCHA v2 „Checkbox") i ustaw w `.env`:
+```
+RECAPTCHA_SECRET_KEY="..."
+NEXT_PUBLIC_RECAPTCHA_SITE_KEY="..."
+```

@@ -4,10 +4,17 @@ import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, RESET_TOKEN_TTL_MS } from '@/lib/tokens';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { consumeLimit, passwordResetLimiter, passwordResetPerAccountLimiter } from '@/lib/rateLimit';
+import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
+import { verifyCaptcha } from '@/lib/captcha';
 
 export const runtime = 'nodejs';
 
-const bodySchema = z.object({ email: z.string().email() });
+const bodySchema = z.object({ email: z.string().email(), captchaToken: z.string().optional() });
+
+// Lower than the hard rate limits (5/hour per IP+email, 10/hour per email) so
+// a script gets challenged well before it could exhaust either of them.
+const CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD = 2;
+const CAPTCHA_IP_ATTEMPT_THRESHOLD = 3;
 
 function genericResponse() {
   return NextResponse.json({
@@ -36,6 +43,26 @@ export async function POST(req: NextRequest) {
   const allowedByAccount = await consumeLimit(passwordResetPerAccountLimiter, email);
   if (!allowedByIp || !allowedByAccount) {
     return genericResponse();
+  }
+
+  // Captcha decision is based on attempts made *before* this one, so every
+  // request (regardless of outcome) still counts toward it below.
+  const [accountAttempts, ipAttempts] = await Promise.all([
+    getAttemptCount('pwd-reset-account', email),
+    getAttemptCount('pwd-reset-ip', ip),
+  ]);
+  const captchaRequired =
+    accountAttempts >= CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD || ipAttempts >= CAPTCHA_IP_ATTEMPT_THRESHOLD;
+
+  await Promise.all([recordAttempt('pwd-reset-account', email), recordAttempt('pwd-reset-ip', ip)]);
+
+  // Unlike account existence, "you've made several requests recently" is
+  // safe to reveal honestly — it doesn't depend on whether the email exists.
+  if (captchaRequired && !(await verifyCaptcha(parsed.data.captchaToken, ip))) {
+    return NextResponse.json(
+      { error: 'Zbyt wiele prób. Potwierdź, że nie jesteś robotem.', captchaRequired: true },
+      { status: 400 }
+    );
   }
 
   const user = await prisma.user.findUnique({ where: { email } });

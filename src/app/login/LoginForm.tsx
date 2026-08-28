@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Captcha } from '@/components/ui/Captcha';
 
 export function LoginForm() {
   const router = useRouter();
@@ -12,6 +13,8 @@ export function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,10 +24,17 @@ export function LoginForm() {
     const result = await signIn('credentials', {
       email,
       password,
+      captchaToken: captchaToken ?? undefined,
       redirect: false,
     });
 
     setLoading(false);
+
+    if (result?.error === 'CAPTCHA_REQUIRED') {
+      setCaptchaRequired(true);
+      setError('Zbyt wiele prób. Potwierdź, że nie jesteś robotem.');
+      return;
+    }
 
     if (result?.error) {
       setError(result.error);
@@ -64,8 +74,9 @@ export function LoginForm() {
           className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
         />
       </div>
+      {captchaRequired && <Captcha onToken={setCaptchaToken} />}
       {error && <p className="text-sm text-rose-500">{error}</p>}
-      <Button type="submit" disabled={loading} className="w-full">
+      <Button type="submit" disabled={loading || (captchaRequired && !captchaToken)} className="w-full">
         {loading ? 'Logowanie…' : 'Zaloguj się'}
       </Button>
       <a href="/forgot-password" className="text-sm text-slate-400 hover:text-white text-center">

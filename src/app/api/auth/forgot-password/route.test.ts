@@ -12,10 +12,19 @@ vi.mock('@/lib/rateLimit', () => ({
 vi.mock('@/lib/email', () => ({
   sendPasswordResetEmail: vi.fn(),
 }));
+vi.mock('@/lib/attemptTracker', () => ({
+  getAttemptCount: vi.fn(),
+  recordAttempt: vi.fn(),
+}));
+vi.mock('@/lib/captcha', () => ({
+  verifyCaptcha: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
 import { sendPasswordResetEmail } from '@/lib/email';
+import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
+import { verifyCaptcha } from '@/lib/captcha';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -32,6 +41,9 @@ beforeEach(() => {
   mockReset(prisma);
   vi.mocked(consumeLimit).mockReset().mockResolvedValue(true);
   vi.mocked(sendPasswordResetEmail).mockReset().mockResolvedValue(undefined);
+  vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
+  vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
+  vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
 });
 
 describe('POST /api/auth/forgot-password', () => {
@@ -118,5 +130,58 @@ describe('POST /api/auth/forgot-password', () => {
     expect(res.status).toBe(200);
     expect(body.message).toContain('Jeśli podany adres istnieje');
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('captcha gate', () => {
+  it('does not require captcha below the attempt thresholds', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'user@example.com', isActive: true } as any);
+
+    await POST(makeRequest({ email: 'user@example.com' }));
+
+    expect(verifyCaptcha).not.toHaveBeenCalled();
+  });
+
+  it('requires captcha once the account has made enough recent requests', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'pwd-reset-account' ? 2 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    const res = await POST(makeRequest({ email: 'user@example.com' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.captchaRequired).toBe(true);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('requires captcha once the IP alone has made enough recent requests', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'pwd-reset-ip' ? 3 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    const res = await POST(makeRequest({ email: 'user@example.com' }));
+    const body = await res.json();
+
+    expect(body.captchaRequired).toBe(true);
+  });
+
+  it('proceeds with a valid captcha token once required', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'user@example.com', isActive: true } as any);
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'pwd-reset-account' ? 2 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(true);
+
+    const res = await POST(makeRequest({ email: 'user@example.com', captchaToken: 'valid-token' }));
+
+    expect(res.status).toBe(200);
+    expect(sendPasswordResetEmail).toHaveBeenCalled();
+    expect(verifyCaptcha).toHaveBeenCalledWith('valid-token', '1.2.3.4');
+  });
+
+  it('records an attempt on every request regardless of outcome', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await POST(makeRequest({ email: 'nobody@example.com' }));
+
+    expect(recordAttempt).toHaveBeenCalledWith('pwd-reset-account', 'nobody@example.com');
+    expect(recordAttempt).toHaveBeenCalledWith('pwd-reset-ip', '1.2.3.4');
   });
 });

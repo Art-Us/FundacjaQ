@@ -11,6 +11,13 @@ vi.mock('@/lib/password', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/password')>();
   return { ...actual, isPasswordPwned: vi.fn() };
 });
+vi.mock('@/lib/attemptTracker', () => ({
+  getAttemptCount: vi.fn(),
+  recordAttempt: vi.fn(),
+}));
+vi.mock('@/lib/captcha', () => ({
+  verifyCaptcha: vi.fn(),
+}));
 vi.mock('next/headers', () => ({
   headers: vi.fn(),
 }));
@@ -18,6 +25,8 @@ vi.mock('next/headers', () => ({
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
 import { isPasswordPwned } from '@/lib/password';
+import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
+import { verifyCaptcha } from '@/lib/captcha';
 import { headers } from 'next/headers';
 import { hashToken } from '@/lib/tokens';
 import { acceptInvite } from './actions';
@@ -48,6 +57,9 @@ beforeEach(() => {
   );
   vi.mocked(consumeLimit).mockReset().mockResolvedValue(true);
   vi.mocked(isPasswordPwned).mockReset().mockResolvedValue(false);
+  vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
+  vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
+  vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
   vi.mocked(headers).mockReset().mockReturnValue(new Headers({ 'x-forwarded-for': '10.0.0.1' }) as any);
   prisma.user.findUnique.mockResolvedValue(null);
 });
@@ -155,5 +167,49 @@ describe('acceptInvite', () => {
 
     expect(result.ok).toBe(false);
     expect(prisma.inviteToken.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('captcha gate', () => {
+  it('does not require captcha (and never calls verifyCaptcha) below the attempt thresholds', async () => {
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite({ gminaId: 'g1' }) as any);
+    prisma.inviteToken.updateMany.mockResolvedValue({ count: 1 } as any);
+    prisma.user.create.mockResolvedValue({} as any);
+
+    await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(verifyCaptcha).not.toHaveBeenCalled();
+  });
+
+  it('rejects with captchaRequired once the token has been retried enough times without a valid captcha', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'invite-accept-token' ? 2 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(result).toMatchObject({ ok: false, captchaRequired: true });
+    expect(prisma.inviteToken.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects with captchaRequired once the IP alone has been retried enough times', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'invite-accept-ip' ? 3 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(result).toMatchObject({ ok: false, captchaRequired: true });
+  });
+
+  it('proceeds with a valid captcha token once required', async () => {
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite({ gminaId: 'g1' }) as any);
+    prisma.inviteToken.updateMany.mockResolvedValue({ count: 1 } as any);
+    prisma.user.create.mockResolvedValue({} as any);
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'invite-accept-token' ? 2 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(true);
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD, 'valid-token');
+
+    expect(result.ok).toBe(true);
+    expect(verifyCaptcha).toHaveBeenCalledWith('valid-token', '10.0.0.1');
   });
 });

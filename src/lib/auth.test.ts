@@ -12,17 +12,27 @@ vi.mock('./rateLimit', () => ({
   consumeLimit: vi.fn(),
   loginLimiter: {},
 }));
+vi.mock('./attemptTracker', () => ({
+  getAttemptCount: vi.fn(),
+  recordAttempt: vi.fn(),
+  clearAttempts: vi.fn(),
+}));
+vi.mock('./captcha', () => ({
+  verifyCaptcha: vi.fn(),
+}));
 
 import { prisma as prismaImport } from './prisma';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
 import { consumeLimit } from './rateLimit';
+import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
+import { verifyCaptcha } from './captcha';
 import { hashPassword } from './password';
 import { authOptions } from './auth';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
 type AuthorizeFn = (
-  credentials: { email?: string; password?: string } | undefined,
+  credentials: { email?: string; password?: string; captchaToken?: string } | undefined,
   req: { headers?: Record<string, string | string[] | undefined> }
 ) => Promise<any>;
 
@@ -39,6 +49,10 @@ beforeEach(() => {
   vi.mocked(checkLockout).mockReset().mockResolvedValue({ locked: false, until: null });
   vi.mocked(recordFailedAttempt).mockReset().mockResolvedValue(undefined);
   vi.mocked(resetAttempts).mockReset().mockResolvedValue(undefined);
+  vi.mocked(getAttemptCount).mockReset().mockResolvedValue(0);
+  vi.mocked(recordAttempt).mockReset().mockResolvedValue(undefined as any);
+  vi.mocked(clearAttempts).mockReset().mockResolvedValue(undefined);
+  vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
   prisma.loginAttempt.create.mockResolvedValue({} as any);
 });
 
@@ -153,6 +167,74 @@ describe('authorize()', () => {
     expect(prisma.loginAttempt.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ success: false }) })
     );
+  });
+});
+
+describe('captcha gate', () => {
+  it('does not require captcha (and never calls verifyCaptcha) below the attempt thresholds', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow(
+      'Nieprawidłowy email lub hasło.'
+    );
+    expect(verifyCaptcha).not.toHaveBeenCalled();
+  });
+
+  it('rejects with CAPTCHA_REQUIRED once the account has reached its attempt threshold and no valid token is supplied', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-account' ? 3 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow('CAPTCHA_REQUIRED');
+    expect(verifyCaptcha).toHaveBeenCalledWith(undefined, '1.2.3.4');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(recordFailedAttempt).toHaveBeenCalledWith('user@example.com');
+  });
+
+  it('rejects with CAPTCHA_REQUIRED once the IP alone has reached its attempt threshold', async () => {
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-ip' ? 5 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(false);
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, REQ)).rejects.toThrow('CAPTCHA_REQUIRED');
+  });
+
+  it('proceeds past the captcha gate with a valid token once required', async () => {
+    const passwordHash = await hashPassword('CorrectPassword123!');
+    vi.mocked(getAttemptCount).mockImplementation(async (scope: string) => (scope === 'login-account' ? 3 : 0));
+    vi.mocked(verifyCaptcha).mockResolvedValue(true);
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      email: 'user@example.com',
+      name: null,
+      role: 'VOLUNTEER',
+      gminaId: null,
+      isActive: true,
+      passwordHash,
+    } as any);
+
+    const result = await authorize(
+      { email: 'user@example.com', password: 'CorrectPassword123!', captchaToken: 'valid-token' },
+      REQ
+    );
+
+    expect(result).toMatchObject({ id: 'u1' });
+    expect(verifyCaptcha).toHaveBeenCalledWith('valid-token', '1.2.3.4');
+  });
+
+  it('clears the account attempt counter on a successful login', async () => {
+    const passwordHash = await hashPassword('CorrectPassword123!');
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      email: 'user@example.com',
+      name: null,
+      role: 'VOLUNTEER',
+      gminaId: null,
+      isActive: true,
+      passwordHash,
+    } as any);
+
+    await authorize({ email: 'user@example.com', password: 'CorrectPassword123!' }, REQ);
+
+    expect(clearAttempts).toHaveBeenCalledWith('login-account', 'user@example.com');
   });
 });
 
