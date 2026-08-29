@@ -48,8 +48,28 @@ i uruchom seed:
 ADMIN_EMAIL="admin@example.com" ADMIN_PASSWORD="ZmienTeHaslo123456" npm run prisma:seed
 ```
 
-Dopóki nie skonfigurujesz prawdziwego dostawcy email (`src/lib/email.ts`), linki zaproszeń
-i resetu hasła są tylko logowane do konsoli serwera deweloperskiego.
+Dopóki nie skonfigurujesz SMTP (patrz niżej), linki zaproszeń i resetu hasła są tylko
+logowane do konsoli serwera deweloperskiego.
+
+## E-mail (SMTP)
+
+Zaproszenia i linki resetu hasła wysyłane są przez SMTP (`nodemailer`). Bez skonfigurowanego
+`SMTP_HOST` e-maile są tylko logowane do konsoli — wygodne lokalnie, nic do ustawienia.
+
+Aby wysyłać prawdziwe e-maile, ustaw w `.env` dane swojego serwera SMTP (dowolny dostawca —
+istniejąca skrzynka organizacji, Gmail/Workspace, hosting, itp.):
+```
+SMTP_HOST="smtp.example.com"
+SMTP_PORT="587"
+SMTP_SECURE="false"
+SMTP_USER="twoj-login@example.com"
+SMTP_PASSWORD="..."
+SMTP_FROM="QFundation <no-reply@example.com>"
+```
+`SMTP_SECURE="true"` przy porcie 465 (SSL/TLS od początku połączenia); przy porcie 587
+zostaw `"false"` (STARTTLS negocjowane automatycznie). Błąd wysyłki nie przerywa żądania —
+jest tylko logowany do konsoli serwera, żeby np. utworzenie zaproszenia nie kończyło się
+błędem 500 z powodu chwilowej awarii serwera pocztowego.
 
 ## Captcha (reCAPTCHA v2)
 

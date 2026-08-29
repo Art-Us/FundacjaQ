@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, INVITE_TOKEN_TTL_MS } from '@/lib/tokens';
-import { sendInviteEmail } from '@/lib/email';
+import { sendInviteEmail, isEmailConfigured } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 
@@ -82,5 +82,5 @@ export async function POST(req: NextRequest) {
   const inviteUrl = `${process.env.NEXTAUTH_URL}/invite/${rawToken}`;
   await sendInviteEmail(email, inviteUrl);
 
-  return NextResponse.json({ message: 'Zaproszenie wysłane.', inviteUrl });
+  return NextResponse.json({ message: 'Zaproszenie wysłane.', inviteUrl, emailConfigured: isEmailConfigured });
 }

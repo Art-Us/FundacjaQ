@@ -10,6 +10,7 @@ vi.mock('@/lib/rateLimit', () => ({
 }));
 vi.mock('@/lib/email', () => ({
   sendInviteEmail: vi.fn(),
+  isEmailConfigured: false,
 }));
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn(),
@@ -80,10 +81,15 @@ describe('POST /api/admin/invites', () => {
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
     const res = await POST(makeRequest({ email: 'new-admin@example.com', role: 'ADMIN' }));
+    const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(prisma.inviteToken.create).toHaveBeenCalledTimes(1);
     expect(sendInviteEmail).toHaveBeenCalled();
+    // Regression guard: the UI decides which disclaimer to show ("email
+    // sent" vs "email not configured, copy this link") based on this flag,
+    // so it must reflect the real email.ts config, not be silently absent.
+    expect(body).toHaveProperty('emailConfigured', false);
   });
 
   it('blocks COORDINATOR from granting ADMIN or COORDINATOR roles', async () => {

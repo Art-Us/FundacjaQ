@@ -12,6 +12,7 @@ export function CreateInviteForm() {
   const [role, setRole] = useState<typeof ROLES[number]>('VOLUNTEER');
   const [message, setMessage] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [emailConfigured, setEmailConfigured] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -34,6 +35,7 @@ export function CreateInviteForm() {
     if (res.ok) {
       setEmail('');
       setInviteUrl(data.inviteUrl ?? null);
+      setEmailConfigured(Boolean(data.emailConfigured));
       router.refresh();
     }
   }
@@ -83,7 +85,9 @@ export function CreateInviteForm() {
       {inviteUrl && (
         <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
           <p className="text-xs text-slate-500 mb-2">
-            Wiadomość e-mail nie jest jeszcze skonfigurowana — oto link zaproszenia do przekazania ręcznie:
+            {emailConfigured
+              ? 'E-mail z zaproszeniem został wysłany. Możesz też przekazać link ręcznie:'
+              : 'Wiadomość e-mail nie jest jeszcze skonfigurowana — oto link zaproszenia do przekazania ręcznie:'}
           </p>
           <div className="flex items-center gap-2">
             <input
