@@ -1,14 +1,9 @@
 import { redis } from './redis';
+import { blockSecondsForCount } from './escalatingBlock';
 
 // The cumulative wrong-password count for an IP slides forward 24h on every
 // new failure, so an IP that stays clean for a full day starts over at zero.
 const COUNTER_TTL_SECONDS = 24 * 60 * 60;
-
-// Every 5th cumulative wrong password from this IP (across any account it
-// targets) re-triggers a block, escalating 1min -> 5min -> 15min -> 30min.
-// Past the last tier, every further multiple of 5 repeats the 30min block.
-const ATTEMPTS_PER_TIER = 5;
-const TIER_BLOCK_SECONDS = [60, 5 * 60, 15 * 60, 30 * 60];
 
 function counterKey(ip: string): string {
   return `ip-login-fails:${ip}`;
@@ -16,12 +11,6 @@ function counterKey(ip: string): string {
 
 function blockKey(ip: string): string {
   return `ip-login-block:${ip}`;
-}
-
-function blockSecondsForCount(count: number): number | null {
-  if (count === 0 || count % ATTEMPTS_PER_TIER !== 0) return null;
-  const tierIndex = count / ATTEMPTS_PER_TIER - 1;
-  return TIER_BLOCK_SECONDS[Math.min(tierIndex, TIER_BLOCK_SECONDS.length - 1)];
 }
 
 export const IP_BLOCKED_MESSAGE =

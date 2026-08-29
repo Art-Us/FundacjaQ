@@ -4,7 +4,12 @@ import { prisma } from './prisma';
 import { verifyPassword, DUMMY_PASSWORD_HASH } from './password';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
 import { checkIpBlock, recordFailedLoginByIp, clearIpFailures, IP_BLOCKED_MESSAGE } from './ipLockout';
-import { consumeLimit, loginLimiter } from './rateLimit';
+import {
+  checkLoginPairBlock,
+  recordFailedLoginPair,
+  clearLoginPairFailures,
+  LOGIN_PAIR_BLOCKED_MESSAGE,
+} from './loginPairLockout';
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
 
@@ -13,8 +18,6 @@ const isProd = process.env.NODE_ENV === 'production';
 
 // A softer, earlier nudge than the 20-attempt/1h account lockout in
 // lockout.ts — this challenges a script before it ever reaches that wall.
-// There's no IP-side captcha threshold anymore: wrong passwords from an IP
-// are now handled by the harder, escalating block in ipLockout.ts instead.
 const CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD = 3;
 
 function getClientIp(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string {
@@ -40,6 +43,7 @@ async function recordFailure(email: string, userId: string | null, ip: string, u
     recordFailedAttempt(email),
     recordAttempt('login-account', email),
     recordFailedLoginByIp(ip),
+    recordFailedLoginPair(email, ip),
     logAttempt(email, userId, false, ip, userAgent),
   ]);
 }
@@ -85,9 +89,9 @@ export const authOptions: NextAuthOptions = {
           throw new Error(IP_BLOCKED_MESSAGE);
         }
 
-        const allowed = await consumeLimit(loginLimiter, `${email}:${ip}`);
-        if (!allowed) {
-          throw new Error('Za dużo prób logowania. Spróbuj ponownie później.');
+        const pairBlock = await checkLoginPairBlock(email, ip);
+        if (pairBlock.blocked) {
+          throw new Error(LOGIN_PAIR_BLOCKED_MESSAGE);
         }
 
         const lockout = await checkLockout(email);
@@ -121,6 +125,7 @@ export const authOptions: NextAuthOptions = {
         await resetAttempts(email);
         await clearAttempts('login-account', email);
         await clearIpFailures(ip);
+        await clearLoginPairFailures(email, ip);
         await logAttempt(email, user.id, true, ip, userAgent);
 
         return {

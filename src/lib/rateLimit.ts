@@ -1,15 +1,9 @@
 import { RateLimiterRedis } from 'rate-limiter-flexible';
 import { redis } from './redis';
 
-// keyed by `${email}:${ip}` at call sites so one bad actor can't lock out
-// everyone sharing an IP, and a single email can't be hammered from many IPs.
-export const loginLimiter = new RateLimiterRedis({
-  storeClient: redis,
-  keyPrefix: 'rl:login',
-  points: 5,
-  duration: 15 * 60, // 5 attempts / 15 min
-  blockDuration: 15 * 60,
-});
+// Login attempts are throttled by ipLockout.ts (IP-wide) and
+// loginPairLockout.ts (email+IP pair) instead of a flat limiter here — both
+// escalate the block duration instead of repeating a fixed one.
 
 export const inviteAcceptLimiter = new RateLimiterRedis({
   storeClient: redis,
