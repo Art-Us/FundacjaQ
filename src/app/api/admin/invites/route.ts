@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
 import { z } from 'zod';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, INVITE_TOKEN_TTL_MS } from '@/lib/tokens';
 import { sendInviteEmail } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
+import { requireAdminOrCoordinator } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
@@ -16,15 +15,6 @@ const createInviteSchema = z.object({
   role: z.enum(ROLES),
   gminaId: z.string().optional(),
 });
-
-async function requireAdminOrCoordinator() {
-  const session = await getServerSession(authOptions);
-  const user = session?.user;
-  if (!user || (user.role !== 'ADMIN' && user.role !== 'COORDINATOR')) {
-    return null;
-  }
-  return user;
-}
 
 export async function GET() {
   const user = await requireAdminOrCoordinator();

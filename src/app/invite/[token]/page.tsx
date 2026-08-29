@@ -20,7 +20,7 @@ export default async function InvitePage({ params }: { params: { token: string }
           <AcceptInviteForm token={params.token} />
         </>
       ) : (
-        <p className="text-sm text-rose-500">Link zaproszenia jest nieprawidłowy lub wygasł.</p>
+        <p className="text-sm text-rose-500">Link zaproszenia jest nieprawidłowy, wygasł lub został unieważniony. Skontaktuj się z administratorem.</p>
       )}
     </main>
   );

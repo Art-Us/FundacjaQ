@@ -73,7 +73,7 @@ export async function acceptInvite(
   const invite = await prisma.inviteToken.findUnique({ where: { tokenHash } });
 
   if (!invite || invite.usedAt || invite.revokedAt || invite.expiresAt.getTime() < Date.now()) {
-    return { ok: false, error: 'Link zaproszenia jest nieprawidłowy lub wygasł.' };
+    return { ok: false, error: 'Link zaproszenia jest nieprawidłowy, wygasł lub został unieważniony. Skontaktuj się z administratorem.' };
   }
 
   if (await isPasswordPwned(password)) {

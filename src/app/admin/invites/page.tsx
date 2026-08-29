@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { CreateInviteForm } from './CreateInviteForm';
+import { RevokeInviteButton } from './RevokeInviteButton';
 
 export default async function AdminInvitesPage() {
   const session = await getServerSession(authOptions);
@@ -12,6 +13,7 @@ export default async function AdminInvitesPage() {
   }
 
   const isAdmin = session.user.role === 'ADMIN';
+  const userId = session.user.id;
   const gminaFilter = isAdmin || !session.user.gminaId ? {} : { gminaId: session.user.gminaId };
 
   const [invites, users] = await Promise.all([
@@ -40,6 +42,7 @@ export default async function AdminInvitesPage() {
                 <th className="py-2 pr-4">Rola</th>
                 <th className="py-2 pr-4">Status</th>
                 <th className="py-2 pr-4">Wygasa</th>
+                <th className="py-2 pr-4"></th>
               </tr>
             </thead>
             <tbody>
@@ -51,12 +54,14 @@ export default async function AdminInvitesPage() {
                   : invite.expiresAt.getTime() < Date.now()
                   ? 'Wygasłe'
                   : 'Aktywne';
+                const canRevoke = status === 'Aktywne' && (isAdmin || invite.createdById === userId);
                 return (
                   <tr key={invite.id} className="border-b border-slate-900">
                     <td className="py-2 pr-4">{invite.email}</td>
                     <td className="py-2 pr-4">{invite.role}</td>
                     <td className="py-2 pr-4">{status}</td>
                     <td className="py-2 pr-4">{formatDate(invite.expiresAt)}</td>
+                    <td className="py-2 pr-4">{canRevoke && <RevokeInviteButton inviteId={invite.id} />}</td>
                   </tr>
                 );
               })}
