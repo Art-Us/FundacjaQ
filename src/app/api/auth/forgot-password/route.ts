@@ -10,7 +10,10 @@ import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
 
 export const runtime = 'nodejs';
 
-const bodySchema = z.object({ email: z.string().email(), captchaToken: z.string().optional() });
+// .nullish() (not .optional()) because a JSON body with an explicit `null`
+// (e.g. a client that hasn't obtained a captcha token yet) must not fail
+// validation — verifyCaptcha() already treats null the same as undefined.
+const bodySchema = z.object({ email: z.string().email(), captchaToken: z.string().nullish() });
 
 // Lower than the hard rate limits (5/hour per IP+email, 10/hour per email) so
 // a script gets challenged well before it could exhaust either of them.

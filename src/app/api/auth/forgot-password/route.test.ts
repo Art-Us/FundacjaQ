@@ -107,6 +107,15 @@ describe('POST /api/auth/forgot-password', () => {
     expect(res.status).toBe(400);
   });
 
+  it('accepts an explicit null captchaToken (what the client actually sends before captcha is required)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'user@example.com', isActive: true } as any);
+
+    const res = await POST(makeRequest({ email: 'user@example.com', captchaToken: null }));
+
+    expect(res.status).toBe(200);
+    expect(sendPasswordResetEmail).toHaveBeenCalled();
+  });
+
   it('still returns the generic message (not a distinguishable status) when rate-limited', async () => {
     vi.mocked(consumeLimit).mockResolvedValue(false);
 

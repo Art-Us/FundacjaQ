@@ -17,7 +17,7 @@ export function ForgotPasswordForm() {
     const res = await fetch('/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, captchaToken }),
+      body: JSON.stringify({ email, captchaToken: captchaToken ?? undefined }),
     });
     const data = await res.json();
     setLoading(false);
