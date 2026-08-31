@@ -1,13 +1,12 @@
-import { getServerSession } from 'next-auth';
 import { redirect } from 'next/navigation';
-import { authOptions } from '@/lib/auth';
+import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { CreateInviteForm } from './CreateInviteForm';
 import { RevokeInviteButton } from './RevokeInviteButton';
 
 export default async function AdminInvitesPage() {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session?.user || (session.user.role !== 'ADMIN' && session.user.role !== 'COORDINATOR')) {
     redirect('/');
   }

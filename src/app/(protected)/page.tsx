@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { getServerSession } from 'next-auth';
 import { redirect } from 'next/navigation';
-import { authOptions } from '@/lib/auth';
+import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
 import { formatDate } from '@/lib/utils';
 import type { Role } from '@/types';
@@ -34,7 +33,7 @@ const RESOURCE_STATUS_LABELS: Record<string, string> = {
 };
 
 export default async function HomePage() {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session?.user) {
     redirect('/login');
   }

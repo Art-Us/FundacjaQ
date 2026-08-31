@@ -12,6 +12,7 @@ import {
 } from './loginPairLockout';
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
+import { SESSION_COOKIE_NAME } from './sessionCookie';
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 const isProd = process.env.NODE_ENV === 'production';
@@ -58,7 +59,7 @@ export const authOptions: NextAuthOptions = {
   },
   cookies: {
     sessionToken: {
-      name: isProd ? '__Host-next-auth.session-token' : 'next-auth.session-token',
+      name: SESSION_COOKIE_NAME,
       options: {
         httpOnly: true,
         sameSite: 'lax',
