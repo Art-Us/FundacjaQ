@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import { AuthStatus } from './AuthStatus';
 
 export const Navbar = () => {
   return (
@@ -16,6 +17,7 @@ export const Navbar = () => {
           <Link href="/" className="hover:text-white transition-colors">
             Strona główna
           </Link>
+          <AuthStatus />
         </nav>
       </div>
     </header>

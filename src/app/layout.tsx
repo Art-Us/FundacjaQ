@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Navbar } from '@/components/layout/Navbar';
+import { SessionProvider } from '@/components/providers/SessionProvider';
 
 export const metadata: Metadata = {
   title: 'QFundation',
@@ -15,10 +16,12 @@ export default function RootLayout({
   return (
     <html lang="pl">
       <body className="bg-slate-950 text-slate-100 antialiased min-h-screen flex flex-col">
-        <Navbar />
-        <div className="flex-1">
-          {children}
-        </div>
+        <SessionProvider>
+          <Navbar />
+          <div className="flex-1">
+            {children}
+          </div>
+        </SessionProvider>
       </body>
     </html>
   );

@@ -1,4 +1,4 @@
-export type Role = 'ADMIN' | 'NGO' | 'FIREFIGHTER' | 'COORDINATOR' | 'VOLUNTEER';
+export type Role = 'ADMIN' | 'COORDINATOR' | 'VOLUNTEER';
 
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
