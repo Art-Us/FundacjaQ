@@ -2,8 +2,10 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
+import { canManageUser } from '@/lib/authz';
 import { CreateInviteForm } from './CreateInviteForm';
 import { RevokeInviteButton } from './RevokeInviteButton';
+import { ToggleUserActiveButton } from './ToggleUserActiveButton';
 
 export default async function AdminInvitesPage() {
   const session = await getSession();
@@ -11,9 +13,10 @@ export default async function AdminInvitesPage() {
     redirect('/');
   }
 
-  const isAdmin = session.user.role === 'ADMIN';
-  const userId = session.user.id;
-  const gminaFilter = isAdmin || !session.user.gminaId ? {} : { gminaId: session.user.gminaId };
+  const currentUser = session.user;
+  const isAdmin = currentUser.role === 'ADMIN';
+  const userId = currentUser.id;
+  const gminaFilter = isAdmin || !currentUser.gminaId ? {} : { gminaId: currentUser.gminaId };
 
   const [invites, users] = await Promise.all([
     prisma.inviteToken.findMany({
@@ -79,6 +82,7 @@ export default async function AdminInvitesPage() {
               <th className="py-2 pr-4">Rola</th>
               <th className="py-2 pr-4">Gmina</th>
               <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4"></th>
             </tr>
           </thead>
           <tbody>
@@ -89,6 +93,11 @@ export default async function AdminInvitesPage() {
                 <td className="py-2 pr-4">{user.role}</td>
                 <td className="py-2 pr-4">{user.gmina?.name ?? '—'}</td>
                 <td className="py-2 pr-4">{user.isActive ? 'Aktywny' : 'Nieaktywny'}</td>
+                <td className="py-2 pr-4">
+                  {canManageUser(currentUser, user) && (
+                    <ToggleUserActiveButton userId={user.id} isActive={user.isActive} />
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
