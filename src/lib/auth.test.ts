@@ -285,7 +285,7 @@ describe('jwt callback', () => {
     expect(token.invalid).toBe(false);
   });
 
-  it('invalidates the token when the account has been deactivated', async () => {
+  it('invalidates the token when the account has been deactivated, tagged as "deactivated"', async () => {
     prisma.user.findUnique.mockResolvedValue({
       isActive: false,
       lockedUntil: null,
@@ -297,9 +297,10 @@ describe('jwt callback', () => {
     const token = await jwt({ token: { sub: 'u1', iat: Math.floor(Date.now() / 1000) } } as any);
 
     expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('deactivated');
   });
 
-  it('invalidates the token while the account is locked', async () => {
+  it('invalidates the token while the account is locked, tagged as "stale" (not deactivated)', async () => {
     prisma.user.findUnique.mockResolvedValue({
       isActive: true,
       lockedUntil: new Date(Date.now() + 60_000),
@@ -311,9 +312,10 @@ describe('jwt callback', () => {
     const token = await jwt({ token: { sub: 'u1', iat: Math.floor(Date.now() / 1000) } } as any);
 
     expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('stale');
   });
 
-  it('invalidates a session issued before a later password reset (anti session-hijack)', async () => {
+  it('invalidates a session issued before a later password reset (anti session-hijack), tagged as "stale"', async () => {
     const issuedAt = Math.floor(Date.now() / 1000) - 3600; // 1h ago
     prisma.user.findUnique.mockResolvedValue({
       isActive: true,
@@ -326,28 +328,41 @@ describe('jwt callback', () => {
     const token = await jwt({ token: { sub: 'u1', iat: issuedAt } } as any);
 
     expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('stale');
   });
 
-  it('invalidates the token when the user no longer exists', async () => {
+  it('invalidates the token when the user no longer exists, tagged as "deactivated"', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
     const token = await jwt({ token: { sub: 'deleted-user', iat: Math.floor(Date.now() / 1000) } } as any);
 
     expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('deactivated');
   });
 });
 
 describe('session callback', () => {
   const session = authOptions.callbacks!.session!;
 
-  it('strips session.user when the token is invalid', async () => {
+  it('strips session.user when the token is invalid and marks it blocked for a deactivated account', async () => {
     const result = await session({
       session: { user: { id: 'u1' }, expires: 'later' } as any,
-      token: { invalid: true } as any,
+      token: { invalid: true, invalidReason: 'deactivated' } as any,
     } as any);
 
     expect((result as any).user).toBeUndefined();
+    expect((result as any).blocked).toBe(true);
     expect((result as any).expires).toBe('later');
+  });
+
+  it('strips session.user without the blocked flag for a stale (non-deactivation) invalidation', async () => {
+    const result = await session({
+      session: { user: { id: 'u1' }, expires: 'later' } as any,
+      token: { invalid: true, invalidReason: 'stale' } as any,
+    } as any);
+
+    expect((result as any).user).toBeUndefined();
+    expect((result as any).blocked).toBe(false);
   });
 
   it('populates session.user from the token when valid', async () => {

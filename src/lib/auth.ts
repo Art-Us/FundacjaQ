@@ -160,8 +160,18 @@ export const authOptions: NextAuthOptions = {
       const passwordChangedAfterIssue = dbUser ? dbUser.passwordChangedAt.getTime() > issuedAtMs : true;
       const stillLocked = dbUser?.lockedUntil ? dbUser.lockedUntil.getTime() > Date.now() : false;
 
-      if (!dbUser || !dbUser.isActive || passwordChangedAfterIssue || stillLocked) {
+      // Distinguished from the other invalidation causes (stale password, temporary
+      // lockout) so the client can show "your account was deactivated, contact an
+      // admin" specifically for this one, rather than a generic session-expired redirect.
+      if (!dbUser || !dbUser.isActive) {
         token.invalid = true;
+        token.invalidReason = 'deactivated';
+        return token;
+      }
+
+      if (passwordChangedAfterIssue || stillLocked) {
+        token.invalid = true;
+        token.invalidReason = 'stale';
         return token;
       }
 
@@ -172,7 +182,7 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (token.invalid) {
-        return { ...session, user: undefined, expires: session.expires };
+        return { ...session, user: undefined, blocked: token.invalidReason === 'deactivated', expires: session.expires };
       }
       if (session.user) {
         session.user.id = token.sub as string;

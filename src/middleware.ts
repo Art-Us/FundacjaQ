@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { SESSION_COOKIE_NAME } from '@/lib/sessionCookie';
 
-const PUBLIC_PATHS = ['/login', '/invite', '/forgot-password', '/reset-password'];
+const PUBLIC_PATHS = ['/login', '/invite', '/forgot-password', '/reset-password', '/account-blocked'];
 
 function isPublicPath(pathname: string): boolean {
   return (

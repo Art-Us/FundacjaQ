@@ -14,7 +14,11 @@ import { getSession } from '@/lib/session';
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session?.user) {
-    redirect('/login');
+    // A live-invalidated session (see auth.ts jwt callback) still has a session
+    // object — just no user — so it can carry *why* it was invalidated. Only a
+    // deactivated account gets the "blocked" page; a stale password or a
+    // temporary lockout falls back to the plain login redirect.
+    redirect(session?.blocked ? '/account-blocked' : '/login');
   }
 
   return <>{children}</>;
