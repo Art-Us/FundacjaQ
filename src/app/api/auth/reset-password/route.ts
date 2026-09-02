@@ -5,6 +5,7 @@ import { hashToken } from '@/lib/tokens';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { consumeLimit, passwordResetLimiter } from '@/lib/rateLimit';
 import { resetAttempts } from '@/lib/lockout';
+import { parseClientIp } from '@/lib/clientIp';
 
 export const runtime = 'nodejs';
 
@@ -14,7 +15,7 @@ const bodySchema = z.object({
 });
 
 function getClientIp(req: NextRequest): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  return parseClientIp(req.headers.get('x-forwarded-for'));
 }
 
 export async function POST(req: NextRequest) {

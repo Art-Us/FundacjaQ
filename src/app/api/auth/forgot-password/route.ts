@@ -7,6 +7,7 @@ import { consumeLimit, passwordResetLimiter, passwordResetPerAccountLimiter } fr
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
 import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
+import { parseClientIp } from '@/lib/clientIp';
 
 export const runtime = 'nodejs';
 
@@ -27,7 +28,7 @@ function genericResponse() {
 }
 
 function getClientIp(req: NextRequest): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  return parseClientIp(req.headers.get('x-forwarded-for'));
 }
 
 export async function POST(req: NextRequest) {

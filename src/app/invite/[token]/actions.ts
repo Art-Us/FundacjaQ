@@ -8,6 +8,7 @@ import { consumeLimit, inviteAcceptLimiter } from '@/lib/rateLimit';
 import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
 import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
+import { parseClientIp } from '@/lib/clientIp';
 
 export interface AcceptInviteResult {
   ok: boolean;
@@ -21,7 +22,7 @@ const CAPTCHA_TOKEN_ATTEMPT_THRESHOLD = 2;
 const CAPTCHA_IP_ATTEMPT_THRESHOLD = 3;
 
 function getClientIp(): string {
-  return headers().get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  return parseClientIp(headers().get('x-forwarded-for'));
 }
 
 export async function acceptInvite(
