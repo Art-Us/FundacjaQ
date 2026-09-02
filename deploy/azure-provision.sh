@@ -20,7 +20,14 @@ set -euo pipefail
 #    will need changing if these are already taken.
 # ---------------------------------------------------------------------------
 RESOURCE_GROUP="qfundation-rg"
-LOCATION="westeurope"                     # az account list-locations -o table
+LOCATION="germanywestcentral"             # restricted by subscription policy to: germanywestcentral, switzerlandnorth, spaincentral, uaenorth, italynorth
+# Postgres Flexible Server isn't allowed in $LOCATION for this subscription
+# ("The location is restricted from performing this operation") even though
+# it's on the general allowed-regions list — a separate, service-level
+# restriction on student/trial subscriptions. Postgres, Redis, and the App
+# Service plan use this region instead; ACR stays on $LOCATION since it was
+# already created there.
+COMPUTE_LOCATION="switzerlandnorth"
 
 APP_NAME="qfundation-app"                 # must be globally unique -> https://$APP_NAME.azurewebsites.net
 ACR_NAME="qfundationacr"                  # must be globally unique, alnum only
@@ -63,13 +70,19 @@ SMTP_FROM="${SMTP_FROM:-QFundation <no-reply@example.com>}"
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
 
 # ---------------------------------------------------------------------------
-# 4. Container registry + build image (built in Azure, no local Docker needed)
+# 4. Container registry + build image
+#    ACR Tasks (cloud build via `az acr build`) is blocked on student/trial
+#    subscriptions (TasksOperationsNotAllowed), so the image is built locally
+#    with Docker and pushed instead.
 # ---------------------------------------------------------------------------
 az acr create --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" --sku Basic --admin-enabled true
 
-az acr build --registry "$ACR_NAME" --image qfundation:v1 .
-
 ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
+
+docker build -t "$ACR_LOGIN_SERVER/qfundation:v1" .
+az acr login --name "$ACR_NAME"
+docker push "$ACR_LOGIN_SERVER/qfundation:v1"
+
 ACR_USERNAME=$(az acr credential show --name "$ACR_NAME" --query username -o tsv)
 ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].value" -o tsv)
 
@@ -79,7 +92,7 @@ ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].v
 az postgres flexible-server create \
   --resource-group "$RESOURCE_GROUP" \
   --name "$DB_SERVER_NAME" \
-  --location "$LOCATION" \
+  --location "$COMPUTE_LOCATION" \
   --admin-user "$DB_ADMIN_USER" \
   --admin-password "$DB_ADMIN_PASSWORD" \
   --sku-name Standard_B1ms \
@@ -91,27 +104,44 @@ az postgres flexible-server create \
 az postgres flexible-server db create \
   --resource-group "$RESOURCE_GROUP" \
   --server-name "$DB_SERVER_NAME" \
-  --database-name "$DB_NAME"
+  --name "$DB_NAME"
 
 # Special rule 0.0.0.0-0.0.0.0 = "allow access from Azure services"
 az postgres flexible-server firewall-rule create \
   --resource-group "$RESOURCE_GROUP" \
-  --name "$DB_SERVER_NAME" \
-  --rule-name AllowAzureServices \
+  --server-name "$DB_SERVER_NAME" \
+  --name AllowAzureServices \
   --start-ip-address 0.0.0.0 \
   --end-ip-address 0.0.0.0
 
 # ---------------------------------------------------------------------------
-# 6. Redis (Basic tier — bump to Standard for production HA later)
+# 6. Redis — classic "Azure Cache for Redis" (`az redis create`) is being
+#    retired; this uses its replacement, Azure Managed Redis, via the
+#    `redisenterprise` extension (auto-installed on first use).
+#    Balanced_B0 is the cheapest available SKU (1GB) — bump for production.
 # ---------------------------------------------------------------------------
-az redis create \
+az redisenterprise create \
+  --cluster-name "$REDIS_NAME" \
   --resource-group "$RESOURCE_GROUP" \
-  --name "$REDIS_NAME" \
-  --location "$LOCATION" \
-  --sku Basic \
-  --vm-size c0
+  --location "$COMPUTE_LOCATION" \
+  --sku Balanced_B0 \
+  --public-network-access Enabled \
+  --no-database
 
-REDIS_KEY=$(az redis list-keys --resource-group "$RESOURCE_GROUP" --name "$REDIS_NAME" --query primaryKey -o tsv)
+# NoCluster is required: the app uses a plain single-node ioredis client
+# (src/lib/redis.ts), which can't follow the MOVED redirects that the default
+# OSSCluster policy sends. NoCluster makes this behave like classic Redis.
+# accessKeysAuthentication defaults to Disabled — the app connects with a
+# password (access key), not Azure AD, so it's explicitly enabled here.
+az redisenterprise database create \
+  --cluster-name "$REDIS_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --clustering-policy NoCluster \
+  --access-keys-authentication Enabled
+
+REDIS_HOST=$(az redisenterprise show --cluster-name "$REDIS_NAME" --resource-group "$RESOURCE_GROUP" --query hostName -o tsv)
+REDIS_PORT=$(az redisenterprise database show --cluster-name "$REDIS_NAME" --resource-group "$RESOURCE_GROUP" --query port -o tsv)
+REDIS_KEY=$(az redisenterprise database list-keys --cluster-name "$REDIS_NAME" --resource-group "$RESOURCE_GROUP" --query primaryKey -o tsv)
 
 # ---------------------------------------------------------------------------
 # 7. App Service plan (Linux, B1 — minimum tier that supports Always On)
@@ -119,6 +149,7 @@ REDIS_KEY=$(az redis list-keys --resource-group "$RESOURCE_GROUP" --name "$REDIS
 az appservice plan create \
   --resource-group "$RESOURCE_GROUP" \
   --name "$PLAN_NAME" \
+  --location "$COMPUTE_LOCATION" \
   --is-linux \
   --sku B1
 
@@ -150,7 +181,7 @@ az webapp config appsettings set \
   --name "$APP_NAME" \
   --settings \
     DATABASE_URL="postgresql://$DB_ADMIN_USER:$DB_ADMIN_PASSWORD@$DB_SERVER_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require" \
-    REDIS_URL="rediss://:$REDIS_KEY@$REDIS_NAME.redis.cache.windows.net:6380" \
+    REDIS_URL="rediss://:$REDIS_KEY@$REDIS_HOST:$REDIS_PORT" \
     NEXTAUTH_URL="https://$APP_NAME.azurewebsites.net" \
     NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
     WEBSITES_PORT="3000" \

@@ -3,6 +3,38 @@ import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { SESSION_COOKIE_NAME } from '@/lib/sessionCookie';
 
+const isProd = process.env.NODE_ENV === 'production';
+
+// Nonce-based script-src (instead of 'unsafe-inline') so Next's own hydration/
+// RSC bootstrap scripts still run: Next reads the nonce back off the
+// 'Content-Security-Policy' *request* header (set below) and stamps it onto
+// the inline <script> tags it emits while rendering.
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' https://www.google.com https://www.gstatic.com` +
+      (isProd ? '' : " 'unsafe-eval' 'unsafe-inline'"),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self' https://www.google.com",
+    "frame-src https://www.google.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ');
+}
+
+function nextWithCsp(req: NextRequest, nonce: string, csp: string) {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', csp);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('Content-Security-Policy', csp);
+  return response;
+}
+
 const PUBLIC_PATHS = ['/login', '/invite', '/forgot-password', '/reset-password', '/account-blocked'];
 
 // Subset of PUBLIC_PATHS that only make sense for a signed-out visitor (sign in,
@@ -23,6 +55,8 @@ function isPublicPath(pathname: string): boolean {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const csp = buildCsp(nonce);
 
   if (isPublicPath(pathname)) {
     if (matchesPath(AUTH_ONLY_PATHS, pathname)) {
@@ -35,7 +69,7 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(new URL('/', req.url));
       }
     }
-    return NextResponse.next();
+    return nextWithCsp(req, nonce, csp);
   }
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET, cookieName: SESSION_COOKIE_NAME });
@@ -57,7 +91,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL('/', req.url));
   }
 
-  return NextResponse.next();
+  return nextWithCsp(req, nonce, csp);
 }
 
 export const config = {
