@@ -13,6 +13,7 @@ import {
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
 import { SESSION_COOKIE_NAME } from './sessionCookie';
+import { parseClientIp } from './clientIp';
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 const isProd = process.env.NODE_ENV === 'production';
@@ -24,7 +25,7 @@ const CAPTCHA_ACCOUNT_ATTEMPT_THRESHOLD = 3;
 function getClientIp(req: { headers?: Record<string, string | string[] | undefined> } | undefined): string {
   const forwarded = req?.headers?.['x-forwarded-for'];
   const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return raw?.split(',')[0]?.trim() ?? 'unknown';
+  return parseClientIp(raw);
 }
 
 async function logAttempt(

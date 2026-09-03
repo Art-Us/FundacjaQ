@@ -1,20 +1,8 @@
 const isProd = process.env.NODE_ENV === 'production';
 
-const csp = [
-  "default-src 'self'",
-  "script-src 'self' https://www.google.com https://www.gstatic.com" + (isProd ? '' : " 'unsafe-eval' 'unsafe-inline'"),
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self' https://www.google.com",
-  "frame-src https://www.google.com",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
-
+// Content-Security-Policy is set per-request in src/middleware.ts instead (it
+// needs a fresh nonce per response for script-src to work without 'unsafe-inline').
 const securityHeaders = [
-  { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

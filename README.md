@@ -1,4 +1,4 @@
-# QFundation
+# System zarządzania kryzysowego
 
 Projekt aplikacji webowej opartej o Next.js (App Router), TypeScript, Tailwind CSS oraz Prisma ORM (PostgreSQL).
 

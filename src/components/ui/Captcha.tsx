@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 declare global {
   interface Window {
@@ -10,9 +10,15 @@ declare global {
         container: HTMLElement,
         params: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void }
       ) => number;
+      reset: (widgetId?: number) => void;
     };
   }
 }
+
+export type CaptchaHandle = {
+  /** Resets the widget to its unsolved state so a consumed/expired token can't be resubmitted. */
+  reset: () => void;
+};
 
 const SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 const SCRIPT_SRC = 'https://www.google.com/recaptcha/api.js?render=explicit';
@@ -35,9 +41,21 @@ function loadScript(): Promise<void> {
 }
 
 /** Renders once a server response signals a captcha challenge is required. */
-export function Captcha({ onToken }: { onToken: (token: string | null) => void }) {
+export const Captcha = forwardRef<CaptchaHandle, { onToken: (token: string | null) => void }>(function Captcha(
+  { onToken },
+  ref
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef(false);
+  const widgetIdRef = useRef<number | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    reset() {
+      if (widgetIdRef.current !== null) {
+        window.grecaptcha?.reset(widgetIdRef.current);
+      }
+    },
+  }));
 
   useEffect(() => {
     if (!SITE_KEY) {
@@ -52,7 +70,7 @@ export function Captcha({ onToken }: { onToken: (token: string | null) => void }
       .then(() => {
         if (cancelled || !containerRef.current || renderedRef.current) return;
         renderedRef.current = true;
-        window.grecaptcha!.render(containerRef.current, {
+        widgetIdRef.current = window.grecaptcha!.render(containerRef.current, {
           sitekey: SITE_KEY!,
           callback: onToken,
           'expired-callback': () => onToken(null),
@@ -68,4 +86,4 @@ export function Captcha({ onToken }: { onToken: (token: string | null) => void }
   if (!SITE_KEY) return null;
 
   return <div ref={containerRef} />;
-}
+});
