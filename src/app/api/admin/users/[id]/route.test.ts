@@ -120,6 +120,40 @@ describe('PATCH /api/admin/users/[id]', () => {
     );
   });
 
+  it('stamps lastActivatedAt when isActive is set to true', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ isActive: false }) as any);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ isActive: true });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ isActive: true, lastActivatedAt: expect.any(Date) }),
+      })
+    );
+  });
+
+  it('stamps lastDeactivatedAt and stores the reason when isActive is set to false for another user', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ isActive: false, deactivationReason: 'Naruszenie regulaminu' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          isActive: false,
+          lastDeactivatedAt: expect.any(Date),
+          deactivationReason: 'Naruszenie regulaminu',
+        }),
+      })
+    );
+  });
+
   it('blocks an ADMIN from deactivating their own account', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-1' }) as any);

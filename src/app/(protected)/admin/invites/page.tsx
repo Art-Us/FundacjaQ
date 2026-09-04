@@ -82,6 +82,8 @@ export default async function AdminInvitesPage() {
               <th className="py-2 pr-4">Rola</th>
               <th className="py-2 pr-4">Gmina</th>
               <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Ostatnia aktywacja</th>
+              <th className="py-2 pr-4">Ostatnia dezaktywacja</th>
               <th className="py-2 pr-4"></th>
             </tr>
           </thead>
@@ -93,6 +95,17 @@ export default async function AdminInvitesPage() {
                 <td className="py-2 pr-4">{user.role}</td>
                 <td className="py-2 pr-4">{user.gmina?.name ?? '—'}</td>
                 <td className="py-2 pr-4">{user.isActive ? 'Aktywny' : 'Nieaktywny'}</td>
+                <td className="py-2 pr-4">{user.lastActivatedAt ? formatDate(user.lastActivatedAt) : '—'}</td>
+                <td className="py-2 pr-4">
+                  {user.lastDeactivatedAt ? (
+                    <span title={user.deactivationReason ?? undefined}>
+                      {formatDate(user.lastDeactivatedAt)}
+                      {user.deactivationReason ? ` (${user.deactivationReason})` : ''}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td className="py-2 pr-4">
                   {canManageUser(currentUser, user) && (
                     <ToggleUserActiveButton userId={user.id} isActive={user.isActive} />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
@@ -16,6 +17,9 @@ const updateUserSchema = z.object({
   organization: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
+  // Only meaningful when isActive is being set to false in the same request
+  // — see the isActive handling below.
+  deactivationReason: z.string().trim().min(1).max(500).optional(),
 });
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
@@ -61,10 +65,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   }
 
+  const { deactivationReason, ...rest } = parsed.data;
+  const data: Prisma.UserUpdateInput = { ...rest };
+  if (parsed.data.isActive === true) {
+    data.lastActivatedAt = new Date();
+  } else if (parsed.data.isActive === false) {
+    data.lastDeactivatedAt = new Date();
+    data.deactivationReason = deactivationReason ?? null;
+  }
+
   try {
     const user = await prisma.user.update({
       where: { id: target.id },
-      data: parsed.data,
+      data,
       select: adminUserSelect,
     });
     return NextResponse.json({ user });

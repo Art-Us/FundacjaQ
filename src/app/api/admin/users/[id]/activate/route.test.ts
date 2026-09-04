@@ -65,7 +65,7 @@ describe('POST /api/admin/users/[id]/activate', () => {
     expect(res.status).toBe(200);
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'target-1' },
-      data: { isActive: true },
+      data: { isActive: true, lastActivatedAt: expect.any(Date) },
     });
   });
 

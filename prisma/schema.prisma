@@ -35,22 +35,25 @@ enum ResourceStatus {
 }
 
 model User {
-  id                String    @id @default(cuid())
-  name              String?
-  email             String    @unique
-  passwordHash      String
-  role              Role      @default(VOLUNTEER)
-  organization      String?
-  phone             String?
-  gminaId           String?
-  gmina             Gmina?    @relation(fields: [gminaId], references: [id])
-  emailVerified     DateTime?
-  isActive          Boolean   @default(true)
-  failedAttempts    Int       @default(0)
-  lockedUntil       DateTime?
-  passwordChangedAt DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  name               String?
+  email              String    @unique
+  passwordHash       String
+  role               Role      @default(VOLUNTEER)
+  organization       String?
+  phone              String?
+  gminaId            String?
+  gmina              Gmina?    @relation(fields: [gminaId], references: [id])
+  emailVerified      DateTime?
+  isActive           Boolean   @default(true)
+  lastActivatedAt    DateTime?
+  lastDeactivatedAt  DateTime?
+  deactivationReason String?
+  failedAttempts     Int       @default(0)
+  lockedUntil        DateTime?
+  passwordChangedAt  DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   alertsCreated       Alert[]
   invitesCreated      InviteToken[]
@@ -101,16 +104,16 @@ model LoginAttempt {
 }
 
 model Gmina {
-  id           String     @id @default(cuid())
-  name         String     @unique
+  id           String   @id @default(cuid())
+  name         String   @unique
   powiat       String
   voivodeship  String
   latitude     Float?
   longitude    Float?
   contactEmail String?
   contactPhone String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   users        User[]
   alerts       Alert[]
@@ -119,14 +122,14 @@ model Gmina {
 }
 
 model ResourceCategory {
-  id          String     @id @default(cuid())
-  name        String     @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
   description String?
   icon        String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  resources   Resource[]
+  resources Resource[]
 }
 
 model Resource {

@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+const deactivateSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
   const user = await requireAdminOrCoordinator();
   if (!user) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
@@ -23,9 +28,14 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ message: 'Konto jest już nieaktywne.' });
   }
 
+  const parsed = deactivateSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
+  }
+
   await prisma.user.update({
     where: { id: target.id },
-    data: { isActive: false },
+    data: { isActive: false, lastDeactivatedAt: new Date(), deactivationReason: parsed.data.reason ?? null },
   });
 
   return NextResponse.json({ message: 'Konto zostało dezaktywowane.' });

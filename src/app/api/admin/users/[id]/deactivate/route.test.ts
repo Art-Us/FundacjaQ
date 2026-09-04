@@ -27,8 +27,17 @@ function baseUser(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function callRoute(id = 'target-1') {
-  return POST(new Request('http://localhost'), { params: { id } });
+function callRoute(id = 'target-1', body?: unknown) {
+  return POST(
+    new Request('http://localhost', {
+      method: 'POST',
+      ...(body !== undefined && {
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    }),
+    { params: { id } }
+  );
 }
 
 beforeEach(() => {
@@ -65,8 +74,32 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     expect(res.status).toBe(200);
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'target-1' },
-      data: { isActive: false },
+      data: { isActive: false, lastDeactivatedAt: expect.any(Date), deactivationReason: null },
     });
+  });
+
+  it('stores the given reason and the deactivation timestamp', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callRoute('target-1', { reason: 'Naruszenie regulaminu' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'target-1' },
+      data: { isActive: false, lastDeactivatedAt: expect.any(Date), deactivationReason: 'Naruszenie regulaminu' },
+    });
+  });
+
+  it('rejects a reason over the length limit before writing to the database', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+
+    const res = await callRoute('target-1', { reason: 'x'.repeat(501) });
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('lets COORDINATOR deactivate a VOLUNTEER in their own gmina', async () => {

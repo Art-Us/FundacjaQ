@@ -25,7 +25,7 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
   await prisma.user.update({
     where: { id: target.id },
-    data: { isActive: true },
+    data: { isActive: true, lastActivatedAt: new Date() },
   });
 
   return NextResponse.json({ message: 'Konto zostało aktywowane.' });
