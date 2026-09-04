@@ -103,7 +103,7 @@ export async function acceptInvite(
           gminaId: invite.gminaId,
           passwordHash,
           emailVerified: new Date(),
-          isActive: true,
+          isActive: false,
         },
       });
       return true;

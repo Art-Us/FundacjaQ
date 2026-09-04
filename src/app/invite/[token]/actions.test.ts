@@ -85,7 +85,7 @@ describe('acceptInvite', () => {
           email: 'volunteer@example.com',
           role: 'VOLUNTEER',
           gminaId: 'g1',
-          isActive: true,
+          isActive: false,
           emailVerified: expect.any(Date),
         }),
       })
