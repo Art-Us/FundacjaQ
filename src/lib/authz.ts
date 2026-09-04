@@ -17,6 +17,16 @@ export async function requireAdminOrCoordinator(): Promise<AuthorizedUser | null
   return user;
 }
 
+/** Returns the current session user if they're ADMIN, otherwise null. */
+export async function requireAdmin(): Promise<AuthorizedUser | null> {
+  const session = await getServerSession(authOptions);
+  const user = session?.user;
+  if (!user || user.role !== 'ADMIN') {
+    return null;
+  }
+  return user;
+}
+
 /**
  * Whether `actor` may activate/deactivate `target`. ADMIN can manage anyone;
  * COORDINATOR only their own gmina's VOLUNTEERs (mirrors the invite-role
