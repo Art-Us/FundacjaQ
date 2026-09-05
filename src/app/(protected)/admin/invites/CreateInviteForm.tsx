@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Mail, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
@@ -47,61 +48,70 @@ export function CreateInviteForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full max-w-sm">
-      <div>
-        <label className="block text-sm text-slate-400 mb-1" htmlFor="email">
-          Email zapraszanej osoby
-        </label>
-        <input
-          id="email"
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-        />
+    <div className="rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80">
+      <div className="flex items-center gap-2 text-indigo-600 font-bold mb-4">
+        <UserPlus className="h-5 w-5" />
+        <h2 className="text-base font-extrabold text-slate-900">Nowe zaproszenie</h2>
       </div>
-      <div>
-        <label className="block text-sm text-slate-400 mb-1" htmlFor="role">
-          Rola
-        </label>
-        <select
-          id="role"
-          value={role}
-          onChange={(e) => setRole(e.target.value as typeof ROLES[number])}
-          className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-        >
-          {ROLES.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
-      {message && <p className="text-sm text-slate-300">{message}</p>}
-      <Button type="submit" disabled={loading} className="w-full">
-        {loading ? 'Wysyłanie…' : 'Wyślij zaproszenie'}
-      </Button>
-      {inviteUrl && (
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-          <p className="text-xs text-slate-500 mb-2">
-            {emailConfigured
-              ? 'E-mail z zaproszeniem został wysłany. Możesz też przekazać link ręcznie:'
-              : 'Wiadomość e-mail nie jest jeszcze skonfigurowana — oto link zaproszenia do przekazania ręcznie:'}
-          </p>
-          <div className="flex items-center gap-2">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="email">
+            Email zapraszanej osoby
+          </label>
+          <div className="relative">
+            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
-              readOnly
-              value={inviteUrl}
-              onFocus={(e) => e.target.select()}
-              className="flex-1 rounded-md bg-slate-950 border border-slate-800 px-2 py-1.5 text-xs text-slate-300 focus:outline-none"
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-4 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-sm transition"
             />
-            <Button type="button" variant="secondary" size="sm" onClick={handleCopy}>
-              {copied ? 'Skopiowano!' : 'Kopiuj'}
-            </Button>
           </div>
         </div>
-      )}
-    </form>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="role">
+            Rola
+          </label>
+          <select
+            id="role"
+            value={role}
+            onChange={(e) => setRole(e.target.value as typeof ROLES[number])}
+            className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-slate-900 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-sm transition"
+          >
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+        {message && <p className="text-xs text-slate-500">{message}</p>}
+        <Button type="submit" disabled={loading} className="w-full">
+          {loading ? 'Wysyłanie…' : 'Wyślij zaproszenie'}
+        </Button>
+        {inviteUrl && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[11px] text-slate-500 mb-2">
+              {emailConfigured
+                ? 'E-mail z zaproszeniem został wysłany. Możesz też przekazać link ręcznie:'
+                : 'Wiadomość e-mail nie jest jeszcze skonfigurowana — oto link zaproszenia do przekazania ręcznie:'}
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={inviteUrl}
+                onFocus={(e) => e.target.select()}
+                className="flex-1 rounded-xl bg-white border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 focus:outline-none"
+              />
+              <Button type="button" variant="secondary" size="sm" onClick={handleCopy}>
+                {copied ? 'Skopiowano!' : 'Kopiuj'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </form>
+    </div>
   );
 }

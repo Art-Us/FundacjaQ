@@ -44,7 +44,7 @@ export function ToggleUserActiveButton({ userId, isActive }: { userId: string; i
           onChange={(e) => setReason(e.target.value)}
           placeholder="Powód dezaktywacji (opcjonalnie)"
           rows={2}
-          className="w-48 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          className="w-48 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
         />
         <div className="flex gap-2">
           <Button
