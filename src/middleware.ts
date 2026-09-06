@@ -15,7 +15,10 @@ function buildCsp(nonce: string): string {
     `script-src 'self' 'nonce-${nonce}' https://www.google.com https://www.gstatic.com` +
       (isProd ? '' : " 'unsafe-eval' 'unsafe-inline'"),
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    // *.tile.openstreetmap.org serwuje kafelki mapy (Leaflet, strona /map) —
+    // bez tego przeglądarka po cichu blokuje obrazki tła mapy przez CSP, bez
+    // widocznego błędu sieciowego (tylko wpis o naruszeniu CSP w konsoli).
+    "img-src 'self' data: https://*.tile.openstreetmap.org",
     "font-src 'self'",
     "connect-src 'self' https://www.google.com",
     "frame-src https://www.google.com",

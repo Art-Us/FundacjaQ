@@ -3,26 +3,13 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
 import { formatDate } from '@/lib/utils';
+import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
 import type { Role } from '@/types';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
   COORDINATOR: 'Koordynator gminny',
   VOLUNTEER: 'Wolontariusz',
-};
-
-const SEVERITY_STYLES: Record<string, string> = {
-  CRITICAL: 'bg-rose-950 text-rose-300 border-rose-800',
-  HIGH: 'bg-orange-950 text-orange-300 border-orange-800',
-  MEDIUM: 'bg-amber-950 text-amber-300 border-amber-800',
-  LOW: 'bg-slate-800 text-slate-300 border-slate-700',
-};
-
-const ALERT_STATUS_LABELS: Record<string, string> = {
-  ACTIVE: 'Aktywny',
-  IN_PROGRESS: 'W trakcie',
-  RESOLVED: 'Rozwiązany',
-  CANCELLED: 'Anulowany',
 };
 
 const RESOURCE_STATUS_LABELS: Record<string, string> = {

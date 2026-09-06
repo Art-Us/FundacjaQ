@@ -17,6 +17,9 @@ export const Navbar = () => {
           <Link href="/" className="hover:text-white transition-colors">
             Strona główna
           </Link>
+          <Link href="/map" className="hover:text-white transition-colors">
+            Mapa
+          </Link>
           <AuthStatus />
         </nav>
       </div>

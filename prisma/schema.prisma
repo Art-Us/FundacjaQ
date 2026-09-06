@@ -152,6 +152,8 @@ model Alert {
   severity    Severity    @default(MEDIUM)
   status      AlertStatus @default(ACTIVE)
   location    String?
+  latitude    Float?
+  longitude   Float?
   authorId    String?
   author      User?       @relation(fields: [authorId], references: [id])
   gminaId     String
