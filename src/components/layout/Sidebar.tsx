@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { Home, UserPlus, LogOut, ChevronRight } from 'lucide-react';
+import { Home, UserPlus, Users, LogOut, ChevronRight } from 'lucide-react';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
@@ -83,6 +83,15 @@ export function Sidebar({ isOpen, onCloseMobile, name, role, canManageInvites }:
                       <UserPlus className="h-4 w-4" />
                     </div>
                     <span>Zaproszenia</span>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
+                <Link href="/admin/users" onClick={onCloseMobile} className={linkClasses(pathname === '/admin/users')}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition">
+                      <Users className="h-4 w-4" />
+                    </div>
+                    <span>Użytkownicy</span>
                   </div>
                   <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Link>

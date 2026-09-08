@@ -37,20 +37,24 @@ export function ToggleUserActiveButton({ userId, isActive }: { userId: string; i
   }
 
   if (showReasonInput) {
+    // basis-full forces this onto its own line inside a flex-wrap row (see
+    // UserCard's action row), so the field and buttons span the full card
+    // width instead of squeezing next to the neighboring Edytuj button.
     return (
-      <div className="flex flex-col items-start gap-1">
+      <div className="w-full basis-full flex flex-col gap-1.5">
         <textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="Powód dezaktywacji (opcjonalnie)"
           rows={2}
-          className="w-48 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
+          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
         />
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button
             type="button"
             variant="secondary"
             size="sm"
+            className="flex-1"
             disabled={loading}
             onClick={() => callToggle('deactivate', { reason: reason.trim() || undefined })}
           >

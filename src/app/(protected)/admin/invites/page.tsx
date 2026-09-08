@@ -4,9 +4,9 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
+import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
 import { CreateInviteForm } from './CreateInviteForm';
 import { RevokeInviteButton } from './RevokeInviteButton';
-import { ToggleUserActiveButton } from './ToggleUserActiveButton';
 
 const INVITE_STATUS_BADGE: Record<string, string> = {
   Aktywne: 'bg-emerald-50 text-emerald-700 border-emerald-200',
