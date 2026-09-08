@@ -44,6 +44,14 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
