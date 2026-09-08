@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { AuthStatus } from './AuthStatus';
+import { NavLinks } from './NavLinks';
 
 export const Navbar = () => {
   return (
@@ -14,12 +15,7 @@ export const Navbar = () => {
         </Link>
 
         <nav className="flex items-center gap-6 text-sm font-medium text-slate-300">
-          <Link href="/" className="hover:text-white transition-colors">
-            Strona główna
-          </Link>
-          <Link href="/map" className="hover:text-white transition-colors">
-            Mapa
-          </Link>
+          <NavLinks />
           <AuthStatus />
         </nav>
       </div>

@@ -3,8 +3,15 @@
 import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { Prisma } from '@prisma/client';
-import { SEVERITY_STYLES, SEVERITY_LABELS, SEVERITY_MARKER_COLORS, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
+import {
+  SEVERITY_STYLES,
+  SEVERITY_LABELS,
+  ALERT_STATUS_LABELS,
+  ALERT_CATEGORY_LABELS,
+  CATEGORY_MARKER_COLORS,
+} from '@/lib/alertLabels';
 import { formatDate } from '@/lib/utils';
+import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import type { Role } from '@/types';
 import AlertForm from './AlertForm';
 import AlertActions from './AlertActions';
@@ -16,10 +23,9 @@ const AlertMap = dynamic(() => import('./AlertMap'), {
   ),
 });
 
-const NOWA_DEBA_CENTER: [number, number] = [50.4166, 21.75];
-
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 const STATUSES = ['ACTIVE', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'] as const;
+const CATEGORIES = ['HYDROLOGICAL', 'ROAD', 'HUMANITARIAN', 'FIRE', 'INFRASTRUCTURE', 'GENERAL'] as const;
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 
 const alertInclude = { gmina: true } satisfies Prisma.AlertInclude;
@@ -163,15 +169,15 @@ export default function AlertsMapView({
           onMapClick={canManageAlerts ? handleMapClick : undefined}
         />
         <div className="absolute bottom-3 left-3 z-[1000] rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-2 text-xs text-slate-300 backdrop-blur pointer-events-none">
-          <p className="font-semibold mb-1.5">Legenda: Krytyczność</p>
+          <p className="font-semibold mb-1.5">Legenda: Kategoria</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-            {SEVERITIES.map((sev) => (
-              <div key={sev} className="flex items-center gap-1.5">
+            {CATEGORIES.map((cat) => (
+              <div key={cat} className="flex items-center gap-1.5">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: SEVERITY_MARKER_COLORS[sev] }}
+                  style={{ backgroundColor: CATEGORY_MARKER_COLORS[cat] }}
                 />
-                {SEVERITY_LABELS[sev]}
+                {ALERT_CATEGORY_LABELS[cat]}
               </div>
             ))}
           </div>
@@ -194,6 +200,9 @@ export default function AlertsMapView({
                   {ALERT_STATUS_LABELS[alert.status] ?? alert.status}
                 </span>
               </div>
+              <p className="text-xs uppercase tracking-wide opacity-70 mt-1">
+                {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
+              </p>
               <p className="text-sm opacity-80 mt-1 line-clamp-3">{alert.description}</p>
               <p className="text-xs opacity-60 mt-2">
                 {alert.gmina.name}

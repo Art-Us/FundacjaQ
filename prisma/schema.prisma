@@ -27,6 +27,15 @@ enum AlertStatus {
   CANCELLED
 }
 
+enum AlertCategory {
+  HYDROLOGICAL // Ostrzeżenie hydrologiczne
+  ROAD // Komunikat drogowy
+  HUMANITARIAN // Pomoc humanitarna
+  FIRE // Zagrożenie pożarowe
+  INFRASTRUCTURE // Awaria infrastruktury
+  GENERAL // Informacja ogólna
+}
+
 enum ResourceStatus {
   AVAILABLE
   RESERVED
@@ -101,16 +110,16 @@ model LoginAttempt {
 }
 
 model Gmina {
-  id           String     @id @default(cuid())
-  name         String     @unique
+  id           String   @id @default(cuid())
+  name         String   @unique
   powiat       String
   voivodeship  String
   latitude     Float?
   longitude    Float?
   contactEmail String?
   contactPhone String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   users        User[]
   alerts       Alert[]
@@ -119,14 +128,14 @@ model Gmina {
 }
 
 model ResourceCategory {
-  id          String     @id @default(cuid())
-  name        String     @unique
+  id          String   @id @default(cuid())
+  name        String   @unique
   description String?
   icon        String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  resources   Resource[]
+  resources Resource[]
 }
 
 model Resource {
@@ -146,19 +155,20 @@ model Resource {
 }
 
 model Alert {
-  id          String      @id @default(cuid())
+  id          String        @id @default(cuid())
   title       String
   description String
-  severity    Severity    @default(MEDIUM)
-  status      AlertStatus @default(ACTIVE)
+  severity    Severity      @default(MEDIUM)
+  status      AlertStatus   @default(ACTIVE)
+  category    AlertCategory @default(GENERAL)
   location    String?
   latitude    Float?
   longitude   Float?
   authorId    String?
-  author      User?       @relation(fields: [authorId], references: [id])
+  author      User?         @relation(fields: [authorId], references: [id])
   gminaId     String
-  gmina       Gmina       @relation(fields: [gminaId], references: [id])
+  gmina       Gmina         @relation(fields: [gminaId], references: [id])
   expiresAt   DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }

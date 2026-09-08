@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet';
-import { SEVERITY_MARKER_COLORS, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { CATEGORY_MARKER_COLORS, ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS } from '@/lib/alertLabels';
+import { createPinIcon } from './pinIcon';
 import 'leaflet/dist/leaflet.css';
 import './leaflet-dark.css';
 
@@ -12,6 +13,7 @@ export interface MapAlert {
   description: string;
   severity: string;
   status: string;
+  category: string;
   location: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -63,15 +65,13 @@ export default function AlertMap({ alerts, center, focusedAlertId, onMapClick }:
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {withCoords.map((alert) => {
-        const color = SEVERITY_MARKER_COLORS[alert.severity] ?? SEVERITY_MARKER_COLORS.LOW;
+        const color = CATEGORY_MARKER_COLORS[alert.category] ?? CATEGORY_MARKER_COLORS.GENERAL;
         return (
-          <CircleMarker
-            key={alert.id}
-            center={[alert.latitude, alert.longitude]}
-            radius={10}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 2 }}
-          >
+          <Marker key={alert.id} position={[alert.latitude, alert.longitude]} icon={createPinIcon(color)}>
             <Popup>
+              <p className="text-[10px] uppercase tracking-wide opacity-70">
+                {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
+              </p>
               <p className="font-semibold text-sm">{alert.title}</p>
               <p className="text-xs mt-1">{alert.description}</p>
               <p className="text-xs mt-1 opacity-80">
@@ -79,7 +79,7 @@ export default function AlertMap({ alerts, center, focusedAlertId, onMapClick }:
                 {alert.location ? ` · ${alert.location}` : ''}
               </p>
             </Popup>
-          </CircleMarker>
+          </Marker>
         );
       })}
       <FocusController alerts={alerts} focusedAlertId={focusedAlertId} />

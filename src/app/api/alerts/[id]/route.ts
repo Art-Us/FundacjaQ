@@ -7,12 +7,14 @@ export const runtime = 'nodejs';
 
 const SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 const ALERT_STATUSES = ['ACTIVE', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'] as const;
+const CATEGORIES = ['HYDROLOGICAL', 'ROAD', 'HUMANITARIAN', 'FIRE', 'INFRASTRUCTURE', 'GENERAL'] as const;
 
 const updateAlertSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().min(1).max(2000).optional(),
   severity: z.enum(SEVERITIES).optional(),
   status: z.enum(ALERT_STATUSES).optional(),
+  category: z.enum(CATEGORIES).optional(),
   location: z.string().max(200).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),

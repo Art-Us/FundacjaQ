@@ -6,11 +6,13 @@ import { requireAdminOrCoordinator } from '@/lib/authz';
 export const runtime = 'nodejs';
 
 const SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+const CATEGORIES = ['HYDROLOGICAL', 'ROAD', 'HUMANITARIAN', 'FIRE', 'INFRASTRUCTURE', 'GENERAL'] as const;
 
 const createAlertSchema = z.object({
   title: z.string().min(1, 'Tytuł jest wymagany.').max(200),
   description: z.string().min(1, 'Opis jest wymagany.').max(2000),
   severity: z.enum(SEVERITIES),
+  category: z.enum(CATEGORIES).default('GENERAL'),
   location: z.string().max(200).optional(),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
