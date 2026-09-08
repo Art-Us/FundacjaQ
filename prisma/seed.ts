@@ -5,6 +5,8 @@ const prisma = new PrismaClient();
 
 const TEST_PASSWORD = 'Test1234!';
 
+const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
 async function seedAdmin() {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
@@ -15,17 +17,23 @@ async function seedAdmin() {
   }
 
   const passwordHash = await hashPassword(password);
+  // ADMIN is site-wide (not tied to one gmina), so gminaId stays unset —
+  // every other field is filled in so the account renders fully on admin/users.
+  const data = {
+    name: 'Administrator Systemu',
+    organization: 'QFundation',
+    phone: '+48 600 000 000',
+    passwordHash,
+    role: 'ADMIN' as const,
+    isActive: true,
+    lastActivatedAt: daysAgo(120),
+    emailVerified: daysAgo(120),
+  };
 
   await prisma.user.upsert({
     where: { email },
-    update: { passwordHash },
-    create: {
-      email,
-      passwordHash,
-      role: 'ADMIN',
-      isActive: true,
-      emailVerified: new Date(),
-    },
+    update: data,
+    create: { email, ...data },
   });
 
   console.log(`🌱 Konto admina gotowe: ${email}`);
@@ -62,32 +70,105 @@ async function seedKategorie() {
 }
 
 async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
-  const users: Array<{ email: string; name: string; role: Role; gminaId: string | null }> = [
-    { email: 'koordynator@example.com', name: 'Katarzyna Nowak', role: 'COORDINATOR', gminaId: gminy[0].id },
-    { email: 'wolontariusz@example.com', name: 'Anna Wiśniewska', role: 'VOLUNTEER', gminaId: gminy[1].id },
-    { email: 'wolontariusz2@example.com', name: 'Marek Zieliński', role: 'VOLUNTEER', gminaId: gminy[2].id },
+  const users: Array<{
+    email: string;
+    name: string;
+    role: Role;
+    gminaId: string;
+    organization: string;
+    phone: string;
+    isActive: boolean;
+    lastActivatedAt: Date | null;
+    lastDeactivatedAt: Date | null;
+    deactivationReason: string | null;
+  }> = [
+    {
+      email: 'koordynator@example.com',
+      name: 'Katarzyna Nowak',
+      role: 'COORDINATOR',
+      gminaId: gminy[0].id,
+      organization: 'Urząd Gminy Wieliczka',
+      phone: '+48 601 234 567',
+      isActive: true,
+      lastActivatedAt: daysAgo(30),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'koordynator2@example.com',
+      name: 'Tomasz Wójcik',
+      role: 'COORDINATOR',
+      gminaId: gminy[1].id,
+      organization: 'Urząd Gminy Sanok',
+      phone: '+48 605 111 222',
+      isActive: true,
+      lastActivatedAt: daysAgo(20),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'wolontariusz@example.com',
+      name: 'Anna Wiśniewska',
+      role: 'VOLUNTEER',
+      gminaId: gminy[1].id,
+      organization: 'Polski Czerwony Krzyż',
+      phone: '+48 602 345 678',
+      isActive: false,
+      lastActivatedAt: daysAgo(60),
+      lastDeactivatedAt: daysAgo(4),
+      deactivationReason: 'Zakończony okres wolontariatu',
+    },
+    {
+      email: 'wolontariusz2@example.com',
+      name: 'Marek Zieliński',
+      role: 'VOLUNTEER',
+      gminaId: gminy[2].id,
+      organization: 'Ochotnicza Straż Pożarna Kłodzko',
+      phone: '+48 603 456 789',
+      isActive: true,
+      lastActivatedAt: daysAgo(15),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'wolontariusz3@example.com',
+      name: 'Piotr Kowalski',
+      role: 'VOLUNTEER',
+      gminaId: gminy[0].id,
+      organization: 'Caritas Diecezji Krakowskiej',
+      phone: '+48 606 789 012',
+      isActive: false,
+      lastActivatedAt: null,
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
   ];
 
   const passwordHash = await hashPassword(TEST_PASSWORD);
 
   for (const u of users) {
+    const data = {
+      name: u.name,
+      role: u.role,
+      gminaId: u.gminaId,
+      organization: u.organization,
+      phone: u.phone,
+      passwordHash,
+      isActive: u.isActive,
+      lastActivatedAt: u.lastActivatedAt,
+      lastDeactivatedAt: u.lastDeactivatedAt,
+      deactivationReason: u.deactivationReason,
+      emailVerified: daysAgo(90),
+    };
     await prisma.user.upsert({
       where: { email: u.email },
-      update: {},
-      create: {
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        gminaId: u.gminaId,
-        passwordHash,
-        isActive: true,
-        emailVerified: new Date(),
-      },
+      update: data,
+      create: { email: u.email, ...data },
     });
   }
 
   console.log(`🌱 Konta testowe gotowe (hasło: ${TEST_PASSWORD}):`);
-  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]`));
+  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]${u.isActive ? '' : ' (nieaktywne)'}`));
 }
 
 async function seedZasoby(gminy: Awaited<ReturnType<typeof seedGminy>>, kategorie: Awaited<ReturnType<typeof seedKategorie>>) {
