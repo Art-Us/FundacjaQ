@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { adminUserSelect } from '@/lib/users';
+import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +15,7 @@ const createUserSchema = z.object({
   password: passwordSchema,
   role: z.enum(ROLES),
   gminaId: z.string().optional(),
+  newGminaName: z.string().trim().min(1).max(120).optional(),
   name: z.string().optional(),
   organization: z.string().optional(),
   phone: z.string().optional(),
@@ -45,7 +47,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
   }
 
-  const { email, password, role, gminaId, name, organization, phone } = parsed.data;
+  const { email, password, role, gminaId, newGminaName, name, organization, phone } = parsed.data;
+
+  let effectiveGminaId: string | undefined;
+  if (requiresGmina(role) || gminaId || newGminaName) {
+    const resolved = await resolveGminaId({ gminaId, newGminaName });
+    if ('error' in resolved) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
+    }
+    effectiveGminaId = resolved.id;
+  }
 
   if (await isPasswordPwned(password)) {
     return NextResponse.json(
@@ -65,7 +76,7 @@ export async function POST(req: NextRequest) {
     // isActive: false — an admin-created account still needs an explicit
     // activation step, same as one created through the invite flow.
     const user = await prisma.user.create({
-      data: { email, passwordHash, role, gminaId, name, organization, phone, isActive: false },
+      data: { email, passwordHash, role, gminaId: effectiveGminaId, name, organization, phone, isActive: false },
       select: adminUserSelect,
     });
     return NextResponse.json({ user }, { status: 201 });

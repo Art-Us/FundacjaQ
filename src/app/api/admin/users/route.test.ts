@@ -78,6 +78,7 @@ describe('POST /api/admin/users', () => {
 
   it('creates the user as inactive, hashing the password', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockResolvedValue({ id: 'new-1' } as any);
 
@@ -101,9 +102,12 @@ describe('POST /api/admin/users', () => {
 
   it('rejects a duplicate email with 400 and does not create a user', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue({ id: 'existing' } as any);
 
-    const res = await POST(makeRequest({ email: 'existing@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER' }));
+    const res = await POST(
+      makeRequest({ email: 'existing@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+    );
 
     expect(res.status).toBe(400);
     expect(prisma.user.create).not.toHaveBeenCalled();
@@ -111,13 +115,35 @@ describe('POST /api/admin/users', () => {
 
   it('rejects a password found in a breach database', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     vi.mocked(isPasswordPwned).mockResolvedValue(true);
+
+    const res = await POST(
+      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+    );
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a gmina when creating a COORDINATOR/VOLUNTEER without one', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
 
     const res = await POST(makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER' }));
 
     expect(res.status).toBe(400);
     expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('does not require a gmina when creating an ADMIN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-1' } as any);
+
+    const res = await POST(makeRequest({ email: 'new-admin@example.com', password: STRONG_PASSWORD, role: 'ADMIN' }));
+
+    expect(res.status).toBe(201);
   });
 
   it('rejects a role outside the enum before touching the database', async () => {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/ui/PasswordInput';
+import { GminaSelect, type GminaSelectValue } from '@/components/gmina/GminaSelect';
 import type { UserGmina, UserListItem, UserRole } from './types';
 
 const ROLES: { value: UserRole; label: string }[] = [
@@ -32,7 +33,8 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
   const [role, setRole] = useState<UserRole>(user?.role ?? 'VOLUNTEER');
   const [organization, setOrganization] = useState(user?.organization ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
-  const [gminaId, setGminaId] = useState(user?.gmina?.id ?? '');
+  const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: user?.gmina?.id ?? null, newGminaName: null });
+  const gminaRequired = mode === 'create' && role !== 'ADMIN';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,7 +68,8 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             name: name || undefined,
             organization: organization || undefined,
             phone: phone || undefined,
-            gminaId: gminaId || undefined,
+            gminaId: gmina.gminaId || undefined,
+            newGminaName: gmina.newGminaName || undefined,
           }
         : {
             email,
@@ -74,7 +77,8 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             name: name || null,
             organization: organization || null,
             phone: phone || null,
-            gminaId: gminaId || null,
+            gminaId: gmina.newGminaName ? null : gmina.gminaId,
+            newGminaName: gmina.newGminaName || undefined,
           };
 
     const res = await fetch(mode === 'create' ? '/api/admin/users' : `/api/admin/users/${user!.id}`, {
@@ -182,21 +186,9 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             </div>
             <div>
               <label htmlFor="user-gmina" className={labelClasses}>
-                Gmina
+                Gmina{gminaRequired && ' *'}
               </label>
-              <select
-                id="user-gmina"
-                value={gminaId}
-                onChange={(e) => setGminaId(e.target.value)}
-                className={inputClasses}
-              >
-                <option value="">— Brak —</option>
-                {gminas.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+              <GminaSelect id="user-gmina" gminas={gminas} value={gmina} onChange={setGmina} required={gminaRequired} />
             </div>
           </div>
 

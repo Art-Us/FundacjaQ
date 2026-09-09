@@ -26,7 +26,7 @@ export default async function AdminInvitesPage() {
   const userId = currentUser.id;
   const gminaFilter = isAdmin || !currentUser.gminaId ? {} : { gminaId: currentUser.gminaId };
 
-  const [invites, users] = await Promise.all([
+  const [invites, users, gminas] = await Promise.all([
     prisma.inviteToken.findMany({
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -37,6 +37,11 @@ export default async function AdminInvitesPage() {
       take: 100,
       include: { gmina: true },
     }),
+    // Only ADMIN picks/creates a gmina when inviting; a coordinator's invite
+    // always goes to their own gmina, so they never need the full list.
+    isAdmin
+      ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
+      : Promise.resolve([]),
   ]);
 
   return (
@@ -44,7 +49,7 @@ export default async function AdminInvitesPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-6">Zaproszenia</h1>
         <div className="grid gap-6 md:grid-cols-2 items-start">
-          <CreateInviteForm />
+          <CreateInviteForm gminas={gminas} isAdmin={isAdmin} currentUserGminaId={currentUser.gminaId} />
           <div className="min-w-0 bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">

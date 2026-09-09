@@ -2,32 +2,52 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mail, UserPlus } from 'lucide-react';
+import { Mail, UserPlus, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { GminaSelect, type GminaOption, type GminaSelectValue } from '@/components/gmina/GminaSelect';
 
 const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 
-export function CreateInviteForm() {
+interface CreateInviteFormProps {
+  gminas: GminaOption[];
+  isAdmin: boolean;
+  currentUserGminaId: string | null;
+}
+
+export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: CreateInviteFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<typeof ROLES[number]>('VOLUNTEER');
+  const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: null, newGminaName: null });
   const [message, setMessage] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const gminaRequired = isAdmin && role !== 'ADMIN';
+  // A coordinator's invite always goes to their own gmina — if they don't
+  // have one assigned, they can't invite anyone at all.
+  const blockedNoGmina = !isAdmin && !currentUserGminaId;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (blockedNoGmina) return;
     setLoading(true);
     setMessage(null);
     setInviteUrl(null);
     setCopied(false);
 
+    const body: Record<string, unknown> = { email, role: isAdmin ? role : 'VOLUNTEER' };
+    if (isAdmin) {
+      body.gminaId = gmina.gminaId || undefined;
+      body.newGminaName = gmina.newGminaName || undefined;
+    }
+
     const res = await fetch('/api/admin/invites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     setLoading(false);
@@ -70,25 +90,41 @@ export function CreateInviteForm() {
             />
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="role">
-            Rola
-          </label>
-          <select
-            id="role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as typeof ROLES[number])}
-            className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-slate-900 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-sm transition"
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
+        {isAdmin && (
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="role">
+              Rola
+            </label>
+            <select
+              id="role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as typeof ROLES[number])}
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-slate-900 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-sm transition"
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {isAdmin && (
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="invite-gmina">
+              Gmina{gminaRequired && ' *'}
+            </label>
+            <GminaSelect id="invite-gmina" gminas={gminas} value={gmina} onChange={setGmina} required={gminaRequired} />
+          </div>
+        )}
+        {blockedNoGmina && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>Nie masz przypisanej gminy — nie możesz zapraszać użytkowników. Skontaktuj się z administratorem.</span>
+          </div>
+        )}
         {message && <p className="text-xs text-slate-500">{message}</p>}
-        <Button type="submit" disabled={loading} className="w-full">
+        <Button type="submit" disabled={loading || blockedNoGmina} className="w-full">
           {loading ? 'Wysyłanie…' : 'Wyślij zaproszenie'}
         </Button>
         {inviteUrl && (

@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
+import { resolveGminaId } from '@/lib/gmina';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +15,7 @@ const updateUserSchema = z.object({
   email: z.string().email().optional(),
   role: z.enum(ROLES).optional(),
   gminaId: z.string().nullable().optional(),
+  newGminaName: z.string().trim().min(1).max(120).optional(),
   organization: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
@@ -65,8 +67,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   }
 
-  const { deactivationReason, ...rest } = parsed.data;
-  const data: Prisma.UserUpdateInput = { ...rest };
+  const { deactivationReason, newGminaName, ...rest } = parsed.data;
+  const data: Prisma.UserUncheckedUpdateInput = { ...rest };
+
+  if (newGminaName) {
+    const resolved = await resolveGminaId({ newGminaName });
+    if ('error' in resolved) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
+    }
+    data.gminaId = resolved.id;
+  }
   if (parsed.data.isActive === true) {
     data.lastActivatedAt = new Date();
   } else if (parsed.data.isActive === false) {
