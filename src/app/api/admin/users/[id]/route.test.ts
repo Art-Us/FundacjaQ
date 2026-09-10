@@ -212,6 +212,44 @@ describe('PATCH /api/admin/users/[id]', () => {
       expect.objectContaining({ data: expect.objectContaining({ gminaId: 'new-gmina' }) })
     );
   });
+
+  // Regression coverage for the 2026-09-10 audit finding: a PATCH that
+  // silently detached a COORDINATOR/VOLUNTEER from their gmina made them
+  // invisible to gmina-scoped queries (lib/gmina.ts scopedGminaWhere treats
+  // "gmina-scoped role, no gmina" as "return nothing"), which is a functional
+  // regression even though it isn't itself a privilege escalation.
+  it('rejects explicitly clearing gminaId on a VOLUNTEER (would leave a gmina-scoped role with no gmina)', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+
+    const res = await callPatch({ gminaId: null });
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects changing role to COORDINATOR when the target has no gmina and none is supplied', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'ADMIN', gminaId: null }) as any);
+
+    const res = await callPatch({ role: 'COORDINATOR' });
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows clearing gminaId when the resulting role is ADMIN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'ADMIN', gminaId: 'gmina-1' }) as any);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ gminaId: null });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: null }) })
+    );
+  });
 });
 
 describe('DELETE /api/admin/users/[id]', () => {

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { adminUserSelect } from '@/lib/users';
 import { UsersDirectory } from './UsersDirectory';
 import type { UserListItem } from './types';
@@ -16,15 +17,18 @@ export default async function AdminUsersPage() {
   const currentUser = session.user;
   const isAdmin = currentUser.role === 'ADMIN';
   // Mirrors admin/invites: a coordinator only ever sees their own gmina.
-  const gminaFilter = isAdmin || !currentUser.gminaId ? {} : { gminaId: currentUser.gminaId };
+  // null means "coordinator with no gmina of their own" — fail closed, never {}.
+  const gminaFilter = scopedGminaWhere(currentUser);
 
   const [users, gminas] = await Promise.all([
-    prisma.user.findMany({
-      where: gminaFilter,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      select: { ...adminUserSelect, gmina: { select: { id: true, name: true } } },
-    }),
+    gminaFilter === null
+      ? Promise.resolve([])
+      : prisma.user.findMany({
+          where: gminaFilter,
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          select: { ...adminUserSelect, gmina: { select: { id: true, name: true } } },
+        }),
     // Only ADMIN can create/reassign users, so coordinators never need the full list.
     isAdmin
       ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })

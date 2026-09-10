@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
-import { resolveGminaId } from '@/lib/gmina';
+import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 
 export const runtime = 'nodejs';
 
@@ -70,13 +70,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { deactivationReason, newGminaName, ...rest } = parsed.data;
   const data: Prisma.UserUncheckedUpdateInput = { ...rest };
 
+  // What gminaId will this user end up with after this update, resolving
+  // newGminaName same as below but computed first so we can validate it.
+  let effectiveGminaId = parsed.data.gminaId !== undefined ? parsed.data.gminaId : target.gminaId;
+
   if (newGminaName) {
     const resolved = await resolveGminaId({ newGminaName });
     if ('error' in resolved) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
+    effectiveGminaId = resolved.id;
     data.gminaId = resolved.id;
   }
+
+  // Every non-ADMIN must belong to a gmina — enforced at creation time via
+  // requiresGmina() (see /api/admin/users and invite acceptance), but an
+  // update could otherwise silently detach a COORDINATOR/VOLUNTEER from
+  // their gmina (explicit gminaId: null, or a role change with no gminaId
+  // in the same request). That broke gmina-scoped visibility for the
+  // affected user elsewhere (see scopedGminaWhere in lib/gmina.ts).
+  const effectiveRole = parsed.data.role ?? target.role;
+  if (requiresGmina(effectiveRole) && !effectiveGminaId) {
+    return NextResponse.json({ error: 'Ta rola wymaga przypisanej gminy.' }, { status: 400 });
+  }
+
   if (parsed.data.isActive === true) {
     data.lastActivatedAt = new Date();
   } else if (parsed.data.isActive === false) {

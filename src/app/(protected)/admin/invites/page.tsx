@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
 import { CreateInviteForm } from './CreateInviteForm';
 import { RevokeInviteButton } from './RevokeInviteButton';
@@ -24,19 +25,23 @@ export default async function AdminInvitesPage() {
   const currentUser = session.user;
   const isAdmin = currentUser.role === 'ADMIN';
   const userId = currentUser.id;
-  const gminaFilter = isAdmin || !currentUser.gminaId ? {} : { gminaId: currentUser.gminaId };
+  // null means "gmina-scoped actor with no gmina of their own" — fail closed
+  // (see scopedGminaWhere's doc comment), never fall back to an unfiltered {}.
+  const gminaFilter = scopedGminaWhere(currentUser);
 
   const [invites, users, gminas] = await Promise.all([
     prisma.inviteToken.findMany({
       orderBy: { createdAt: 'desc' },
       take: 50,
     }),
-    prisma.user.findMany({
-      where: gminaFilter,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      include: { gmina: true },
-    }),
+    gminaFilter === null
+      ? Promise.resolve([])
+      : prisma.user.findMany({
+          where: gminaFilter,
+          orderBy: { createdAt: 'desc' },
+          take: 100,
+          include: { gmina: true },
+        }),
     // Only ADMIN picks/creates a gmina when inviting; a coordinator's invite
     // always goes to their own gmina, so they never need the full list.
     isAdmin

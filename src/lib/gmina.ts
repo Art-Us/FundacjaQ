@@ -6,6 +6,24 @@ export function requiresGmina(role: Role): boolean {
   return role !== 'ADMIN';
 }
 
+/**
+ * Scopes a Prisma `where` filter to `actor`'s own gmina for every gmina-scoped
+ * role (anyone but ADMIN). Returns `null` when the actor IS gmina-scoped but
+ * has no gmina of their own (stale data from before gmina became required, or
+ * an admin cleared it via PATCH /api/admin/users/[id]).
+ *
+ * Callers MUST treat `null` as "return nothing" (fail closed) and never
+ * substitute an empty `{}` filter for it — `{}` means "no filter", which
+ * would hand a gmina-scoped actor with no gmina the same unrestricted view
+ * as an ADMIN. This was exactly the bug found in the 2026-09-10 audit across
+ * admin/invites/page.tsx, admin/users/page.tsx and dashboard.ts.
+ */
+export function scopedGminaWhere(actor: { role: Role | string; gminaId: string | null }): { gminaId: string } | Record<string, never> | null {
+  if (actor.role === 'ADMIN') return {};
+  if (!actor.gminaId) return null;
+  return { gminaId: actor.gminaId };
+}
+
 interface ResolveGminaInput {
   gminaId?: string;
   newGminaName?: string;
