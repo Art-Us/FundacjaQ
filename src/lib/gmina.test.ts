@@ -5,7 +5,7 @@ import type { PrismaClient } from '@prisma/client';
 vi.mock('./prisma');
 
 import { prisma as prismaImport } from './prisma';
-import { requiresGmina, scopedGminaWhere, normalizeGminaName, createGmina } from './gmina';
+import { requiresGmina, scopedGminaWhere, normalizeGminaName, createGmina, resolveGminaId } from './gmina';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
@@ -55,6 +55,36 @@ describe('normalizeGminaName', () => {
   });
 });
 
+describe('resolveGminaId', () => {
+  beforeEach(() => {
+    mockReset(prisma);
+  });
+
+  it('returns the id when the given gminaId exists', async () => {
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+
+    const result = await resolveGminaId({ gminaId: 'g1' });
+
+    expect(result).toEqual({ id: 'g1' });
+  });
+
+  it('errors when the given gminaId does not exist', async () => {
+    prisma.gmina.findUnique.mockResolvedValue(null);
+
+    const result = await resolveGminaId({ gminaId: 'missing' });
+
+    expect(result).toEqual({ error: 'Wybrana gmina nie istnieje.' });
+  });
+
+  it('returns a clean error instead of throwing when looking up the gminaId fails', async () => {
+    prisma.gmina.findUnique.mockRejectedValue(new Error('connection lost'));
+
+    const result = await resolveGminaId({ gminaId: 'g1' });
+
+    expect(result).toEqual({ error: 'Nie udało się zweryfikować gminy.' });
+  });
+});
+
 describe('createGmina', () => {
   beforeEach(() => {
     mockReset(prisma);
@@ -96,6 +126,15 @@ describe('createGmina', () => {
 
     expect(result).toEqual({ error: 'Nazwa gminy jest wymagana.' });
     expect(prisma.gmina.findFirst).not.toHaveBeenCalled();
+    expect(prisma.gmina.create).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean error instead of throwing when the duplicate-check read itself fails', async () => {
+    prisma.gmina.findFirst.mockRejectedValue(new Error('connection lost'));
+
+    const result = await createGmina({ name: 'Warszawa' });
+
+    expect(result).toEqual({ error: 'Nie udało się utworzyć gminy.' });
     expect(prisma.gmina.create).not.toHaveBeenCalled();
   });
 

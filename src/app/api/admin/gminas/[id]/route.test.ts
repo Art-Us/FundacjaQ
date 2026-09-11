@@ -120,6 +120,17 @@ describe('PATCH /api/admin/gminas/[id]', () => {
     expect(prisma.gmina.update).not.toHaveBeenCalled();
   });
 
+  it('returns a clean 400 (not an unhandled crash) when the duplicate-check read itself fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(baseGmina({ name: 'Warszawa' }) as any);
+    prisma.gmina.findFirst.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ name: 'Kraków' });
+
+    expect(res.status).toBe(400);
+    expect(prisma.gmina.update).not.toHaveBeenCalled();
+  });
+
   it('returns 409 (not a generic 400) when a concurrent rename races past the pre-check and hits the unique constraint', async () => {
     const { Prisma } = await import('@prisma/client');
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
@@ -170,13 +181,29 @@ describe('DELETE /api/admin/gminas/[id]', () => {
     expect(prisma.gmina.delete).toHaveBeenCalledWith({ where: { id: 'target-1' } });
   });
 
-  it('returns 409 when the gmina has related records blocking deletion', async () => {
+  it('returns 409 when the gmina has related records blocking deletion (P2003)', async () => {
+    const { Prisma } = await import('@prisma/client');
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
-    prisma.gmina.delete.mockRejectedValue(new Error('Foreign key constraint failed'));
+    prisma.gmina.delete.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: '5.19.1',
+      })
+    );
 
     const res = await callDelete();
 
     expect(res.status).toBe(409);
+  });
+
+  it('returns 500 (not a false "has dependents" 409) when delete fails for an unrelated reason', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
+    prisma.gmina.delete.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callDelete();
+
+    expect(res.status).toBe(500);
   });
 });

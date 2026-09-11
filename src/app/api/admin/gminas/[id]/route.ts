@@ -40,7 +40,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: 'Nazwa gminy jest wymagana.' }, { status: 400 });
     }
     if (normalized.toLowerCase() !== target.name.toLowerCase()) {
-      const existing = await prisma.gmina.findFirst({ where: { name: { equals: normalized, mode: 'insensitive' } } });
+      let existing;
+      try {
+        existing = await prisma.gmina.findFirst({ where: { name: { equals: normalized, mode: 'insensitive' } } });
+      } catch {
+        return NextResponse.json(
+          { error: 'Nie udało się zaktualizować gminy. Sprawdź podane dane.' },
+          { status: 400 }
+        );
+      }
       if (existing && existing.id !== target.id) {
         return NextResponse.json({ error: 'Gmina o tej nazwie już istnieje.' }, { status: 409 });
       }
@@ -82,16 +90,20 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
 
   try {
     await prisma.gmina.delete({ where: { id: target.id } });
-  } catch {
+  } catch (err) {
     // User/Resource/Alert/InviteToken.gminaId are ON DELETE RESTRICT, so a
-    // gmina with any dependents can't be hard-deleted.
-    return NextResponse.json(
-      {
-        error:
-          'Nie można usunąć tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty lub zaproszenia.',
-      },
-      { status: 409 }
-    );
+    // gmina with any dependents fails with P2003 — that's the only *expected*
+    // failure here; anything else is a real server error, not "has dependents".
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return NextResponse.json(
+        {
+          error:
+            'Nie można usunąć tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty lub zaproszenia.',
+        },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ error: 'Nie udało się usunąć gminy.' }, { status: 500 });
   }
 
   return NextResponse.json({ message: 'Gmina została usunięta.' });

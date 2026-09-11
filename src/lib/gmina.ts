@@ -38,7 +38,12 @@ type ResolveGminaResult = { id: string } | { error: string };
  */
 export async function resolveGminaId({ gminaId, newGminaName }: ResolveGminaInput): Promise<ResolveGminaResult> {
   if (gminaId) {
-    const gmina = await prisma.gmina.findUnique({ where: { id: gminaId }, select: { id: true } });
+    let gmina;
+    try {
+      gmina = await prisma.gmina.findUnique({ where: { id: gminaId }, select: { id: true } });
+    } catch {
+      return { error: 'Nie udało się zweryfikować gminy.' };
+    }
     if (!gmina) {
       return { error: 'Wybrana gmina nie istnieje.' };
     }
@@ -95,7 +100,12 @@ export async function createGmina(input: CreateGminaInput): Promise<CreateGminaR
     return { error: 'Nazwa gminy jest wymagana.' };
   }
 
-  const existing = await findGminaByNormalizedName(name);
+  let existing;
+  try {
+    existing = await findGminaByNormalizedName(name);
+  } catch {
+    return { error: 'Nie udało się utworzyć gminy.' };
+  }
   if (existing) {
     return { gmina: existing, created: false };
   }
