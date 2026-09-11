@@ -139,4 +139,14 @@ describe('POST /api/auth/reset-password', () => {
     expect(res.status).toBe(429);
     expect(prisma.passwordResetToken.findUnique).not.toHaveBeenCalled();
   });
+
+  it('returns a clean 500 (not an unhandled crash) when the password-change transaction fails', async () => {
+    prisma.passwordResetToken.findUnique.mockResolvedValue(baseToken() as any);
+    prisma.$transaction.mockRejectedValue(new Error('connection lost'));
+
+    const res = await POST(makeRequest({ token: RAW_TOKEN, password: STRONG_PASSWORD }));
+
+    expect(res.status).toBe(500);
+    expect(resetAttempts).not.toHaveBeenCalled();
+  });
 });

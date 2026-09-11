@@ -33,10 +33,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { isActive: false, lastDeactivatedAt: new Date(), deactivationReason: parsed.data.reason ?? null },
-  });
+  try {
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { isActive: false, lastDeactivatedAt: new Date(), deactivationReason: parsed.data.reason ?? null },
+    });
+  } catch (err) {
+    console.error('[users] failed to deactivate user:', err);
+    return NextResponse.json({ error: 'Nie udało się dezaktywować konta.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Konto zostało dezaktywowane.' });
 }

@@ -28,10 +28,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ message: 'Zaproszenie jest już unieważnione.' });
   }
 
-  await prisma.inviteToken.update({
-    where: { id: invite.id },
-    data: { revokedAt: new Date() },
-  });
+  try {
+    await prisma.inviteToken.update({
+      where: { id: invite.id },
+      data: { revokedAt: new Date() },
+    });
+  } catch (err) {
+    console.error('[invites] failed to revoke invite:', err);
+    return NextResponse.json({ error: 'Nie udało się unieważnić zaproszenia.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Zaproszenie zostało unieważnione.' });
 }

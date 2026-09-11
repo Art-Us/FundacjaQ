@@ -150,6 +150,18 @@ describe('POST /api/admin/invites', () => {
     );
   });
 
+  it('returns a clean 500 (not an unhandled crash) when creating the invite token fails', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.inviteToken.create.mockRejectedValue(new Error('connection lost'));
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+
+    expect(res.status).toBe(500);
+    expect(sendInviteEmail).not.toHaveBeenCalled();
+  });
+
   it('never stores the raw token — the stored tokenHash differs from the token in the emailed URL', async () => {
     mockSession('ADMIN', 'admin-1');
     prisma.user.findUnique.mockResolvedValue(null);

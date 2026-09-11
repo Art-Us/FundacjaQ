@@ -155,15 +155,31 @@ describe('acceptInvite', () => {
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
-  it('surfaces a generic error (not a raw DB error) if the transaction throws a unique-constraint-like error', async () => {
+  it('reports "email already registered" specifically for a real unique-constraint race (P2002)', async () => {
+    const { Prisma } = await import('@prisma/client');
     prisma.inviteToken.findUnique.mockResolvedValue(baseInvite() as any);
     prisma.inviteToken.updateMany.mockResolvedValue({ count: 1 } as any);
-    prisma.user.create.mockRejectedValue(new Error('Unique constraint failed on the fields: (`email`)'));
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
+        code: 'P2002',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(result).toEqual({ ok: false, error: 'Konto dla tego adresu email już istnieje.' });
+  });
+
+  it('surfaces a generic error (not "email already registered") for an unrelated DB failure', async () => {
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite() as any);
+    prisma.inviteToken.updateMany.mockResolvedValue({ count: 1 } as any);
+    prisma.user.create.mockRejectedValue(new Error('connection lost'));
 
     const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
 
     expect(result.ok).toBe(false);
-    expect(result.error).not.toContain('Unique constraint');
+    expect(result.error).not.toContain('już istnieje');
   });
 
   it('makes no database calls when rate-limited', async () => {

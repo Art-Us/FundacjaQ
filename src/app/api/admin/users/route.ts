@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
@@ -80,7 +81,14 @@ export async function POST(req: NextRequest) {
       select: adminUserSelect,
     });
     return NextResponse.json({ user }, { status: 201 });
-  } catch {
+  } catch (err) {
+    // The `existing` email check above already covers the common case — this
+    // only fires on a genuine race (two concurrent creates for the same
+    // email), a real P2002 unique-constraint hit. Anything else is a real
+    // server error, not "this email is already registered".
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return NextResponse.json({ error: 'Konto dla tego adresu email już istnieje.' }, { status: 400 });
+    }
     return NextResponse.json(
       { error: 'Nie udało się utworzyć użytkownika. Sprawdź podane dane (np. gminę).' },
       { status: 400 }

@@ -23,10 +23,15 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ message: 'Konto jest już aktywne.' });
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { isActive: true, lastActivatedAt: new Date() },
-  });
+  try {
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { isActive: true, lastActivatedAt: new Date() },
+    });
+  } catch (err) {
+    console.error('[users] failed to activate user:', err);
+    return NextResponse.json({ error: 'Nie udało się aktywować konta.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Konto zostało aktywowane.' });
 }

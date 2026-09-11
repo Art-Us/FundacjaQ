@@ -152,4 +152,14 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     expect(res.status).toBe(200);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
+
+  it('returns a clean 500 (not an unhandled crash) when the update fails', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'other-gmina' }) as any);
+    prisma.user.update.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callRoute();
+
+    expect(res.status).toBe(500);
+  });
 });

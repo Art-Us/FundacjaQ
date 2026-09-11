@@ -113,6 +113,42 @@ describe('POST /api/admin/users', () => {
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
+  it('reports "email already registered" specifically for a real unique-constraint race (P2002)', async () => {
+    const { Prisma } = await import('@prisma/client');
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const res = await POST(
+      makeRequest({ email: 'race@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Konto dla tego adresu email już istnieje.');
+  });
+
+  it('surfaces a generic error (not "email already registered") for an unrelated DB failure', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockRejectedValue(new Error('connection lost'));
+
+    const res = await POST(
+      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).not.toContain('już istnieje');
+  });
+
   it('rejects a password found in a breach database', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);

@@ -16,10 +16,18 @@ export interface LockoutStatus {
 /**
  * Redis is the fast path; Postgres `User.lockedUntil` is the durable source
  * of truth consulted whenever the Redis key is missing (e.g. after a Redis
- * restart) so a lock can never be silently dropped.
+ * restart) so a lock can never be silently dropped. A Redis *error* (not just
+ * a missing key) is treated the same way — fails open to the Postgres check
+ * rather than crashing login entirely on a transient Redis blip.
  */
 export async function checkLockout(email: string): Promise<LockoutStatus> {
-  const redisTtl = await redis.get(lockKey(email));
+  let redisTtl: string | null = null;
+  try {
+    redisTtl = await redis.get(lockKey(email));
+  } catch (err) {
+    console.error('[lockout] redis.get failed, falling back to Postgres:', err);
+  }
+
   if (redisTtl) {
     const until = new Date(Number(redisTtl));
     if (until.getTime() > Date.now()) return { locked: true, until };
@@ -31,9 +39,14 @@ export async function checkLockout(email: string): Promise<LockoutStatus> {
   });
 
   if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-    // Re-populate Redis so subsequent checks stay on the fast path.
-    const ttlSeconds = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000);
-    await redis.set(lockKey(email), user.lockedUntil.getTime(), 'EX', ttlSeconds);
+    // Re-populate Redis so subsequent checks stay on the fast path — best
+    // effort only, the lock status above is already determined either way.
+    try {
+      const ttlSeconds = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000);
+      await redis.set(lockKey(email), user.lockedUntil.getTime(), 'EX', ttlSeconds);
+    } catch (err) {
+      console.error('[lockout] failed to repopulate redis cache (non-fatal):', err);
+    }
     return { locked: true, until: user.lockedUntil };
   }
 
@@ -49,13 +62,26 @@ export async function recordFailedAttempt(email: string): Promise<void> {
 
   if (!user || user.failedAttempts < MAX_FAILED_ATTEMPTS) return;
 
-  const until = new Date(Date.now() + LOCKOUT_SECONDS * 1000);
-  await prisma.user.update({ where: { email }, data: { lockedUntil: until } });
-  await redis.set(lockKey(email), until.getTime(), 'EX', LOCKOUT_SECONDS);
+  // Best-effort escalation: this is bookkeeping on the "record a failure"
+  // path — it must never throw and mask the caller's own intended response
+  // (e.g. the "invalid email or password" error in auth.ts).
+  try {
+    const until = new Date(Date.now() + LOCKOUT_SECONDS * 1000);
+    await prisma.user.update({ where: { email }, data: { lockedUntil: until } });
+    await redis.set(lockKey(email), until.getTime(), 'EX', LOCKOUT_SECONDS);
+  } catch (err) {
+    console.error('[lockout] failed to escalate to a full lockout (non-fatal):', err);
+  }
 }
 
 export async function resetAttempts(email: string): Promise<void> {
-  await redis.del(lockKey(email));
+  // Best-effort cleanup on a successful login — must never throw and block
+  // an already-authenticated user from completing sign-in.
+  try {
+    await redis.del(lockKey(email));
+  } catch (err) {
+    console.error('[lockout] failed to clear redis lock key (non-fatal):', err);
+  }
   await prisma.user.update({
     where: { email },
     data: { failedAttempts: 0, lockedUntil: null },

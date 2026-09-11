@@ -187,6 +187,36 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  it('reports "email already registered" specifically for a real unique-constraint race (P2002)', async () => {
+    const { Prisma } = await import('@prisma/client');
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValueOnce(baseUser() as any).mockResolvedValueOnce(null);
+    prisma.user.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const res = await callPatch({ email: 'race@example.com' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Konto dla tego adresu email już istnieje.');
+  });
+
+  it('surfaces a generic error (not "email already registered") for an unrelated DB failure', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+    prisma.user.update.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ name: 'New Name' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).not.toContain('już istnieje');
+  });
+
   it('rejects a role outside the enum before touching the database', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);
@@ -292,13 +322,29 @@ describe('DELETE /api/admin/users/[id]', () => {
     expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'target-1' } });
   });
 
-  it('returns 409 when the user has related records blocking deletion', async () => {
+  it('returns 409 when the user has related records blocking deletion (P2003)', async () => {
+    const { Prisma } = await import('@prisma/client');
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);
-    prisma.user.delete.mockRejectedValue(new Error('Foreign key constraint failed'));
+    prisma.user.delete.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: '5.19.1',
+      })
+    );
 
     const res = await callDelete();
 
     expect(res.status).toBe(409);
+  });
+
+  it('returns 500 (not a false "has related records" 409) when delete fails for an unrelated reason', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+    prisma.user.delete.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callDelete();
+
+    expect(res.status).toBe(500);
   });
 });

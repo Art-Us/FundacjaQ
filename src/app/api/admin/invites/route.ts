@@ -95,16 +95,21 @@ export async function POST(req: NextRequest) {
   }
 
   const rawToken = generateToken();
-  await prisma.inviteToken.create({
-    data: {
-      email,
-      role,
-      gminaId: effectiveGminaId,
-      tokenHash: hashToken(rawToken),
-      createdById: user.id,
-      expiresAt: new Date(Date.now() + INVITE_TOKEN_TTL_MS),
-    },
-  });
+  try {
+    await prisma.inviteToken.create({
+      data: {
+        email,
+        role,
+        gminaId: effectiveGminaId,
+        tokenHash: hashToken(rawToken),
+        createdById: user.id,
+        expiresAt: new Date(Date.now() + INVITE_TOKEN_TTL_MS),
+      },
+    });
+  } catch (err) {
+    console.error('[invites] failed to create invite token:', err);
+    return NextResponse.json({ error: 'Nie udało się utworzyć zaproszenia.' }, { status: 500 });
+  }
 
   const inviteUrl = `${process.env.NEXTAUTH_URL}/invite/${rawToken}`;
   await sendInviteEmail(email, inviteUrl);
