@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
+import { requireAdminOrCoordinator, canManageUser, isLastActiveAdmin } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +26,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   if (!target.isActive) {
     return NextResponse.json({ message: 'Konto jest już nieaktywne.' });
+  }
+
+  if (await isLastActiveAdmin(target)) {
+    return NextResponse.json(
+      { error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' },
+      { status: 403 }
+    );
   }
 
   const parsed = deactivateSchema.safeParse(await req.json().catch(() => ({})));

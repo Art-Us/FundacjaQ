@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireAdmin, isLastActiveAdmin } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 
@@ -58,6 +58,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // callback) — self-deactivation would kill the admin's own session mid-request.
   if (target.id === admin.id && parsed.data.isActive === false) {
     return NextResponse.json({ error: 'Nie możesz dezaktywować własnego konta.' }, { status: 403 });
+  }
+
+  if (parsed.data.isActive === false && (await isLastActiveAdmin(target))) {
+    return NextResponse.json(
+      { error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' },
+      { status: 403 }
+    );
   }
 
   if (parsed.data.email && parsed.data.email !== target.email) {
@@ -136,6 +143,13 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   const target = await prisma.user.findUnique({ where: { id: params.id } });
   if (!target) {
     return NextResponse.json({ error: 'Użytkownik nie istnieje.' }, { status: 404 });
+  }
+
+  if (await isLastActiveAdmin(target)) {
+    return NextResponse.json(
+      { error: 'Nie można usunąć jedynego aktywnego administratora w systemie.' },
+      { status: 403 }
+    );
   }
 
   try {

@@ -78,6 +78,29 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     });
   });
 
+  it('blocks deactivating the only remaining active admin', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(1);
+
+    const res = await callRoute('admin-2');
+
+    expect(res.status).toBe(403);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows deactivating an admin when another active admin remains', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(2);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callRoute('admin-2');
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalled();
+  });
+
   it('stores the given reason and the deactivation timestamp', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);

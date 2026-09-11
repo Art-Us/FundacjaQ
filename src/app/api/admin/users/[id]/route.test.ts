@@ -164,6 +164,29 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  it('blocks deactivating the only remaining active admin (another admin acting on them)', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(1);
+
+    const res = await callPatch({ isActive: false }, 'admin-2');
+
+    expect(res.status).toBe(403);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows deactivating an admin when another active admin remains', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(2);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ isActive: false }, 'admin-2');
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalled();
+  });
+
   it('lets an ADMIN edit their own non-activation fields', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-1' }) as any);
@@ -309,6 +332,28 @@ describe('DELETE /api/admin/users/[id]', () => {
     const res = await callDelete('missing');
 
     expect(res.status).toBe(404);
+  });
+
+  it('blocks deleting the only remaining active admin', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(1);
+
+    const res = await callDelete('admin-2');
+
+    expect(res.status).toBe(403);
+    expect(prisma.user.delete).not.toHaveBeenCalled();
+  });
+
+  it('allows deleting an admin when another active admin remains', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true }) as any);
+    prisma.user.count.mockResolvedValue(2);
+    prisma.user.delete.mockResolvedValue({} as any);
+
+    const res = await callDelete('admin-2');
+
+    expect(res.status).toBe(200);
   });
 
   it('lets ADMIN delete another user', async () => {

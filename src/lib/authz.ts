@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
+import { prisma } from './prisma';
 
 export interface AuthorizedUser {
   id: string;
@@ -42,4 +43,23 @@ export function canManageUser(
   if (actor.id === target.id) return false;
   if (actor.role === 'ADMIN') return true;
   return target.role === 'VOLUNTEER' && target.gminaId !== null && target.gminaId === actor.gminaId;
+}
+
+/**
+ * Whether deleting or deactivating `target` would leave the system with zero
+ * active ADMIN accounts — the only way anyone could get back in at that point
+ * is a direct database/seed-script fix, so this must never be allowed,
+ * regardless of who requests it or whether they're acting on themselves or
+ * someone else. Only meaningful for a target that IS currently an active
+ * admin; anyone else can never affect the active-admin count by definition.
+ *
+ * This is a plain count-then-act check, not a transaction — two admins
+ * deactivating/deleting each other in the exact same instant could in theory
+ * still both pass it. That residual race is accepted as effectively
+ * impossible to hit in practice, not engineered around with locking.
+ */
+export async function isLastActiveAdmin(target: { role: string; isActive: boolean }): Promise<boolean> {
+  if (target.role !== 'ADMIN' || !target.isActive) return false;
+  const activeAdminCount = await prisma.user.count({ where: { role: 'ADMIN', isActive: true } });
+  return activeAdminCount <= 1;
 }
