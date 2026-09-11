@@ -6,6 +6,7 @@ import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
 import { scopedGminaWhere } from '@/lib/gmina';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
+import { RefreshOnMount } from '@/components/RefreshOnMount';
 import { CreateInviteForm } from './CreateInviteForm';
 import { RevokeInviteButton } from './RevokeInviteButton';
 
@@ -51,6 +52,7 @@ export default async function AdminInvitesPage() {
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-10">
+      <RefreshOnMount />
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-6">Zaproszenia</h1>
         <div className="grid gap-6 md:grid-cols-2 items-start">

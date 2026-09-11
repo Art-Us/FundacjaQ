@@ -114,7 +114,14 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: Create
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="invite-gmina">
               Gmina{gminaRequired && ' *'}
             </label>
-            <GminaSelect id="invite-gmina" gminas={gminas} value={gmina} onChange={setGmina} required={gminaRequired} />
+            <GminaSelect
+              id="invite-gmina"
+              gminas={gminas}
+              value={gmina}
+              onChange={setGmina}
+              required={gminaRequired}
+              newGminaMode="modal"
+            />
           </div>
         )}
         {blockedNoGmina && (

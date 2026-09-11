@@ -5,6 +5,7 @@ import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
 import { scopedGminaWhere } from '@/lib/gmina';
 import { adminUserSelect } from '@/lib/users';
+import { RefreshOnMount } from '@/components/RefreshOnMount';
 import { UsersDirectory } from './UsersDirectory';
 import type { UserListItem } from './types';
 
@@ -53,6 +54,7 @@ export default async function AdminUsersPage() {
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
+      <RefreshOnMount />
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Użytkownicy</h1>
         <p className="text-sm text-slate-500 mt-1">

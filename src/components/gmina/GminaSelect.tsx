@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { GminaFormModal } from './GminaFormModal';
 
 export interface GminaOption {
   id: string;
@@ -24,14 +25,45 @@ interface GminaSelectProps {
   onChange: (value: GminaSelectValue) => void;
   required?: boolean;
   disabled?: boolean;
+  /**
+   * 'inline' (default) shows a free-text input for the new gmina's name,
+   * submitted as newGminaName alongside the rest of the form.
+   * 'modal' opens the same create form used on the gmina management page —
+   * it creates the gmina immediately via POST /api/admin/gminas and selects
+   * the resulting id, so this select never needs to carry newGminaName.
+   */
+  newGminaMode?: 'inline' | 'modal';
 }
 
-export function GminaSelect({ id, gminas, value, onChange, required = false, disabled = false }: GminaSelectProps) {
+export function GminaSelect({
+  id,
+  gminas,
+  value,
+  onChange,
+  required = false,
+  disabled = false,
+  newGminaMode = 'inline',
+}: GminaSelectProps) {
   const [creatingNew, setCreatingNew] = useState(Boolean(value.newGminaName));
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createdGminas, setCreatedGminas] = useState<GminaOption[]>([]);
+
+  const options = useMemo(() => {
+    if (createdGminas.length === 0) return gminas;
+    const merged = [...gminas];
+    for (const g of createdGminas) {
+      if (!merged.some((m) => m.id === g.id)) merged.push(g);
+    }
+    return merged;
+  }, [gminas, createdGminas]);
 
   function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const selected = e.target.value;
     if (selected === NEW_GMINA_VALUE) {
+      if (newGminaMode === 'modal') {
+        setShowCreateModal(true);
+        return;
+      }
       setCreatingNew(true);
       onChange({ gminaId: null, newGminaName: '' });
       return;
@@ -52,7 +84,7 @@ export function GminaSelect({ id, gminas, value, onChange, required = false, dis
       >
         {!required && !creatingNew && <option value="">— Brak —</option>}
         {creatingNew && <option value="" disabled hidden />}
-        {gminas.map((g) => (
+        {options.map((g) => (
           <option key={g.id} value={g.id}>
             {g.name}
           </option>
@@ -60,7 +92,7 @@ export function GminaSelect({ id, gminas, value, onChange, required = false, dis
         <option value={NEW_GMINA_VALUE}>+ Nowa gmina…</option>
       </select>
 
-      {creatingNew && (
+      {creatingNew && newGminaMode === 'inline' && (
         <input
           type="text"
           autoFocus
@@ -71,6 +103,18 @@ export function GminaSelect({ id, gminas, value, onChange, required = false, dis
           disabled={disabled}
           maxLength={120}
           className={selectClasses}
+        />
+      )}
+
+      {showCreateModal && (
+        <GminaFormModal
+          mode="create"
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={(gmina) => {
+            setCreatedGminas((prev) => [...prev, { id: gmina.id, name: gmina.name }]);
+            onChange({ gminaId: gmina.id, newGminaName: null });
+            setShowCreateModal(false);
+          }}
         />
       )}
     </div>

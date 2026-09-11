@@ -137,7 +137,7 @@ describe('POST /api/admin/invites', () => {
   it('lets ADMIN create a new gmina by name when inviting', async () => {
     mockSession('ADMIN', 'admin-1');
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.gmina.findUnique.mockResolvedValue(null);
+    prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.create.mockResolvedValue({ id: 'new-gmina' } as any);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 

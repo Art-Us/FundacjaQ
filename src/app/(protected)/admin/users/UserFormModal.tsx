@@ -188,7 +188,14 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
               <label htmlFor="user-gmina" className={labelClasses}>
                 Gmina{gminaRequired && ' *'}
               </label>
-              <GminaSelect id="user-gmina" gminas={gminas} value={gmina} onChange={setGmina} required={gminaRequired} />
+              <GminaSelect
+              id="user-gmina"
+              gminas={gminas}
+              value={gmina}
+              onChange={setGmina}
+              required={gminaRequired}
+              newGminaMode="modal"
+            />
             </div>
           </div>
 

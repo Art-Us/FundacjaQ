@@ -200,7 +200,7 @@ describe('PATCH /api/admin/users/[id]', () => {
   it('creates a new gmina by name and assigns it when newGminaName is given', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);
-    prisma.gmina.findUnique.mockResolvedValue(null);
+    prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.create.mockResolvedValue({ id: 'new-gmina' } as any);
     prisma.user.update.mockResolvedValue({} as any);
 
