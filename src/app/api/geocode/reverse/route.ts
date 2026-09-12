@@ -1,28 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { consumeLimit, geocodeLimiter } from '@/lib/rateLimit';
+import { fetchNominatim, resolveLocation, type NominatimPlace } from '@/lib/geocode';
 
 export const runtime = 'nodejs';
-
-// Nominatim's usage policy requires a descriptive User-Agent identifying the
-// application (no generic browser UA) — NOMINATIM_CONTACT_EMAIL is optional,
-// set it to an organizational contact address if stricter compliance is needed.
-const NOMINATIM_USER_AGENT = `FundacjaQ-CrisisMap/1.0${
-  process.env.NOMINATIM_CONTACT_EMAIL ? ` (${process.env.NOMINATIM_CONTACT_EMAIL})` : ''
-}`;
-
-interface NominatimAddress {
-  road?: string;
-  pedestrian?: string;
-  footway?: string;
-  house_number?: string;
-  city?: string;
-  town?: string;
-  village?: string;
-  municipality?: string;
-  county?: string;
-  state?: string;
-}
 
 export async function GET(req: NextRequest) {
   // Gated the same as alert creation — this endpoint only feeds AlertForm's
@@ -50,26 +31,13 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('zoom', '18');
   url.searchParams.set('addressdetails', '1');
 
-  let data: { address?: NominatimAddress; display_name?: string };
+  let data: NominatimPlace;
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': NOMINATIM_USER_AGENT, 'Accept-Language': 'pl' },
-    });
-    if (!res.ok) throw new Error(`Nominatim responded with ${res.status}`);
-    data = await res.json();
+    data = (await fetchNominatim(url)) as NominatimPlace;
   } catch (err) {
     console.error('[geocode] reverse lookup failed:', err);
     return NextResponse.json({ error: 'Nie udało się rozpoznać lokalizacji.' }, { status: 502 });
   }
 
-  const address = data.address ?? {};
-  const road = address.road ?? address.pedestrian ?? address.footway ?? null;
-  const town = address.city ?? address.town ?? address.village ?? address.municipality ?? null;
-
-  return NextResponse.json({
-    location: road ? `${road}${address.house_number ? ` ${address.house_number}` : ''}` : null,
-    town,
-    county: address.county ?? null,
-    state: address.state ?? null,
-  });
+  return NextResponse.json(resolveLocation(data.address ?? {}));
 }

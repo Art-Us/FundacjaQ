@@ -27,13 +27,32 @@ enum AlertStatus {
   CANCELLED
 }
 
+// Zdarzenia codzienne (festyny, koncerty, zebrania) trzymamy w tej samej tabeli
+// Alert co komunikaty kryzysowe — format danych jest identyczny, różni je tylko
+// przeznaczenie. `kind` rozdziela oba widoki na mapie i chroni statystyki
+// kryzysowe (patrz lib/dashboard.ts) od liczenia wydarzeń jako alertów.
+enum AlertKind {
+  ALERT // Komunikat kryzysowy
+  EVENT // Zdarzenie codzienne
+}
+
 enum AlertCategory {
+  // Kategorie komunikatów kryzysowych (kind = ALERT)
   HYDROLOGICAL // Ostrzeżenie hydrologiczne
   ROAD // Komunikat drogowy
   HUMANITARIAN // Pomoc humanitarna
   FIRE // Zagrożenie pożarowe
   INFRASTRUCTURE // Awaria infrastruktury
   GENERAL // Informacja ogólna
+
+  // Kategorie zdarzeń codziennych (kind = EVENT)
+  FESTIVAL // Festyn / święto miasta
+  CONCERT // Koncert
+  SPORT // Wydarzenie sportowe
+  COMMUNITY // Spotkanie mieszkańców
+  FAIR // Targi / jarmark
+  CULTURE // Kultura / wystawa
+  OTHER_EVENT // Inne wydarzenie
 }
 
 enum ResourceStatus {
@@ -158,6 +177,7 @@ model Alert {
   id          String        @id @default(cuid())
   title       String
   description String
+  kind        AlertKind     @default(ALERT)
   severity    Severity      @default(MEDIUM)
   status      AlertStatus   @default(ACTIVE)
   category    AlertCategory @default(GENERAL)

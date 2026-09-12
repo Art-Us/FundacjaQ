@@ -28,12 +28,16 @@ export async function getDashboardData(role: Role, gminaId: string | null): Prom
   const isGminaScoped = role !== 'ADMIN';
   const gminaFilter = isGminaScoped && gminaId ? { gminaId } : {};
 
+  // Zdarzenia codzienne (kind = EVENT) dzielą tabelę z komunikatami
+  // kryzysowymi, ale panel kryzysowy musi liczyć i pokazywać wyłącznie alerty.
+  const crisisFilter = { ...gminaFilter, kind: 'ALERT' as const };
+
   const [activeAlerts, gminyCount, usersCount, alerts, resources] = await Promise.all([
-    prisma.alert.count({ where: { ...gminaFilter, status: { in: ['ACTIVE', 'IN_PROGRESS'] } } }),
+    prisma.alert.count({ where: { ...crisisFilter, status: { in: ['ACTIVE', 'IN_PROGRESS'] } } }),
     prisma.gmina.count(),
     prisma.user.count(isGminaScoped && gminaId ? { where: { gminaId } } : undefined),
     prisma.alert.findMany({
-      where: gminaFilter,
+      where: crisisFilter,
       include: alertInclude,
       orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
       take: role === 'ADMIN' ? 10 : 8,

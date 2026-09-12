@@ -2,19 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
+import type { AlertKindValue } from '@/lib/alertLabels';
 
 export const runtime = 'nodejs';
 
 const SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 const ALERT_STATUSES = ['ACTIVE', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'] as const;
-const CATEGORIES = ['HYDROLOGICAL', 'ROAD', 'HUMANITARIAN', 'FIRE', 'INFRASTRUCTURE', 'GENERAL'] as const;
+// `as const` jest tu istotne: zachowuje literały, więc z.enum() daje union
+// zgodny z enumem AlertCategory Prismy (bez tego byłby zwykły `string`).
+const ALL_CATEGORIES = [...ALERT_CATEGORIES, ...EVENT_CATEGORIES] as const;
 
+// `kind` celowo nie jest edytowalny: alert i zdarzenie codzienne mają rozłączne
+// zestawy kategorii, więc zmiana rodzaju w miejscu zostawiłaby wpis z kategorią
+// z innego zestawu.
 const updateAlertSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().min(1).max(2000).optional(),
   severity: z.enum(SEVERITIES).optional(),
   status: z.enum(ALERT_STATUSES).optional(),
-  category: z.enum(CATEGORIES).optional(),
+  category: z.enum(ALL_CATEGORIES).optional(),
   location: z.string().max(200).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
@@ -44,6 +51,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   if (Object.keys(parsed.data).length === 0) {
     return NextResponse.json({ error: 'Brak zmian do zapisania.' }, { status: 400 });
+  }
+
+  if (parsed.data.category && !isCategoryValidForKind(parsed.data.category, alert.kind as AlertKindValue)) {
+    return NextResponse.json(
+      { error: 'Wybrana kategoria nie należy do tego rodzaju wpisu.' },
+      { status: 400 }
+    );
   }
 
   await prisma.alert.update({ where: { id: alert.id }, data: parsed.data });

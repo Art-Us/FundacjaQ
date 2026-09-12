@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
-import { createPinIcon } from './pinIcon';
+import { createPinIcon, createEventPinIcon } from './pinIcon';
 import 'leaflet/dist/leaflet.css';
 import './leaflet-dark.css';
 
@@ -11,6 +11,9 @@ interface LocationPickerProps {
   value: { lat: number; lng: number } | null;
   onPick: (lat: number, lng: number) => void;
   color: string;
+  // Podgląd pinezki musi używać tego samego glifu co docelowy marker na mapie
+  // przeglądowej — trójkąt ostrzegawczy dla alertów, kalendarz dla zdarzeń.
+  icon?: 'alert' | 'event';
 }
 
 function ClickHandler({ onPick }: { onPick: (lat: number, lng: number) => void }) {
@@ -22,9 +25,9 @@ function ClickHandler({ onPick }: { onPick: (lat: number, lng: number) => void }
   return null;
 }
 
-// Leci do nowo wybranego punktu tylko gdy się zmienia (np. po kliknięciu
-// przycisku GPS) — kliknięcie bezpośrednio na mapie już jest widoczne w
-// bieżącym kadrze, więc dodatkowy flyTo tylko by przeszkadzał.
+// Wycentrowuje mapę na nowo wybranym punkcie — istotne głównie gdy `value`
+// zostaje ustawione programowo (np. istniejąca lokalizacja przy edycji alertu),
+// a nie tylko przez kliknięcie w widoczny już obszar mapy.
 function FlyToValue({ value }: { value: { lat: number; lng: number } | null }) {
   const map = useMap();
 
@@ -37,17 +40,8 @@ function FlyToValue({ value }: { value: { lat: number; lng: number } | null }) {
   return null;
 }
 
-export default function LocationPicker({ center, value, onPick, color }: LocationPickerProps) {
-  function handleGps() {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => onPick(pos.coords.latitude, pos.coords.longitude),
-      () => {
-        // Cichy fallback — brak zgody/lokalizacji nie blokuje ręcznego kliknięcia na mapie.
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }
+export default function LocationPicker({ center, value, onPick, color, icon = 'alert' }: LocationPickerProps) {
+  const markerIcon = icon === 'event' ? createEventPinIcon(color, 40) : createPinIcon(color, 40);
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-gray-300" style={{ height: 260 }}>
@@ -61,17 +55,10 @@ export default function LocationPicker({ center, value, onPick, color }: Locatio
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {value && <Marker position={[value.lat, value.lng]} icon={createPinIcon(color, 40)} />}
+        {value && <Marker position={[value.lat, value.lng]} icon={markerIcon} />}
         <ClickHandler onPick={onPick} />
         <FlyToValue value={value} />
       </MapContainer>
-      <button
-        type="button"
-        onClick={handleGps}
-        className="absolute top-2 right-2 z-[1000] rounded-lg border border-gray-300 bg-white/95 px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm backdrop-blur hover:bg-gray-50 transition-colors"
-      >
-        📍 Mój GPS
-      </button>
     </div>
   );
 }

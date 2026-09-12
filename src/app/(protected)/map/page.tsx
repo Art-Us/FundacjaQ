@@ -20,7 +20,7 @@ export default async function MapPage() {
   const [alerts, gminy] = await Promise.all([
     prisma.alert.findMany({
       where: gminaFilter,
-      include: { gmina: true },
+      include: { gmina: true, author: true },
       orderBy: { createdAt: 'desc' },
     }),
     // ADMIN musi móc wybrać gminę przy tworzeniu alertu; COORDINATOR i tak jest

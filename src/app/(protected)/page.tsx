@@ -4,13 +4,8 @@ import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
 import { formatDate } from '@/lib/utils';
 import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
+import { ROLE_LABELS } from '@/lib/roleLabels';
 import type { Role } from '@/types';
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Administrator',
-  COORDINATOR: 'Koordynator gminny',
-  VOLUNTEER: 'Wolontariusz',
-};
 
 const RESOURCE_STATUS_LABELS: Record<string, string> = {
   AVAILABLE: 'Dostępny',
@@ -33,7 +28,7 @@ export default async function HomePage() {
       <div className="mb-8">
         <p className="text-sm text-slate-500">Witaj, {session.user.name ?? session.user.email}</p>
         <h1 className="text-2xl font-bold text-slate-100">
-          Panel — {ROLE_LABELS[role] ?? role}
+          Panel — {ROLE_LABELS[role as Role] ?? role}
         </h1>
         <p className="text-sm text-slate-500 mt-1">Zakres danych: {data.scopeLabel}</p>
       </div>

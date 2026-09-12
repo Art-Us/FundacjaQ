@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import './globals.css';
-import { Navbar } from '@/components/layout/Navbar';
 import { SessionProvider } from '@/components/providers/SessionProvider';
 
 export const metadata: Metadata = {
@@ -22,10 +21,7 @@ export default async function RootLayout({
     <html lang="pl">
       <body className="bg-slate-950 text-slate-100 antialiased min-h-screen flex flex-col">
         <SessionProvider>
-          <Navbar />
-          <div className="flex-1">
-            {children}
-          </div>
+          <div className="flex-1 flex flex-col">{children}</div>
         </SessionProvider>
       </body>
     </html>
