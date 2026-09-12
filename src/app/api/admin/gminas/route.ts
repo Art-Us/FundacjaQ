@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { createGmina } from '@/lib/gmina';
+import { recordAudit, requestMeta, snapshotGmina } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
@@ -40,6 +41,16 @@ export async function POST(req: NextRequest) {
   if (!result.created) {
     return NextResponse.json({ error: 'Gmina o tej nazwie już istnieje.' }, { status: 409 });
   }
+
+  await recordAudit({
+    actor: admin,
+    action: 'GMINA_CREATE',
+    entityType: 'GMINA',
+    entityId: result.gmina.id,
+    gminaId: result.gmina.id,
+    after: snapshotGmina(result.gmina),
+    meta: requestMeta(req),
+  });
 
   return NextResponse.json({ gmina: result.gmina }, { status: 201 });
 }

@@ -34,6 +34,25 @@ enum ResourceStatus {
   DEPLETED
 }
 
+enum AuditAction {
+  USER_CREATE
+  USER_UPDATE
+  USER_DELETE
+  USER_ACTIVATE
+  USER_DEACTIVATE
+  GMINA_CREATE
+  GMINA_UPDATE
+  GMINA_DELETE
+  INVITE_CREATE
+  INVITE_REVOKE
+}
+
+enum AuditEntityType {
+  USER
+  GMINA
+  INVITE_TOKEN
+}
+
 model User {
   id                 String    @id @default(cuid())
   name               String?
@@ -146,6 +165,53 @@ model Resource {
   gmina       Gmina            @relation(fields: [gminaId], references: [id])
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+}
+
+// Append-only admin action trail: who did what, to which record, when, and
+// what it looked like before/after — with an optional revert. Deliberately
+// has NO foreign keys to User/Gmina/InviteToken: those rows can be deleted
+// (see the P2003 RESTRICT handling in the admin CRUD routes) and a RESTRICT
+// here would block deleting the very thing being audited, so actor/entity
+// identity is captured as a plain id plus a point-in-time snapshot instead
+// of a live relation. `before`/`after` are built from an explicit per-entity
+// allowlist (see lib/auditLog.ts) that never includes passwordHash or tokenHash.
+model AuditLog {
+  id  String @id @default(cuid())
+  // A real DB-assigned monotonic sequence, used ONLY to order same-entity
+  // rows for the cascading-revert chain (lib/auditLog.ts) — cuids are
+  // roughly time-ordered but not guaranteed to be, so two rows created in
+  // the same millisecond (or by different app instances) could otherwise
+  // sort in the wrong causal order and make revertAuditLog undo them out of
+  // sequence. Postgres serializes concurrent inserts' sequence assignment,
+  // so this is reliable in a way `createdAt`/`id` alone are not.
+  seq Int @default(autoincrement())
+  actorId    String
+  actorEmail String
+  actorName  String?
+  actorRole  Role
+  action     AuditAction
+  entityType AuditEntityType
+  entityId   String
+  gminaId    String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime        @default(now())
+
+  // Set on THIS row once someone reverts the action it records.
+  revertedAt   DateTime?
+  revertedById String?
+
+  // Set on the row created BY a revert, pointing back at what it reverted.
+  isRevert  Boolean    @default(false)
+  revertOfId String?
+  revertOf   AuditLog?  @relation("AuditRevertChain", fields: [revertOfId], references: [id])
+  revertedBy AuditLog[] @relation("AuditRevertChain")
+
+  @@index([entityType, entityId, seq])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }
 
 model Alert {

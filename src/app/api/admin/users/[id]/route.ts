@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, isLastActiveAdmin } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
+import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
@@ -88,6 +89,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     effectiveGminaId = resolved.id;
     data.gminaId = resolved.id;
+    await auditInlineGminaCreation(admin, resolved, requestMeta(req));
   }
 
   // Every non-ADMIN must belong to a gmina — enforced at creation time via
@@ -114,6 +116,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       data,
       select: adminUserSelect,
     });
+    await recordAudit({
+      actor: admin,
+      action: 'USER_UPDATE',
+      entityType: 'USER',
+      entityId: user.id,
+      gminaId: user.gminaId,
+      before: snapshotUser(target),
+      after: snapshotUser(user),
+      meta: requestMeta(req),
+    });
     return NextResponse.json({ user });
   } catch (err) {
     // The email-collision check above already covers the common case — this
@@ -130,7 +142,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   const admin = await requireAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
@@ -154,6 +166,15 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
 
   try {
     await prisma.user.delete({ where: { id: target.id } });
+    await recordAudit({
+      actor: admin,
+      action: 'USER_DELETE',
+      entityType: 'USER',
+      entityId: target.id,
+      gminaId: target.gminaId,
+      before: snapshotUser(target),
+      meta: requestMeta(req),
+    });
   } catch (err) {
     // InviteToken.createdById and PasswordResetToken.userId are ON DELETE
     // RESTRICT, so a user with either kind of history fails with P2003 —

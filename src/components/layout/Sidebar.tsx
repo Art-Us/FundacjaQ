@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { Home, UserPlus, Users, MapPin, LogOut, ChevronRight } from 'lucide-react';
+import { Home, UserPlus, Users, MapPin, History, LogOut, ChevronRight } from 'lucide-react';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
@@ -102,6 +102,17 @@ export function Sidebar({ isOpen, onCloseMobile, name, role, canManageInvites }:
                         <MapPin className="h-4 w-4" />
                       </div>
                       <span>Gminy</span>
+                    </div>
+                    <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </Link>
+                )}
+                {role === 'ADMIN' && (
+                  <Link href="/admin/logs" onClick={onCloseMobile} className={linkClasses(pathname === '/admin/logs')}>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition">
+                        <History className="h-4 w-4" />
+                      </div>
+                      <span>Dziennik zdarzeń</span>
                     </div>
                     <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </Link>

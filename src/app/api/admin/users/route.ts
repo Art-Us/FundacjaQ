@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
+import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
     effectiveGminaId = resolved.id;
+    await auditInlineGminaCreation(admin, resolved, requestMeta(req));
   }
 
   if (await isPasswordPwned(password)) {
@@ -79,6 +81,15 @@ export async function POST(req: NextRequest) {
     const user = await prisma.user.create({
       data: { email, passwordHash, role, gminaId: effectiveGminaId, name, organization, phone, isActive: false },
       select: adminUserSelect,
+    });
+    await recordAudit({
+      actor: admin,
+      action: 'USER_CREATE',
+      entityType: 'USER',
+      entityId: user.id,
+      gminaId: user.gminaId,
+      after: snapshotUser(user),
+      meta: requestMeta(req),
     });
     return NextResponse.json({ user }, { status: 201 });
   } catch (err) {

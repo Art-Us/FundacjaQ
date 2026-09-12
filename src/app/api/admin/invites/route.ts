@@ -6,6 +6,7 @@ import { sendInviteEmail, isEmailConfigured } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
+import { recordAudit, requestMeta, snapshotInvite, auditInlineGminaCreation } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
@@ -64,6 +65,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Nie masz uprawnień do przypisania tej roli.' }, { status: 403 });
   }
 
+  // The "+ Nowa gmina" inline flow creates a real Gmina row right here,
+  // which would otherwise be invisible to the audit log.
+  async function resolveAndAuditGmina(): Promise<{ id: string } | { error: string }> {
+    const resolved = await resolveGminaId({ gminaId, newGminaName });
+    if ('error' in resolved) return resolved;
+    await auditInlineGminaCreation(user!, resolved, requestMeta(req));
+    return { id: resolved.id };
+  }
+
   // A coordinator can never pick or create a gmina — the invite always goes
   // to their own, regardless of what the request body claims.
   let effectiveGminaId: string | undefined;
@@ -75,14 +85,8 @@ export async function POST(req: NextRequest) {
       );
     }
     effectiveGminaId = user.gminaId;
-  } else if (requiresGmina(role)) {
-    const resolved = await resolveGminaId({ gminaId, newGminaName });
-    if ('error' in resolved) {
-      return NextResponse.json({ error: resolved.error }, { status: 400 });
-    }
-    effectiveGminaId = resolved.id;
-  } else if (gminaId || newGminaName) {
-    const resolved = await resolveGminaId({ gminaId, newGminaName });
+  } else if (requiresGmina(role) || gminaId || newGminaName) {
+    const resolved = await resolveAndAuditGmina();
     if ('error' in resolved) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
@@ -95,8 +99,9 @@ export async function POST(req: NextRequest) {
   }
 
   const rawToken = generateToken();
+  let invite;
   try {
-    await prisma.inviteToken.create({
+    invite = await prisma.inviteToken.create({
       data: {
         email,
         role,
@@ -110,6 +115,16 @@ export async function POST(req: NextRequest) {
     console.error('[invites] failed to create invite token:', err);
     return NextResponse.json({ error: 'Nie udało się utworzyć zaproszenia.' }, { status: 500 });
   }
+
+  await recordAudit({
+    actor: user,
+    action: 'INVITE_CREATE',
+    entityType: 'INVITE_TOKEN',
+    entityId: invite.id,
+    gminaId: invite.gminaId,
+    after: snapshotInvite(invite),
+    meta: requestMeta(req),
+  });
 
   const inviteUrl = `${process.env.NEXTAUTH_URL}/invite/${rawToken}`;
   await sendInviteEmail(email, inviteUrl);

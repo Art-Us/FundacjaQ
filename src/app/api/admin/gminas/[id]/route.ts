@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { normalizeGminaName } from '@/lib/gmina';
+import { recordAudit, requestMeta, snapshotGmina } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
@@ -62,6 +63,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   try {
     const gmina = await prisma.gmina.update({ where: { id: target.id }, data });
+    await recordAudit({
+      actor: admin,
+      action: 'GMINA_UPDATE',
+      entityType: 'GMINA',
+      entityId: gmina.id,
+      gminaId: gmina.id,
+      before: snapshotGmina(target),
+      after: snapshotGmina(gmina),
+      meta: requestMeta(req),
+    });
     return NextResponse.json({ gmina });
   } catch (err) {
     // Two concurrent renames can both pass the pre-check above — the unique
@@ -77,7 +88,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   const admin = await requireAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
@@ -90,6 +101,15 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
 
   try {
     await prisma.gmina.delete({ where: { id: target.id } });
+    await recordAudit({
+      actor: admin,
+      action: 'GMINA_DELETE',
+      entityType: 'GMINA',
+      entityId: target.id,
+      gminaId: target.id,
+      before: snapshotGmina(target),
+      meta: requestMeta(req),
+    });
   } catch (err) {
     // User/Resource/Alert/InviteToken.gminaId are ON DELETE RESTRICT, so a
     // gmina with any dependents fails with P2003 — that's the only *expected*

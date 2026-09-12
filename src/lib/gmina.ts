@@ -1,4 +1,4 @@
-import { Prisma, type Role } from '@prisma/client';
+import { Prisma, type Gmina, type Role } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 /** ADMIN accounts are site-wide (see prisma/seed.ts), everyone else must belong to a gmina. */
@@ -29,7 +29,10 @@ interface ResolveGminaInput {
   newGminaName?: string;
 }
 
-type ResolveGminaResult = { id: string } | { error: string };
+// `created`/`gmina` let callers audit-log a brand-new gmina created inline
+// via `newGminaName` (from the users/invites "+ Nowa gmina" flow) — the only
+// case that actually creates a row here; picking an existing gminaId never does.
+type ResolveGminaResult = { id: string; created: boolean; gmina: Gmina | null } | { error: string };
 
 /**
  * Resolves an incoming gminaId/newGminaName pair to a concrete Gmina id,
@@ -47,7 +50,7 @@ export async function resolveGminaId({ gminaId, newGminaName }: ResolveGminaInpu
     if (!gmina) {
       return { error: 'Wybrana gmina nie istnieje.' };
     }
-    return { id: gmina.id };
+    return { id: gmina.id, created: false, gmina: null };
   }
 
   if (newGminaName) {
@@ -55,7 +58,7 @@ export async function resolveGminaId({ gminaId, newGminaName }: ResolveGminaInpu
     if ('error' in resolved) {
       return { error: resolved.error };
     }
-    return { id: resolved.gmina.id };
+    return { id: resolved.gmina.id, created: resolved.created, gmina: resolved.gmina };
   }
 
   return { error: 'Gmina jest wymagana.' };
@@ -74,10 +77,7 @@ export interface CreateGminaInput {
   longitude?: number | null;
 }
 
-type CreateGminaResult =
-  | { gmina: { id: string; name: string }; created: true }
-  | { gmina: { id: string; name: string }; created: false }
-  | { error: string };
+type CreateGminaResult = { gmina: Gmina; created: boolean } | { error: string };
 
 /**
  * Finds an existing gmina whose name matches `name` regardless of case or

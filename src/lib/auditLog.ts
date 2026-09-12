@@ -1,0 +1,617 @@
+import { AuditAction, AuditEntityType, Prisma, type Gmina, type InviteToken, type User } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
+import { isLastActiveAdmin } from '@/lib/authz';
+import { requiresGmina } from '@/lib/gmina';
+import { parseClientIp } from '@/lib/clientIp';
+
+/** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
+export function requestMeta(req: Request): RequestMeta {
+  return {
+    ipAddress: parseClientIp(req.headers.get('x-forwarded-for')),
+    userAgent: req.headers.get('user-agent'),
+  };
+}
+
+export interface AuditActor {
+  id: string;
+  // Optional/nullable because AuthorizedUser (lib/authz.ts) declares these as
+  // such for backward compatibility with existing mocks — recordAudit falls
+  // back to a placeholder so the (NOT NULL) actorEmail column always gets a value.
+  email?: string | null;
+  name?: string | null;
+  role: string;
+}
+
+export interface RequestMeta {
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+interface RecordAuditInput {
+  actor: AuditActor;
+  action: AuditAction;
+  entityType: AuditEntityType;
+  entityId: string;
+  gminaId: string | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  meta?: RequestMeta;
+  isRevert?: boolean;
+  revertOfId?: string;
+}
+
+/**
+ * Writes one append-only audit row. Never throws — the mutation this records
+ * has already succeeded in the database by the time this runs, so a logging
+ * failure must not turn a successful admin action into a 500. Callers should
+ * still `await` it (not fire-and-forget) so ordering with the HTTP response
+ * stays predictable in tests and logs.
+ */
+export async function recordAudit(input: RecordAuditInput): Promise<void> {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        actorId: input.actor.id,
+        actorEmail: input.actor.email ?? 'nieznany@system',
+        actorName: input.actor.name ?? null,
+        actorRole: input.actor.role as never,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        gminaId: input.gminaId,
+        before: input.before === undefined ? Prisma.JsonNull : (input.before as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
+        after: input.after === undefined ? Prisma.JsonNull : (input.after as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
+        ipAddress: input.meta?.ipAddress ?? null,
+        userAgent: input.meta?.userAgent ?? null,
+        isRevert: input.isRevert ?? false,
+        revertOfId: input.revertOfId,
+      },
+    });
+  } catch (err) {
+    console.error('[auditLog] failed to record audit entry:', err);
+  }
+}
+
+// --- Snapshot allowlists -----------------------------------------------
+// Each of these is the single place deciding what an audit row is allowed to
+// remember about an entity. passwordHash and tokenHash must NEVER appear
+// here — see the AuditLog model comment in schema.prisma.
+
+// updatedAt is deliberately NOT captured here (or read anywhere in
+// revertUser/revertGmina below) — it used to back the optimistic-concurrency
+// check, but that's keyed on the actual admin-managed fields instead now
+// (see the comment in revertUser: updatedAt is bumped by unrelated writes
+// like login-lockout bookkeeping, making it the wrong token to key off).
+// Keeping it in the snapshot would only add a meaningless "updatedAt
+// changed" row to the diff table in the logs UI on literally every entry.
+type UserSnapshotSource = Pick<
+  User,
+  | 'id'
+  | 'name'
+  | 'email'
+  | 'role'
+  | 'organization'
+  | 'phone'
+  | 'gminaId'
+  | 'isActive'
+  | 'lastActivatedAt'
+  | 'lastDeactivatedAt'
+  | 'deactivationReason'
+>;
+
+export function snapshotUser(user: UserSnapshotSource): Record<string, unknown> {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    organization: user.organization,
+    phone: user.phone,
+    gminaId: user.gminaId,
+    isActive: user.isActive,
+    lastActivatedAt: user.lastActivatedAt,
+    lastDeactivatedAt: user.lastDeactivatedAt,
+    deactivationReason: user.deactivationReason,
+  };
+}
+
+type GminaSnapshotSource = Pick<Gmina, 'id' | 'name' | 'powiat' | 'voivodeship' | 'latitude' | 'longitude'>;
+
+export function snapshotGmina(gmina: GminaSnapshotSource): Record<string, unknown> {
+  return {
+    id: gmina.id,
+    name: gmina.name,
+    powiat: gmina.powiat,
+    voivodeship: gmina.voivodeship,
+    latitude: gmina.latitude,
+    longitude: gmina.longitude,
+  };
+}
+
+export function snapshotInvite(invite: InviteToken): Record<string, unknown> {
+  return {
+    id: invite.id,
+    email: invite.email,
+    role: invite.role,
+    gminaId: invite.gminaId,
+    createdById: invite.createdById,
+    expiresAt: invite.expiresAt,
+    usedAt: invite.usedAt,
+    revokedAt: invite.revokedAt,
+  };
+}
+
+/**
+ * Logs GMINA_CREATE when resolveGminaId() (lib/gmina.ts) just created a
+ * brand-new gmina via the "+ Nowa gmina" inline flow — shared by every route
+ * that resolves a gminaId/newGminaName pair (POST/PATCH /api/admin/users,
+ * POST /api/admin/invites) so this stays one place to keep in sync instead
+ * of three near-identical copies.
+ */
+export async function auditInlineGminaCreation(
+  actor: AuditActor,
+  resolved: { created: boolean; gmina: Gmina | null },
+  meta?: RequestMeta
+): Promise<void> {
+  if (!resolved.created || !resolved.gmina) return;
+  await recordAudit({
+    actor,
+    action: 'GMINA_CREATE',
+    entityType: 'GMINA',
+    entityId: resolved.gmina.id,
+    gminaId: resolved.gmina.id,
+    after: snapshotGmina(resolved.gmina),
+    meta,
+  });
+}
+
+// --- Action kinds ----------------------------------------------------------
+// The logs list filters by a coarse "kind" instead of the exact per-entity
+// action code — which entity it's about is already a separate filter
+// (entityType), so a second dropdown that also spells out the entity (e.g.
+// "Utworzenie użytkownika" vs "Utworzenie gminy") is redundant. USER_ACTIVATE
+// and USER_DEACTIVATE fold into UPDATE here since, from a filtering
+// standpoint, they're just another kind of user edit.
+
+export const ACTION_KINDS = ['CREATE', 'UPDATE', 'DELETE', 'INVITE'] as const;
+export type ActionKind = (typeof ACTION_KINDS)[number];
+
+export const ACTION_KIND_MAP: Record<ActionKind, AuditAction[]> = {
+  CREATE: ['USER_CREATE', 'GMINA_CREATE'],
+  UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE'],
+  DELETE: ['USER_DELETE', 'GMINA_DELETE'],
+  INVITE: ['INVITE_CREATE', 'INVITE_REVOKE'],
+};
+
+export const ACTION_KIND_LABELS: Record<ActionKind, string> = {
+  CREATE: 'Dodanie',
+  UPDATE: 'Edycja',
+  DELETE: 'Usunięcie',
+  INVITE: 'Zaproszenie',
+};
+
+// --- Revert --------------------------------------------------------------
+
+/**
+ * Actions that can be reverted. USER_CREATE and USER_DELETE are deliberately
+ * excluded: snapshots never contain passwordHash, so "undoing" either one
+ * would mean recreating or deleting a login-capable account without being
+ * able to restore its real password — silently producing a broken account is
+ * worse than not offering the button. Every other action only ever touches
+ * fields that ARE captured in the snapshot, so those can be reverted safely.
+ */
+const REVERTIBLE_ACTIONS = new Set<AuditAction>([
+  'USER_UPDATE',
+  'USER_ACTIVATE',
+  'USER_DEACTIVATE',
+  'GMINA_CREATE',
+  'GMINA_UPDATE',
+  'GMINA_DELETE',
+  'INVITE_CREATE',
+  'INVITE_REVOKE',
+]);
+
+/** Whether the UI/API should offer a revert for this row — used by both the logs list and the revert endpoint. */
+export function canRevert(log: { action: AuditAction; revertedAt: Date | null }): boolean {
+  return log.revertedAt === null && REVERTIBLE_ACTIONS.has(log.action);
+}
+
+// USER_UPDATE/GMINA_UPDATE/USER_ACTIVATE/USER_DEACTIVATE are pure field
+// restores — "revert" always means the same thing (write back `before`)
+// regardless of which direction it's undoing. GMINA_CREATE/DELETE and
+// INVITE_CREATE/REVOKE are NOT: they're structural opposites, so reverting a
+// *revert* of one of those means performing the OTHER operation, not
+// literally repeating the same branch. E.g. a GMINA_CREATE row's revert
+// deletes the gmina; if THAT revert record is itself later reverted, the
+// intent is "un-delete" (recreate) — exactly what GMINA_DELETE's own revert
+// branch does — not another attempt to delete an already-deleted gmina.
+const OPPOSITE_ACTION: Partial<Record<AuditAction, AuditAction>> = {
+  GMINA_CREATE: 'GMINA_DELETE',
+  GMINA_DELETE: 'GMINA_CREATE',
+  INVITE_CREATE: 'INVITE_REVOKE',
+  INVITE_REVOKE: 'INVITE_CREATE',
+};
+
+/**
+ * The action to actually dispatch a revert step on. Only differs from
+ * `step.action` when `step.isRevert` is true AND that action has a
+ * structural opposite (see OPPOSITE_ACTION) — without this, reverting a
+ * revert of e.g. INVITE_CREATE would re-run INVITE_CREATE's own "revoke it"
+ * branch on an invite that's already revoked, hit its "already withdrawn,
+ * nothing to do" early return, and report a false success while leaving the
+ * invite exactly as revoked as before.
+ */
+function effectiveAction(step: { action: AuditAction; isRevert: boolean }): AuditAction {
+  if (step.isRevert) {
+    return OPPOSITE_ACTION[step.action] ?? step.action;
+  }
+  return step.action;
+}
+
+type Failure = { ok: false; status: number; error: string };
+/** Result of reverting a single log entry — used internally by the per-entity step functions. */
+type StepResult = { ok: true } | Failure;
+/** Result of the public revertAuditLog() call — may have cascaded through more than one log entry. */
+export type RevertResult = { ok: true; revertedLogIds: string[] } | Failure;
+
+function conflict(error: string): Failure {
+  return { ok: false, status: 409, error };
+}
+function badRequest(error: string): Failure {
+  return { ok: false, status: 400, error };
+}
+function notFound(error: string): Failure {
+  return { ok: false, status: 404, error };
+}
+
+/** Thrown from inside the revert transaction to abort+rollback it while carrying a typed result back out. */
+class RevertAbort extends Error {
+  constructor(public readonly result: Failure) {
+    super('revert-aborted');
+  }
+}
+
+/**
+ * Reverts the action recorded by `logId`. If that log is no longer the most
+ * recent (still-active) one for its entity — e.g. reverting an old gmina
+ * rename after a newer rename was applied on top of it — this cascades:
+ * every later, not-yet-reverted log for that SAME (entityType, entityId) is
+ * undone first, newest to oldest, ending with the requested one, so the
+ * entity ends up exactly in the state it was in right before the requested
+ * action. Only that one entity's own history is ever touched — an
+ * interleaved change to a different record (e.g. a user edited in between
+ * two gmina renames) lives under a different entityId and is never included.
+ *
+ * The whole cascade runs in one DB transaction: either every step applies or
+ * none do. Each step's write is itself conditioned on the exact state it
+ * expects (see revertUser/revertGmina/revertInvite) so a concurrent edit
+ * from outside this chain — by another admin, mid-revert — is detected and
+ * aborts the transaction instead of being silently overwritten.
+ */
+export async function revertAuditLog(
+  logId: string,
+  actor: AuditActor,
+  meta?: RequestMeta
+): Promise<RevertResult> {
+  try {
+    const revertedLogIds = await prisma.$transaction(async (tx) => {
+      const target = await tx.auditLog.findUnique({ where: { id: logId } });
+      if (!target) throw new RevertAbort(notFound('Wpis dziennika nie istnieje.'));
+      if (target.revertedAt) throw new RevertAbort(conflict('Ta zmiana została już cofnięta.'));
+      if (!REVERTIBLE_ACTIONS.has(target.action)) {
+        throw new RevertAbort(badRequest('Tego typu działania nie można cofnąć.'));
+      }
+
+      // Ordered by `seq` (a real DB-assigned monotonic counter), not
+      // createdAt/id — two rows for the same entity can land in the same
+      // millisecond, and cuids are only roughly time-ordered, not guaranteed
+      // to be, so either could reconstruct the wrong causal order here.
+      const chain = await tx.auditLog.findMany({
+        where: {
+          entityType: target.entityType,
+          entityId: target.entityId,
+          revertedAt: null,
+          seq: { gte: target.seq },
+        },
+        orderBy: { seq: 'asc' },
+      });
+
+      const blocker = chain.find((entry) => !REVERTIBLE_ACTIONS.has(entry.action));
+      if (blocker) {
+        throw new RevertAbort(
+          badRequest(
+            `Nie można cofnąć się aż tak daleko — działania ${blocker.action} z dnia ${blocker.createdAt.toISOString()} nie da się cofnąć.`
+          )
+        );
+      }
+
+      // Undo newest-first. Each step restores the entity to that step's own
+      // `before` — which, by construction (every mutation is logged), is
+      // exactly what the previous iteration's `after` was, so the very next
+      // step's conditional write always matches unless something OUTSIDE
+      // this chain touched the record in between. Applying the entity
+      // mutation and its own bookkeeping (mark reverted + record the revert)
+      // together, one step at a time, is equivalent to doing all mutations
+      // first and all bookkeeping after — this is one transaction either
+      // way, so a later step throwing rolls back everything regardless —
+      // but avoids extracting/re-casting each step's before/after twice.
+      const steps = [...chain].reverse();
+      const now = new Date();
+
+      for (const step of steps) {
+        const before = (step.before ?? {}) as Record<string, unknown>;
+        const after = (step.after ?? {}) as Record<string, unknown>;
+        let stepResult: StepResult;
+        switch (step.entityType) {
+          case 'USER':
+            stepResult = await revertUser(tx, step.entityId, before, after, actor);
+            break;
+          case 'GMINA':
+            stepResult = await revertGmina(tx, effectiveAction(step), step.entityId, before, after);
+            break;
+          case 'INVITE_TOKEN':
+            stepResult = await revertInvite(tx, effectiveAction(step), step.entityId, before, after);
+            break;
+          default:
+            stepResult = badRequest('Nieobsługiwany typ encji.');
+        }
+        if (!stepResult.ok) throw new RevertAbort(stepResult);
+
+        await tx.auditLog.update({
+          where: { id: step.id },
+          data: { revertedAt: now, revertedById: actor.id },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.id,
+            actorEmail: actor.email ?? 'nieznany@system',
+            actorName: actor.name ?? null,
+            actorRole: actor.role as never,
+            action: step.action,
+            entityType: step.entityType,
+            entityId: step.entityId,
+            gminaId: step.gminaId,
+            before: (after as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
+            after: (before as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
+            ipAddress: meta?.ipAddress ?? null,
+            userAgent: meta?.userAgent ?? null,
+            isRevert: true,
+            revertOfId: step.id,
+          },
+        });
+      }
+
+      return steps.map((step) => step.id);
+    });
+
+    return { ok: true, revertedLogIds };
+  } catch (err) {
+    if (err instanceof RevertAbort) return err.result;
+    console.error('[auditLog] revert transaction failed:', err);
+    return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+  }
+}
+
+async function revertUser(
+  tx: Prisma.TransactionClient,
+  entityId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  actor: AuditActor
+): Promise<StepResult> {
+  const target = await tx.user.findUnique({ where: { id: entityId } });
+  if (!target) return notFound('Użytkownik nie istnieje (mógł zostać usunięty).');
+
+  const nextIsActive = (before.isActive as boolean | undefined) ?? target.isActive;
+  const nextRole = (before.role as string | undefined) ?? target.role;
+  const nextGminaId = before.gminaId !== undefined ? (before.gminaId as string | null) : target.gminaId;
+
+  // Mirrors the same guards PATCH /api/admin/users/[id] and the
+  // activate/deactivate routes enforce for the original mutation.
+  if (target.id === actor.id && nextIsActive === false && target.isActive) {
+    return { ok: false, status: 403, error: 'Nie możesz dezaktywować własnego konta.' };
+  }
+  if (nextIsActive === false && target.isActive && (await isLastActiveAdmin(target, tx))) {
+    return { ok: false, status: 403, error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' };
+  }
+  if (requiresGmina(nextRole as never) && !nextGminaId) {
+    return badRequest('Ta rola wymaga przypisanej gminy.');
+  }
+  if (before.email && before.email !== target.email) {
+    const existing = await tx.user.findUnique({ where: { email: before.email as string } });
+    if (existing && existing.id !== target.id) {
+      return badRequest('Konto dla tego adresu email już istnieje.');
+    }
+  }
+
+  // The write itself is conditioned on the admin-managed fields still
+  // matching what this step expects — one atomic UPDATE ... WHERE, not a
+  // separate check-then-write, so a concurrent edit landing between our read
+  // above and this statement can never be silently overwritten.
+  //
+  // Deliberately NOT conditioned on `updatedAt`: that column is bumped by
+  // Prisma's @updatedAt on ANY write to the row, including ones with nothing
+  // to do with admin-managed fields — lockout.ts's login-failure/reset
+  // bookkeeping (failedAttempts/lockedUntil) and the password-reset flow
+  // both call prisma.user.update() on this same row. A user who merely logs
+  // in between the audited action and the revert attempt would otherwise
+  // make every revert on their account spuriously "conflict" even though
+  // none of the fields this revert actually touches had changed.
+  const expectedFields: Prisma.UserWhereInput = {
+    name: (after.name as string | null | undefined) ?? null,
+    email: after.email as string | undefined,
+    role: after.role as never,
+    organization: (after.organization as string | null | undefined) ?? null,
+    phone: (after.phone as string | null | undefined) ?? null,
+    gminaId: (after.gminaId as string | null | undefined) ?? null,
+    isActive: after.isActive as boolean | undefined,
+    lastActivatedAt: after.lastActivatedAt ? new Date(after.lastActivatedAt as string) : null,
+    lastDeactivatedAt: after.lastDeactivatedAt ? new Date(after.lastDeactivatedAt as string) : null,
+    deactivationReason: (after.deactivationReason as string | null | undefined) ?? null,
+  };
+
+  try {
+    const result = await tx.user.updateMany({
+      where: { id: target.id, ...expectedFields },
+      data: {
+        name: (before.name as string | null) ?? null,
+        email: before.email as string | undefined,
+        role: nextRole as never,
+        organization: (before.organization as string | null) ?? null,
+        phone: (before.phone as string | null) ?? null,
+        gminaId: nextGminaId,
+        isActive: nextIsActive,
+        lastActivatedAt: before.lastActivatedAt ? new Date(before.lastActivatedAt as string) : null,
+        lastDeactivatedAt: before.lastDeactivatedAt ? new Date(before.lastDeactivatedAt as string) : null,
+        deactivationReason: (before.deactivationReason as string | null) ?? null,
+      },
+    });
+    if (result.count === 0) {
+      return conflict('Stan użytkownika zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
+    }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return badRequest('Konto dla tego adresu email już istnieje.');
+    }
+    return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+  }
+
+  return { ok: true };
+}
+
+async function revertGmina(
+  tx: Prisma.TransactionClient,
+  action: AuditAction,
+  entityId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>
+): Promise<StepResult> {
+  if (action === 'GMINA_CREATE') {
+    try {
+      // deleteMany (not delete) so "does it still exist" and "delete it" are
+      // one atomic statement instead of a separate check-then-act.
+      const result = await tx.gmina.deleteMany({ where: { id: entityId } });
+      if (result.count === 0) return conflict('Gmina została już usunięta.');
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        return conflict(
+          'Nie można cofnąć utworzenia tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty lub zaproszenia.'
+        );
+      }
+      return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+    }
+    return { ok: true };
+  }
+
+  if (action === 'GMINA_DELETE') {
+    const existing = await tx.gmina.findUnique({ where: { id: entityId } });
+    if (existing) return conflict('Gmina już istnieje — nie ma czego przywracać.');
+    const nameCollision = await tx.gmina.findFirst({
+      where: { name: { equals: before.name as string, mode: 'insensitive' } },
+    });
+    if (nameCollision) return badRequest('Gmina o tej nazwie już istnieje — nie można przywrócić.');
+    try {
+      await tx.gmina.create({
+        data: {
+          id: entityId,
+          name: before.name as string,
+          powiat: (before.powiat as string | null) ?? null,
+          voivodeship: (before.voivodeship as string | null) ?? null,
+          latitude: (before.latitude as number | null) ?? null,
+          longitude: (before.longitude as number | null) ?? null,
+        },
+      });
+    } catch {
+      return { ok: false, status: 500, error: 'Nie udało się przywrócić gminy.' };
+    }
+    return { ok: true };
+  }
+
+  // GMINA_UPDATE
+  const target = await tx.gmina.findUnique({ where: { id: entityId } });
+  if (!target) return notFound('Gmina nie istnieje (mogła zostać usunięta).');
+  if (before.name && (before.name as string).toLowerCase() !== target.name.toLowerCase()) {
+    const nameCollision = await tx.gmina.findFirst({
+      where: { name: { equals: before.name as string, mode: 'insensitive' } },
+    });
+    if (nameCollision && nameCollision.id !== target.id) {
+      return badRequest('Gmina o tej nazwie już istnieje.');
+    }
+  }
+
+  // Conditioned on the actual admin-managed fields (not `updatedAt` — see the
+  // matching comment in revertUser for why that column is the wrong token to
+  // key off): nothing currently writes to Gmina outside these admin routes,
+  // but keying off the real fields costs nothing and avoids the same trap if
+  // that ever changes.
+  const expectedFields: Prisma.GminaWhereInput = {
+    name: after.name as string | undefined,
+    powiat: (after.powiat as string | null | undefined) ?? null,
+    voivodeship: (after.voivodeship as string | null | undefined) ?? null,
+    latitude: (after.latitude as number | null | undefined) ?? null,
+    longitude: (after.longitude as number | null | undefined) ?? null,
+  };
+
+  try {
+    const result = await tx.gmina.updateMany({
+      where: { id: entityId, ...expectedFields },
+      data: {
+        name: before.name as string,
+        powiat: (before.powiat as string | null) ?? null,
+        voivodeship: (before.voivodeship as string | null) ?? null,
+        latitude: (before.latitude as number | null) ?? null,
+        longitude: (before.longitude as number | null) ?? null,
+      },
+    });
+    if (result.count === 0) {
+      return conflict('Stan gminy zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
+    }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return badRequest('Gmina o tej nazwie już istnieje.');
+    }
+    return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+  }
+  return { ok: true };
+}
+
+async function revertInvite(
+  tx: Prisma.TransactionClient,
+  action: AuditAction,
+  entityId: string,
+  _before: Record<string, unknown>,
+  _after: Record<string, unknown>
+): Promise<StepResult> {
+  const invite = await tx.inviteToken.findUnique({ where: { id: entityId } });
+  if (!invite) return notFound('Zaproszenie nie istnieje.');
+
+  if (action === 'INVITE_CREATE') {
+    // Reverting a create means withdrawing it — the raw token was never
+    // stored (only its hash), so it can only be revoked, never deleted and
+    // reissued with the same link.
+    if (invite.usedAt) return conflict('Zaproszenie zostało już wykorzystane — nie można go cofnąć.');
+    if (invite.revokedAt) return { ok: true }; // already withdrawn, nothing to do
+    const result = await tx.inviteToken.updateMany({
+      where: { id: entityId, revokedAt: null, usedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (result.count === 0) {
+      return conflict('Stan zaproszenia zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
+    }
+    return { ok: true };
+  }
+
+  // INVITE_REVOKE → un-revoke
+  if (!invite.revokedAt) return conflict('Zaproszenie nie jest unieważnione.');
+  if (invite.usedAt) return conflict('Zaproszenie zostało już wykorzystane.');
+  if (invite.expiresAt.getTime() < Date.now()) return conflict('Zaproszenie wygasło — nie można go przywrócić.');
+  const result = await tx.inviteToken.updateMany({
+    where: { id: entityId, revokedAt: invite.revokedAt },
+    data: { revokedAt: null },
+  });
+  if (result.count === 0) {
+    return conflict('Stan zaproszenia zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
+  }
+  return { ok: true };
+}

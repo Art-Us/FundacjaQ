@@ -199,4 +199,53 @@ describe('POST /api/admin/users', () => {
     expect(res.status).toBe(400);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
+
+  // Regression coverage: the "+ Nowa gmina" inline flow creates a real Gmina
+  // row via resolveGminaId/createGmina — that used to be invisible to the
+  // audit log (only the dedicated POST /api/admin/gminas route logged it).
+  it('logs a GMINA_CREATE audit entry when the request creates a new gmina inline', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockResolvedValue({ id: 'new-gmina', name: 'Nowa Gmina' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-1', gminaId: 'new-gmina' } as any);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        newGminaName: 'Nowa Gmina',
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'GMINA_CREATE', entityType: 'GMINA', entityId: 'new-gmina' }),
+      })
+    );
+  });
+
+  it('does not log a GMINA_CREATE entry when an existing gmina is reused by name', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findFirst.mockResolvedValue({ id: 'existing-gmina', name: 'Istniejąca' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-1', gminaId: 'existing-gmina' } as any);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        newGminaName: 'Istniejąca',
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(prisma.gmina.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: 'GMINA_CREATE' }) })
+    );
+  });
 });

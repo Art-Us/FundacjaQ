@@ -65,7 +65,7 @@ describe('resolveGminaId', () => {
 
     const result = await resolveGminaId({ gminaId: 'g1' });
 
-    expect(result).toEqual({ id: 'g1' });
+    expect(result).toEqual({ id: 'g1', created: false, gmina: null });
   });
 
   it('errors when the given gminaId does not exist', async () => {

@@ -250,11 +250,11 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('creates a new gmina by name and assigns it when newGminaName is given', async () => {
+  it('creates a new gmina by name and assigns it when newGminaName is given, logging its own GMINA_CREATE audit entry', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);
     prisma.gmina.findFirst.mockResolvedValue(null);
-    prisma.gmina.create.mockResolvedValue({ id: 'new-gmina' } as any);
+    prisma.gmina.create.mockResolvedValue({ id: 'new-gmina', name: 'Gmina Test' } as any);
     prisma.user.update.mockResolvedValue({} as any);
 
     const res = await callPatch({ newGminaName: 'Gmina Test' });
@@ -263,6 +263,14 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.gmina.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'Gmina Test' } }));
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ gminaId: 'new-gmina' }) })
+    );
+    // Regression coverage: this inline "+ Nowa gmina" creation used to be
+    // invisible to the audit log — only the dedicated gmina-management CRUD
+    // route logged GMINA_CREATE.
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'GMINA_CREATE', entityType: 'GMINA', entityId: 'new-gmina' }),
+      })
     );
   });
 

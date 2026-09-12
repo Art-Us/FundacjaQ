@@ -1,4 +1,5 @@
 import { getServerSession } from 'next-auth';
+import type { Prisma } from '@prisma/client';
 import { authOptions } from './auth';
 import { prisma } from './prisma';
 
@@ -6,6 +7,12 @@ export interface AuthorizedUser {
   id: string;
   role: string;
   gminaId: string | null;
+  // Present on the real NextAuth session (see types/next-auth.d.ts,
+  // DefaultSession['user']) but optional here so existing call sites/tests
+  // that only care about id/role/gminaId don't need to supply them. Used for
+  // attributing audit log entries (see lib/auditLog.ts) to a human-readable actor.
+  email?: string | null;
+  name?: string | null;
 }
 
 /** Returns the current session user if they're ADMIN or COORDINATOR, otherwise null. */
@@ -53,13 +60,21 @@ export function canManageUser(
  * someone else. Only meaningful for a target that IS currently an active
  * admin; anyone else can never affect the active-admin count by definition.
  *
- * This is a plain count-then-act check, not a transaction — two admins
- * deactivating/deleting each other in the exact same instant could in theory
- * still both pass it. That residual race is accepted as effectively
- * impossible to hit in practice, not engineered around with locking.
+ * This is a plain count-then-act check — two admins deactivating/deleting
+ * each other in the exact same instant, via two different transactions,
+ * could in theory still both pass it. That residual race is accepted as
+ * effectively impossible to hit in practice, not engineered around with
+ * row locking. Pass `client` (a `tx` from `prisma.$transaction(async tx =>
+ * ...)`) when calling this from inside a transaction that itself acts on
+ * the count's result — e.g. lib/auditLog.ts's revertUser — so the count is
+ * at least read through that same transaction rather than a second,
+ * unrelated connection.
  */
-export async function isLastActiveAdmin(target: { role: string; isActive: boolean }): Promise<boolean> {
+export async function isLastActiveAdmin(
+  target: { role: string; isActive: boolean },
+  client: Pick<Prisma.TransactionClient, 'user'> = prisma
+): Promise<boolean> {
   if (target.role !== 'ADMIN' || !target.isActive) return false;
-  const activeAdminCount = await prisma.user.count({ where: { role: 'ADMIN', isActive: true } });
+  const activeAdminCount = await client.user.count({ where: { role: 'ADMIN', isActive: true } });
   return activeAdminCount <= 1;
 }
