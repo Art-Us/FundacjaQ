@@ -16,6 +16,7 @@ beforeEach(() => {
   prisma.loginAttempt.deleteMany.mockResolvedValue({ count: 0 } as any);
   prisma.inviteToken.deleteMany.mockResolvedValue({ count: 0 } as any);
   prisma.passwordResetToken.deleteMany.mockResolvedValue({ count: 0 } as any);
+  prisma.auditLog.deleteMany.mockResolvedValue({ count: 0 } as any);
 });
 
 describe('runRetentionCleanup', () => {
@@ -52,7 +53,18 @@ describe('runRetentionCleanup', () => {
     expect(ageMs).toBeLessThan(31 * DAY_MS);
   });
 
-  it('does not throw when all three deletes report zero rows removed', async () => {
+  it('deletes AuditLog rows older than ~90 days', async () => {
+    await runRetentionCleanup();
+
+    const call = prisma.auditLog.deleteMany.mock.calls[0][0] as any;
+    const cutoff = call.where.createdAt.lt as Date;
+    const ageMs = Date.now() - cutoff.getTime();
+
+    expect(ageMs).toBeGreaterThan(89 * DAY_MS);
+    expect(ageMs).toBeLessThan(91 * DAY_MS);
+  });
+
+  it('does not throw when all four deletes report zero rows removed', async () => {
     await expect(runRetentionCleanup()).resolves.toBeUndefined();
   });
 });
