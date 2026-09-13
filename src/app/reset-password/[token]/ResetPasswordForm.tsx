@@ -24,21 +24,27 @@ export function ResetPasswordForm({ token }: { token: string }) {
     }
 
     setLoading(true);
-    const res = await fetch('/api/auth/reset-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, password }),
-    });
-    const data = await res.json();
-    setLoading(false);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
+
+      setSuccess(true);
+      setTimeout(() => router.push('/login'), 1500);
+    } catch (err) {
+      console.error('[ResetPasswordForm] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    setSuccess(true);
-    setTimeout(() => router.push('/login'), 1500);
   }
 
   if (success) {

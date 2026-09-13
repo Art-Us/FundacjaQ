@@ -1,31 +1,52 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { History, Search } from 'lucide-react';
+import { ShieldOff, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { AuditLogRow } from './AuditLogRow';
-import { ACTION_LABELS, ACTION_KIND_LABELS, ENTITY_TYPE_LABELS, type AuditLogItem } from './types';
+import { SecurityEventRow, type SecurityEventLike } from './SecurityEventRow';
 
 const PAGE_SIZE = 50;
+// Debounces the email search box so typing doesn't fire one request per
+// keystroke — same UX as a moment's pause before searching, without adding a
+// library.
+const SEARCH_DEBOUNCE_MS = 300;
 
-export function AuditLogDirectory() {
-  const [entityType, setEntityType] = useState('');
-  const [actionKind, setActionKind] = useState('');
-  const [query, setQuery] = useState('');
+/**
+ * Read-only, paginated list backing the "Logowania" tab — no revert, unlike
+ * the admin action audit trail.
+ */
+export function SecurityEventDirectory({
+  endpoint,
+  emptyLabel,
+}: {
+  endpoint: string;
+  emptyLabel: string;
+}) {
+  const [emailInput, setEmailInput] = useState('');
+  const [email, setEmail] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const [logs, setLogs] = useState<AuditLogItem[]>([]);
+  const [items, setItems] = useState<SecurityEventLike[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Debounce: only commit the typed value to `email` (which triggers a
+  // fetch) once the user pauses for a moment.
+  useEffect(() => {
+    const timer = setTimeout(() => setEmail(emailInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [emailInput]);
+
   // Guards against two hazards inherent to "fire a request, then set state
   // from its response" without cancellation: (1) a slower earlier response
-  // landing after a faster later one (e.g. rapidly switching entityType/
-  // actionKind) would otherwise overwrite fresh results with stale ones; (2)
-  // a "Load more" click in-flight when a filter changes would otherwise
-  // append old-filter rows onto the new-filter list. Only the response
-  // matching the CURRENT request (the latest one issued) is ever applied.
+  // landing after a faster later one (e.g. rapid typing before the debounce
+  // above settles, or switching the success filter quickly) would otherwise
+  // overwrite fresh results with stale ones; (2) a "Load more" click
+  // in-flight when a filter changes would otherwise append old-filter rows
+  // onto the new-filter list. Only the response matching the CURRENT request
+  // (the latest one issued) is ever applied to state.
   const requestIdRef = useRef(0);
 
   const fetchPage = useCallback(
@@ -34,11 +55,11 @@ export function AuditLogDirectory() {
 
       try {
         const params = new URLSearchParams({ take: String(PAGE_SIZE) });
-        if (entityType) params.set('entityType', entityType);
-        if (actionKind) params.set('actionKind', actionKind);
+        if (email) params.set('email', email);
+        if (success) params.set('success', success);
         if (afterCursor) params.set('cursor', afterCursor);
 
-        const res = await fetch(`/api/admin/logs?${params.toString()}`);
+        const res = await fetch(`${endpoint}?${params.toString()}`);
         const data = await res.json().catch(() => ({}));
 
         if (requestId !== requestIdRef.current) return; // superseded by a newer request
@@ -48,16 +69,16 @@ export function AuditLogDirectory() {
           return;
         }
 
-        setLogs((prev) => (replace ? data.logs : [...prev, ...data.logs]));
+        setItems((prev) => (replace ? data.items : [...prev, ...data.items]));
         setCursor(data.nextCursor ?? null);
         setError(null);
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
-        console.error('[AuditLogDirectory] failed to fetch:', err);
+        console.error('[SecurityEventDirectory] failed to fetch:', err);
         setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
       }
     },
-    [entityType, actionKind]
+    [endpoint, email, success]
   );
 
   useEffect(() => {
@@ -71,62 +92,27 @@ export function AuditLogDirectory() {
     setLoadingMore(false);
   }
 
-  function handleReverted() {
-    // Simplest correct refresh after a revert: the acted-on row's canRevert
-    // flips and a brand-new "revert" row appears at the top — reloading the
-    // first page picks up both without trying to patch state by hand.
-    setLoading(true);
-    fetchPage(null, true).finally(() => setLoading(false));
-  }
-
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? logs.filter((log) => {
-        const haystack = [log.actorEmail, log.actorName, log.entityId, ACTION_LABELS[log.action] ?? log.action]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(q);
-      })
-    : logs;
-
   return (
     <div className="space-y-4">
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Szukaj po osobie, encji, działaniu…"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+            placeholder="Szukaj po adresie email…"
             className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-3 text-sm text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
           />
         </div>
 
         <select
-          value={entityType}
-          onChange={(e) => setEntityType(e.target.value)}
+          value={success}
+          onChange={(e) => setSuccess(e.target.value)}
           className="rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-sm text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
         >
-          <option value="">Wszystkie encje</option>
-          {Object.entries(ENTITY_TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={actionKind}
-          onChange={(e) => setActionKind(e.target.value)}
-          className="rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-sm text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
-        >
-          <option value="">Wszystkie działania</option>
-          {Object.entries(ACTION_KIND_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
+          <option value="">Wszystkie wyniki</option>
+          <option value="true">Tylko sukces</option>
+          <option value="false">Tylko niepowodzenie</option>
         </select>
       </div>
 
@@ -138,23 +124,23 @@ export function AuditLogDirectory() {
         <div className="rounded-3xl bg-white p-12 text-center border border-slate-200/80 shadow-xs">
           <p className="text-sm text-slate-400">Wczytywanie…</p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="rounded-3xl bg-white p-12 text-center border border-slate-200/80 shadow-xs">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 mb-3">
-            <History className="h-6 w-6" />
+            <ShieldOff className="h-6 w-6" />
           </div>
           <h3 className="text-sm font-bold text-slate-700">Brak wpisów</h3>
-          <p className="text-xs text-slate-400 mt-1">Zmień kryteria filtrowania albo wróć później.</p>
+          <p className="text-xs text-slate-400 mt-1">{emptyLabel}</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((log) => (
-            <AuditLogRow key={log.id} log={log} onReverted={handleReverted} />
+          {items.map((item) => (
+            <SecurityEventRow key={item.id} item={item} />
           ))}
         </div>
       )}
 
-      {!loading && !query && cursor && (
+      {!loading && cursor && (
         <div className="flex justify-center pt-2">
           <Button type="button" variant="secondary" size="sm" disabled={loadingMore} onClick={handleLoadMore}>
             {loadingMore ? 'Wczytywanie…' : 'Wczytaj więcej'}

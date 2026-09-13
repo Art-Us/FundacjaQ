@@ -22,21 +22,27 @@ export function ForgotPasswordForm() {
     // (e.g. a retyped email) could otherwise resend an already-spent token.
     const hadCaptchaToken = captcha.token !== null;
 
-    const res = await fetch('/api/auth/forgot-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, captchaToken: captcha.token ?? undefined }),
-    });
-    const data = await res.json();
-    setLoading(false);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, captchaToken: captcha.token ?? undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    if (data.captchaRequired) {
-      captcha.require();
-    } else if (hadCaptchaToken) {
-      captcha.reset();
+      if (data.captchaRequired) {
+        captcha.require();
+      } else if (hadCaptchaToken) {
+        captcha.reset();
+      }
+
+      setMessage(data.message ?? data.error ?? 'Coś poszło nie tak.');
+    } catch (err) {
+      console.error('[ForgotPasswordForm] request failed:', err);
+      setMessage('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    setMessage(data.message ?? data.error ?? 'Coś poszło nie tak.');
   }
 
   return (

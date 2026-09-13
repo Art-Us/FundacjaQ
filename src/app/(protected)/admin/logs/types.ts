@@ -61,3 +61,18 @@ export function entityLabel(log: Pick<AuditLogItem, 'entityType' | 'entityId' | 
   if (log.entityType === 'GMINA') return (snapshot.name as string) ?? log.entityId;
   return (snapshot.email as string) ?? log.entityId;
 }
+
+// --- Login attempt log ---------------------------------------------------
+// Read-only, no revert — records self-service login attempts, not an admin
+// acting on someone else, so there's no "before" admin-driven state to
+// restore.
+
+export interface LoginAttemptItem {
+  id: string;
+  email: string;
+  userId: string | null;
+  success: boolean;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}

@@ -65,23 +65,28 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
       voivodeship: voivodeship || null,
     };
 
-    const res = await fetch(mode === 'create' ? '/api/admin/gminas' : `/api/admin/gminas/${gmina!.id}`, {
-      method: mode === 'create' ? 'POST' : 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch(mode === 'create' ? '/api/admin/gminas' : `/api/admin/gminas/${gmina!.id}`, {
+        method: mode === 'create' ? 'POST' : 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      onSuccess?.(data.gmina);
+      router.refresh();
+      onClose();
+    } catch (err) {
+      console.error('[GminaFormModal] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    onSuccess?.(data.gmina);
-    router.refresh();
-    onClose();
   }
 
   // Rendered via a portal into document.body: this modal's own <form> would

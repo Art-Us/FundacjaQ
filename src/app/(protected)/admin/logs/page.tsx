@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
-import { AuditLogDirectory } from './AuditLogDirectory';
+import { LogsTabs } from './LogsTabs';
 
 export default async function AdminLogsPage() {
   const session = await getSession();
@@ -15,11 +15,11 @@ export default async function AdminLogsPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Dziennik zdarzeń</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Kto, co i kiedy zmienił w panelu administracyjnym — z możliwością cofnięcia zmiany.
+          Zmiany w panelu administracyjnym, logowania, rejestracje i zmiany hasła.
         </p>
       </div>
 
-      <AuditLogDirectory />
+      <LogsTabs />
     </main>
   );
 }

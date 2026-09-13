@@ -15,25 +15,30 @@ export function ToggleUserActiveButton({ userId, isActive }: { userId: string; i
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/admin/users/${userId}/${action}`, {
-      method: 'POST',
-      ...(body !== undefined && {
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/${action}`, {
+        method: 'POST',
+        ...(body !== undefined && {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      setShowReasonInput(false);
+      setReason('');
+      router.refresh();
+    } catch (err) {
+      console.error('[ToggleUserActiveButton] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    setShowReasonInput(false);
-    setReason('');
-    router.refresh();
   }
 
   if (showReasonInput) {

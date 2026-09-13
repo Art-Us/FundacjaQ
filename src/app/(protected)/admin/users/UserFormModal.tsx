@@ -81,22 +81,27 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             newGminaName: gmina.newGminaName || undefined,
           };
 
-    const res = await fetch(mode === 'create' ? '/api/admin/users' : `/api/admin/users/${user!.id}`, {
-      method: mode === 'create' ? 'POST' : 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch(mode === 'create' ? '/api/admin/users' : `/api/admin/users/${user!.id}`, {
+        method: mode === 'create' ? 'POST' : 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      router.refresh();
+      onClose();
+    } catch (err) {
+      console.error('[UserFormModal] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    router.refresh();
-    onClose();
   }
 
   return (

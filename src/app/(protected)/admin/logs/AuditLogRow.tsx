@@ -32,18 +32,23 @@ export function AuditLogRow({ log, onReverted }: { log: AuditLogItem; onReverted
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/admin/logs/${log.id}/revert`, { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch(`/api/admin/logs/${log.id}/revert`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Nie udało się cofnąć zmiany.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Nie udało się cofnąć zmiany.');
-      return;
+      setConfirming(false);
+      onReverted();
+    } catch (err) {
+      console.error('[AuditLogRow] failed to revert:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    setConfirming(false);
-    onReverted();
   }
 
   const fields = changedFields(log.before, log.after);

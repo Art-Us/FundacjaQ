@@ -15,17 +15,22 @@ export function DeleteUserButton({ userId, userLabel }: { userId: string; userLa
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      router.refresh();
+    } catch (err) {
+      console.error('[DeleteUserButton] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    router.refresh();
   }
 
   if (confirming) {

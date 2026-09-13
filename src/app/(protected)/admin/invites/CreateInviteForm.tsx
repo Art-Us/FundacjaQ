@@ -44,20 +44,26 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: Create
       body.newGminaName = gmina.newGminaName || undefined;
     }
 
-    const res = await fetch('/api/admin/invites', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    setLoading(false);
-    setMessage(data.message ?? data.error ?? 'Coś poszło nie tak.');
+    try {
+      const res = await fetch('/api/admin/invites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.message ?? data.error ?? 'Coś poszło nie tak.');
 
-    if (res.ok) {
-      setEmail('');
-      setInviteUrl(data.inviteUrl ?? null);
-      setEmailConfigured(Boolean(data.emailConfigured));
-      router.refresh();
+      if (res.ok) {
+        setEmail('');
+        setInviteUrl(data.inviteUrl ?? null);
+        setEmailConfigured(Boolean(data.emailConfigured));
+        router.refresh();
+      }
+    } catch (err) {
+      console.error('[CreateInviteForm] request failed:', err);
+      setMessage('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
   }
 

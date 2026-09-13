@@ -15,17 +15,22 @@ export function DeleteGminaButton({ gminaId, gminaName }: { gminaId: string; gmi
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/admin/gminas/${gminaId}`, { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch(`/api/admin/gminas/${gminaId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      router.refresh();
+    } catch (err) {
+      console.error('[DeleteGminaButton] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    router.refresh();
   }
 
   if (confirming) {
