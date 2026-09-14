@@ -184,7 +184,6 @@ export default function AlertsMapView({
   const [view, setView] = useState<AlertKindValue>('ALERT');
   const [showMap, setShowMap] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [pendingCoords, setPendingCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [mapMode, setMapMode] = useState<MapDisplayMode>('severity');
   const [focusedAlertId, setFocusedAlertId] = useState<string | null>(null);
   const [editingAlert, setEditingAlert] = useState<AlertWithGmina | null>(null);
@@ -323,14 +322,7 @@ export default function AlertsMapView({
     setArchiveOrgFilter('all');
     setFocusedAlertId(null);
     setShowForm(false);
-    setPendingCoords(null);
     resetMapFilters();
-  }
-
-  function handleMapClick(lat: number, lng: number) {
-    if (!canManageAlerts) return;
-    setPendingCoords({ lat, lng });
-    setShowForm(true);
   }
 
   function handleFocusOnMap(alertId: string) {
@@ -585,7 +577,6 @@ export default function AlertsMapView({
             center={center}
             height="420px"
             focusedAlertId={focusedAlertId}
-            onMapClick={canManageAlerts ? handleMapClick : undefined}
             mode={mapMode}
             onModeChange={setMapMode}
             kind={view}
@@ -599,10 +590,7 @@ export default function AlertsMapView({
           {!showForm && (
             <button
               type="button"
-              onClick={() => {
-                setPendingCoords(null);
-                setShowForm(true);
-              }}
+              onClick={() => setShowForm(true)}
               className="w-full rounded-3xl border border-dashed border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-slate-700 p-4 text-sm font-semibold text-slate-400 hover:text-slate-200 transition"
             >
               {isEventView ? '+ Dodaj nowe zdarzenie codzienne' : '+ Opublikuj nowy komunikat kryzysowy'}
@@ -614,12 +602,9 @@ export default function AlertsMapView({
               gminy={gminy}
               currentUserGminaId={currentUserGminaId}
               currentUserRole={currentUserRole}
-              initialCoords={pendingCoords}
+              initialCoords={null}
               kind={view}
-              onDone={() => {
-                setShowForm(false);
-                setPendingCoords(null);
-              }}
+              onDone={() => setShowForm(false)}
             />
           )}
         </>

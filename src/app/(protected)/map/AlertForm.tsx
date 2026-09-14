@@ -68,6 +68,8 @@ export default function AlertForm({
   const [location, setLocation] = useState('');
   const [gminaId, setGminaId] = useState(currentUserGminaId ?? gminy[0]?.id ?? '');
   const [coords, setCoords] = useState(initialCoords);
+  const [latText, setLatText] = useState(initialCoords ? String(initialCoords.lat) : '');
+  const [lngText, setLngText] = useState(initialCoords ? String(initialCoords.lng) : '');
   const [geo, setGeo] = useState<GeoState>({ status: 'idle' });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -110,6 +112,8 @@ export default function AlertForm({
   // Kierunek 1: klik na mapie → współrzędne są znane, dopisujemy adres.
   function handlePick(lat: number, lng: number) {
     setCoords({ lat, lng });
+    setLatText(String(lat));
+    setLngText(String(lng));
 
     scheduleGeocode(async (seq) => {
       try {
@@ -166,6 +170,23 @@ export default function AlertForm({
         if (seq === geocodeSeq.current) setGeo({ status: 'notfound' });
       }
     }, 800);
+  }
+
+  // Ręczna edycja współrzędnych — użytkownik może wkleić dokładne dane zamiast
+  // (albo obok) klikania na mapie. Puste/nieliczbowe pole nie przesuwa pinezki,
+  // dopóki obie osie nie będą poprawnymi liczbami.
+  function handleLatChange(text: string) {
+    setLatText(text);
+    const lat = parseFloat(text);
+    if (!Number.isFinite(lat)) return;
+    setCoords((prev) => ({ lat, lng: prev?.lng ?? pickerCenter[1] }));
+  }
+
+  function handleLngChange(text: string) {
+    setLngText(text);
+    const lng = parseFloat(text);
+    if (!Number.isFinite(lng)) return;
+    setCoords((prev) => ({ lat: prev?.lat ?? pickerCenter[0], lng }));
   }
 
   useEffect(() => {
@@ -344,11 +365,39 @@ export default function AlertForm({
             color={pinColor}
             icon={isEvent ? 'event' : 'alert'}
           />
-          <p className="text-xs text-slate-500 font-mono">
-            {coords
-              ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`
-              : 'Kliknij punkt na mapie, aby ustawić lokalizację.'}
-          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Szerokość (lat)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={latText}
+                onChange={(e) => handleLatChange(e.target.value)}
+                placeholder="np. 50.4380"
+                className={`${INPUT_CLASS} font-mono text-xs py-1.5`}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Długość (lng)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={lngText}
+                onChange={(e) => handleLngChange(e.target.value)}
+                placeholder="np. 21.7500"
+                className={`${INPUT_CLASS} font-mono text-xs py-1.5`}
+              />
+            </div>
+          </div>
+          {!coords && (
+            <p className="text-xs text-slate-500">
+              Kliknij punkt na mapie albo wpisz współrzędne ręcznie.
+            </p>
+          )}
 
           {geo.status !== 'idle' && (
             <div
