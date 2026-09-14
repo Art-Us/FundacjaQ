@@ -3,6 +3,11 @@ export interface UserGmina {
   name: string;
 }
 
+export interface UserOrganization {
+  id: string;
+  name: string;
+}
+
 export type UserRole = 'ADMIN' | 'COORDINATOR' | 'VOLUNTEER';
 
 export interface UserListItem {
@@ -10,7 +15,7 @@ export interface UserListItem {
   name: string | null;
   email: string;
   role: UserRole;
-  organization: string | null;
+  organization: UserOrganization | null;
   phone: string | null;
   isActive: boolean;
   lastActivatedAt: string | null;

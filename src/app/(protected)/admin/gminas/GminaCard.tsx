@@ -10,7 +10,11 @@ import type { GminaListItem } from './types';
 export function GminaCard({ gmina }: { gmina: GminaListItem }) {
   const [showEdit, setShowEdit] = useState(false);
   const hasDependents =
-    gmina.usersCount > 0 || gmina.resourcesCount > 0 || gmina.alertsCount > 0 || gmina.inviteTokensCount > 0;
+    gmina.usersCount > 0 ||
+    gmina.resourcesCount > 0 ||
+    gmina.alertsCount > 0 ||
+    gmina.inviteTokensCount > 0 ||
+    gmina.organizationsCount > 0;
 
   return (
     <article className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition flex flex-col justify-between gap-4">
@@ -30,7 +34,7 @@ export function GminaCard({ gmina }: { gmina: GminaListItem }) {
           <Users className="h-3.5 w-3.5 shrink-0" />
           <span>
             {gmina.usersCount} użytk. · {gmina.resourcesCount} zasob. · {gmina.alertsCount} alert. ·{' '}
-            {gmina.inviteTokensCount} zaprosz.
+            {gmina.inviteTokensCount} zaprosz. · {gmina.organizationsCount} organiz.
           </span>
         </div>
       </div>

@@ -14,7 +14,7 @@ export default async function AdminGminasPage() {
   const gminas = await prisma.gmina.findMany({
     orderBy: { name: 'asc' },
     include: {
-      _count: { select: { users: true, resources: true, alerts: true, inviteTokens: true } },
+      _count: { select: { users: true, resources: true, alerts: true, inviteTokens: true, organizations: true } },
     },
   });
 
@@ -29,6 +29,7 @@ export default async function AdminGminasPage() {
     resourcesCount: gmina._count.resources,
     alertsCount: gmina._count.alerts,
     inviteTokensCount: gmina._count.inviteTokens,
+    organizationsCount: gmina._count.organizations,
   }));
 
   return (

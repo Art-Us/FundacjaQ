@@ -299,6 +299,52 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  it('rejects assigning an organization that belongs to a different gmina than the user', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-2' } as any);
+
+    const res = await callPatch({ organizationId: 'org-1' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('innej gminy');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('accepts assigning an organization that belongs to the SAME gmina as the user', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ organizationId: 'org-1' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
+    );
+  });
+
+  // Regression coverage: even when THIS request doesn't touch
+  // organizationId at all, reassigning the user to a different gmina can
+  // leave their PRE-EXISTING organization mismatched — the check must use
+  // the resulting (effective) organization, not just a freshly-submitted one.
+  it('rejects reassigning gminaId when it would leave the user\'s existing organization mismatched', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(
+      baseUser({ gminaId: 'gmina-1', organizationId: 'org-1' }) as any
+    );
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+
+    const res = await callPatch({ gminaId: 'gmina-2' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('innej gminy');
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it('allows clearing gminaId when the resulting role is ADMIN', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'ADMIN', gminaId: 'gmina-1' }) as any);

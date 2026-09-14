@@ -17,7 +17,7 @@ const updateUserSchema = z.object({
   role: z.enum(ROLES).optional(),
   gminaId: z.string().nullable().optional(),
   newGminaName: z.string().trim().min(1).max(120).optional(),
-  organization: z.string().nullable().optional(),
+  organizationId: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
   // Only meaningful when isActive is being set to false in the same request
@@ -103,6 +103,29 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Ta rola wymaga przypisanej gminy.' }, { status: 400 });
   }
 
+  // Same gmina-match check as POST /api/admin/users, plus one POST doesn't
+  // need: if this update changes gminaId/role but leaves organizationId
+  // untouched, the user's PRE-EXISTING organization can now mismatch the
+  // gmina they end up in — so this checks the resulting (effective)
+  // organization, not just a freshly-submitted one.
+  const effectiveOrganizationId =
+    parsed.data.organizationId !== undefined ? parsed.data.organizationId : target.organizationId;
+  if (effectiveOrganizationId) {
+    const organization = await prisma.organization.findUnique({
+      where: { id: effectiveOrganizationId },
+      select: { id: true, gminaId: true },
+    });
+    if (!organization) {
+      return NextResponse.json({ error: 'Wybrana organizacja nie istnieje.' }, { status: 400 });
+    }
+    if (organization.gminaId !== effectiveGminaId) {
+      return NextResponse.json(
+        { error: 'Wybrana organizacja należy do innej gminy niż użytkownik.' },
+        { status: 400 }
+      );
+    }
+  }
+
   if (parsed.data.isActive === true) {
     data.lastActivatedAt = new Date();
   } else if (parsed.data.isActive === false) {
@@ -136,7 +159,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: 'Konto dla tego adresu email już istnieje.' }, { status: 400 });
     }
     return NextResponse.json(
-      { error: 'Nie udało się zaktualizować użytkownika. Sprawdź podane dane (np. gminę).' },
+      { error: 'Nie udało się zaktualizować użytkownika. Sprawdź podane dane (np. gminę lub organizację).' },
       { status: 400 }
     );
   }

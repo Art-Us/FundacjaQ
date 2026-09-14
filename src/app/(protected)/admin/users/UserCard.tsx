@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Mail, Phone, Building2, MapPin, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
+import type { OrganizationOption } from '@/components/organization/OrganizationSelect';
 import { DeleteUserButton } from './DeleteUserButton';
 import { UserFormModal } from './UserFormModal';
 import type { UserGmina, UserListItem } from './types';
@@ -24,9 +25,10 @@ interface UserCardProps {
   user: UserListItem;
   isAdmin: boolean;
   gminas: UserGmina[];
+  organizations: OrganizationOption[];
 }
 
-export function UserCard({ user, isAdmin, gminas }: UserCardProps) {
+export function UserCard({ user, isAdmin, gminas, organizations }: UserCardProps) {
   const [showEdit, setShowEdit] = useState(false);
   const canDelete = isAdmin && !user.isSelf;
 
@@ -57,7 +59,7 @@ export function UserCard({ user, isAdmin, gminas }: UserCardProps) {
           {user.organization && (
             <div className="flex items-center gap-1.5">
               <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <span className="truncate">{user.organization}</span>
+              <span className="truncate">{user.organization.name}</span>
             </div>
           )}
           {user.gmina && (
@@ -109,7 +111,13 @@ export function UserCard({ user, isAdmin, gminas }: UserCardProps) {
       </div>
 
       {showEdit && (
-        <UserFormModal mode="edit" user={user} gminas={gminas} onClose={() => setShowEdit(false)} />
+        <UserFormModal
+          mode="edit"
+          user={user}
+          gminas={gminas}
+          organizations={organizations}
+          onClose={() => setShowEdit(false)}
+        />
       )}
     </article>
   );

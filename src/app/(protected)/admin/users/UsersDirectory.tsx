@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Search, Plus, Clock, Users as UsersIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { OrganizationOption } from '@/components/organization/OrganizationSelect';
 import { UserCard } from './UserCard';
 import { UserFormModal } from './UserFormModal';
 import type { UserGmina, UserListItem } from './types';
@@ -26,10 +27,11 @@ type StatusFilter = (typeof STATUS_OPTIONS)[number]['value'];
 interface UsersDirectoryProps {
   users: UserListItem[];
   gminas: UserGmina[];
+  organizations: OrganizationOption[];
   isAdmin: boolean;
 }
 
-export function UsersDirectory({ users, gminas, isAdmin }: UsersDirectoryProps) {
+export function UsersDirectory({ users, gminas, organizations, isAdmin }: UsersDirectoryProps) {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -49,7 +51,7 @@ export function UsersDirectory({ users, gminas, isAdmin }: UsersDirectoryProps) 
       if (statusFilter === 'ACTIVE' && !user.isActive) return false;
       if (statusFilter === 'INACTIVE' && user.isActive) return false;
       if (!q) return true;
-      const haystack = [user.name, user.email, user.organization, user.gmina?.name]
+      const haystack = [user.name, user.email, user.organization?.name, user.gmina?.name]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
@@ -137,12 +139,14 @@ export function UsersDirectory({ users, gminas, isAdmin }: UsersDirectoryProps) 
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((user) => (
-            <UserCard key={user.id} user={user} isAdmin={isAdmin} gminas={gminas} />
+            <UserCard key={user.id} user={user} isAdmin={isAdmin} gminas={gminas} organizations={organizations} />
           ))}
         </div>
       )}
 
-      {showCreate && <UserFormModal mode="create" gminas={gminas} onClose={() => setShowCreate(false)} />}
+      {showCreate && (
+        <UserFormModal mode="create" gminas={gminas} organizations={organizations} onClose={() => setShowCreate(false)} />
+      )}
     </div>
   );
 }

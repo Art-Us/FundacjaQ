@@ -227,6 +227,74 @@ describe('POST /api/admin/users', () => {
     );
   });
 
+  it('rejects assigning an organization that does not exist', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'missing-org',
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: Organization is itself gmina-scoped
+  // (@@unique([name, gminaId])), so a user ending up in a DIFFERENT gmina
+  // than their assigned organization silently breaks that scoping for every
+  // view/report that joins a user through their organization — this must be
+  // rejected, not merely checked for existence.
+  it('rejects assigning an organization that belongs to a different gmina than the user', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g2' } as any);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('innej gminy');
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts an organization that belongs to the SAME gmina as the user', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-1' } as any);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
+    );
+  });
+
   it('does not log a GMINA_CREATE entry when an existing gmina is reused by name', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findFirst.mockResolvedValue({ id: 'existing-gmina', name: 'Istniejąca' } as any);

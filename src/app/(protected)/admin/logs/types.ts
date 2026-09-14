@@ -5,7 +5,7 @@ export interface AuditLogItem {
   actorName: string | null;
   actorRole: string;
   action: string;
-  entityType: 'USER' | 'GMINA' | 'INVITE_TOKEN';
+  entityType: 'USER' | 'GMINA' | 'ORGANIZATION' | 'INVITE_TOKEN';
   entityId: string;
   gminaId: string | null;
   before: Record<string, unknown> | null;
@@ -29,6 +29,9 @@ export const ACTION_LABELS: Record<string, string> = {
   GMINA_CREATE: 'Utworzenie gminy',
   GMINA_UPDATE: 'Edycja gminy',
   GMINA_DELETE: 'Usunięcie gminy',
+  ORGANIZATION_CREATE: 'Utworzenie organizacji',
+  ORGANIZATION_UPDATE: 'Edycja organizacji',
+  ORGANIZATION_DELETE: 'Usunięcie organizacji',
   INVITE_CREATE: 'Wysłanie zaproszenia',
   INVITE_REVOKE: 'Unieważnienie zaproszenia',
 };
@@ -51,6 +54,7 @@ export const ACTION_KIND_LABELS: Record<ActionKind, string> = {
 export const ENTITY_TYPE_LABELS: Record<string, string> = {
   USER: 'Użytkownik',
   GMINA: 'Gmina',
+  ORGANIZATION: 'Organizacja',
   INVITE_TOKEN: 'Zaproszenie',
 };
 
@@ -58,7 +62,7 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
 export function entityLabel(log: Pick<AuditLogItem, 'entityType' | 'entityId' | 'before' | 'after'>): string {
   const snapshot = (log.after ?? log.before) as Record<string, unknown> | null;
   if (!snapshot) return log.entityId;
-  if (log.entityType === 'GMINA') return (snapshot.name as string) ?? log.entityId;
+  if (log.entityType === 'GMINA' || log.entityType === 'ORGANIZATION') return (snapshot.name as string) ?? log.entityId;
   return (snapshot.email as string) ?? log.entityId;
 }
 

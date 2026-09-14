@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { GminaSelect, type GminaSelectValue } from '@/components/gmina/GminaSelect';
+import { OrganizationSelect, type OrganizationOption } from '@/components/organization/OrganizationSelect';
 import type { UserGmina, UserListItem, UserRole } from './types';
 
 const ROLES: { value: UserRole; label: string }[] = [
@@ -22,21 +23,42 @@ interface UserFormModalProps {
   mode: 'create' | 'edit';
   user?: UserListItem;
   gminas: UserGmina[];
+  organizations: OrganizationOption[];
   onClose: () => void;
 }
 
-export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProps) {
+export function UserFormModal({ mode, user, gminas, organizations, onClose }: UserFormModalProps) {
   const router = useRouter();
   const [email, setEmail] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState(user?.name ?? '');
   const [role, setRole] = useState<UserRole>(user?.role ?? 'VOLUNTEER');
-  const [organization, setOrganization] = useState(user?.organization ?? '');
+  const [organizationId, setOrganizationId] = useState<string | null>(user?.organization?.id ?? null);
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: user?.gmina?.id ?? null, newGminaName: null });
   const gminaRequired = mode === 'create' && role !== 'ADMIN';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Organization is itself gmina-scoped (see schema.prisma), so only offer
+  // organizations belonging to the gmina currently selected above — the
+  // server rejects a mismatch anyway (POST/PATCH /api/admin/users), but
+  // surfacing only valid options here means an admin can't even pick a bad
+  // combination in the first place, instead of hitting that error on submit.
+  const organizationsInGmina = useMemo(
+    () => (gmina.gminaId ? organizations.filter((o) => o.gminaId === gmina.gminaId) : []),
+    [organizations, gmina.gminaId]
+  );
+
+  // If the gmina changes (or is cleared) after an organization was already
+  // picked, that organization may no longer be one of the valid options
+  // above — clear the stale selection rather than leave a value selected
+  // that no longer appears in the dropdown's own option list.
+  useEffect(() => {
+    if (organizationId && !organizationsInGmina.some((o) => o.id === organizationId)) {
+      setOrganizationId(null);
+    }
+  }, [organizationId, organizationsInGmina]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -66,7 +88,7 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             password,
             role,
             name: name || undefined,
-            organization: organization || undefined,
+            organizationId: organizationId || undefined,
             phone: phone || undefined,
             gminaId: gmina.gminaId || undefined,
             newGminaName: gmina.newGminaName || undefined,
@@ -75,7 +97,7 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             email,
             role,
             name: name || null,
-            organization: organization || null,
+            organizationId: organizationId || null,
             phone: phone || null,
             gminaId: gmina.newGminaName ? null : gmina.gminaId,
             newGminaName: gmina.newGminaName || undefined,
@@ -208,12 +230,17 @@ export function UserFormModal({ mode, user, gminas, onClose }: UserFormModalProp
             <label htmlFor="user-organization" className={labelClasses}>
               Organizacja
             </label>
-            <input
+            <OrganizationSelect
               id="user-organization"
-              value={organization}
-              onChange={(e) => setOrganization(e.target.value)}
-              className={inputClasses}
+              organizations={organizationsInGmina}
+              gminas={gminas}
+              defaultGminaId={gmina.gminaId}
+              value={organizationId}
+              onChange={setOrganizationId}
             />
+            {!gmina.gminaId && (
+              <p className="text-[11px] text-slate-400 mt-1">Wybierz najpierw gminę, aby wybrać organizację.</p>
+            )}
           </div>
 
           <div>

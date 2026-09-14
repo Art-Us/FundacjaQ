@@ -19,7 +19,7 @@ const createUserSchema = z.object({
   gminaId: z.string().optional(),
   newGminaName: z.string().trim().min(1).max(120).optional(),
   name: z.string().optional(),
-  organization: z.string().optional(),
+  organizationId: z.string().optional(),
   phone: z.string().optional(),
 });
 
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
   }
 
-  const { email, password, role, gminaId, newGminaName, name, organization, phone } = parsed.data;
+  const { email, password, role, gminaId, newGminaName, name, organizationId, phone } = parsed.data;
 
   let effectiveGminaId: string | undefined;
   if (requiresGmina(role) || gminaId || newGminaName) {
@@ -59,6 +59,27 @@ export async function POST(req: NextRequest) {
     }
     effectiveGminaId = resolved.id;
     await auditInlineGminaCreation(admin, resolved, requestMeta(req));
+  }
+
+  // Organization is itself gmina-scoped (see schema.prisma's @@unique([name,
+  // gminaId]) comment) — an org from a different gmina than the one this
+  // user ends up in would silently break that scoping for every view that
+  // joins a user through their organization, so it's checked here alongside
+  // plain existence, not just left to the FK (which only guards existence).
+  if (organizationId) {
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, gminaId: true },
+    });
+    if (!organization) {
+      return NextResponse.json({ error: 'Wybrana organizacja nie istnieje.' }, { status: 400 });
+    }
+    if (effectiveGminaId && organization.gminaId !== effectiveGminaId) {
+      return NextResponse.json(
+        { error: 'Wybrana organizacja należy do innej gminy niż użytkownik.' },
+        { status: 400 }
+      );
+    }
   }
 
   if (await isPasswordPwned(password)) {
@@ -79,7 +100,7 @@ export async function POST(req: NextRequest) {
     // isActive: false — an admin-created account still needs an explicit
     // activation step, same as one created through the invite flow.
     const user = await prisma.user.create({
-      data: { email, passwordHash, role, gminaId: effectiveGminaId, name, organization, phone, isActive: false },
+      data: { email, passwordHash, role, gminaId: effectiveGminaId, name, organizationId, phone, isActive: false },
       select: adminUserSelect,
     });
     await recordAudit({
@@ -101,7 +122,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Konto dla tego adresu email już istnieje.' }, { status: 400 });
     }
     return NextResponse.json(
-      { error: 'Nie udało się utworzyć użytkownika. Sprawdź podane dane (np. gminę).' },
+      { error: 'Nie udało się utworzyć użytkownika. Sprawdź podane dane (np. gminę lub organizację).' },
       { status: 400 }
     );
   }

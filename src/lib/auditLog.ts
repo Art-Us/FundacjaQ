@@ -1,4 +1,4 @@
-import { AuditAction, AuditEntityType, Prisma, type Gmina, type InviteToken, type User } from '@prisma/client';
+import { AuditAction, AuditEntityType, Prisma, type Gmina, type InviteToken, type Organization, type User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { isLastActiveAdmin } from '@/lib/authz';
 import { requiresGmina } from '@/lib/gmina';
@@ -90,7 +90,7 @@ type UserSnapshotSource = Pick<
   | 'name'
   | 'email'
   | 'role'
-  | 'organization'
+  | 'organizationId'
   | 'phone'
   | 'gminaId'
   | 'isActive'
@@ -105,7 +105,7 @@ export function snapshotUser(user: UserSnapshotSource): Record<string, unknown> 
     name: user.name,
     email: user.email,
     role: user.role,
-    organization: user.organization,
+    organizationId: user.organizationId,
     phone: user.phone,
     gminaId: user.gminaId,
     isActive: user.isActive,
@@ -125,6 +125,39 @@ export function snapshotGmina(gmina: GminaSnapshotSource): Record<string, unknow
     voivodeship: gmina.voivodeship,
     latitude: gmina.latitude,
     longitude: gmina.longitude,
+  };
+}
+
+type OrganizationSnapshotSource = Pick<
+  Organization,
+  | 'id'
+  | 'name'
+  | 'street'
+  | 'houseNumber'
+  | 'apartmentNumber'
+  | 'city'
+  | 'postalCode'
+  | 'gminaId'
+  | 'contactFirstName'
+  | 'contactLastName'
+  | 'contactPhone'
+  | 'contactEmail'
+>;
+
+export function snapshotOrganization(organization: OrganizationSnapshotSource): Record<string, unknown> {
+  return {
+    id: organization.id,
+    name: organization.name,
+    street: organization.street,
+    houseNumber: organization.houseNumber,
+    apartmentNumber: organization.apartmentNumber,
+    city: organization.city,
+    postalCode: organization.postalCode,
+    gminaId: organization.gminaId,
+    contactFirstName: organization.contactFirstName,
+    contactLastName: organization.contactLastName,
+    contactPhone: organization.contactPhone,
+    contactEmail: organization.contactEmail,
   };
 }
 
@@ -177,9 +210,9 @@ export const ACTION_KINDS = ['CREATE', 'UPDATE', 'DELETE', 'INVITE'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_KIND_MAP: Record<ActionKind, AuditAction[]> = {
-  CREATE: ['USER_CREATE', 'GMINA_CREATE'],
-  UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE'],
-  DELETE: ['USER_DELETE', 'GMINA_DELETE'],
+  CREATE: ['USER_CREATE', 'GMINA_CREATE', 'ORGANIZATION_CREATE'],
+  UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'ORGANIZATION_UPDATE'],
+  DELETE: ['USER_DELETE', 'GMINA_DELETE', 'ORGANIZATION_DELETE'],
   INVITE: ['INVITE_CREATE', 'INVITE_REVOKE'],
 };
 
@@ -207,6 +240,9 @@ const REVERTIBLE_ACTIONS = new Set<AuditAction>([
   'GMINA_CREATE',
   'GMINA_UPDATE',
   'GMINA_DELETE',
+  'ORGANIZATION_CREATE',
+  'ORGANIZATION_UPDATE',
+  'ORGANIZATION_DELETE',
   'INVITE_CREATE',
   'INVITE_REVOKE',
 ]);
@@ -228,6 +264,8 @@ export function canRevert(log: { action: AuditAction; revertedAt: Date | null })
 const OPPOSITE_ACTION: Partial<Record<AuditAction, AuditAction>> = {
   GMINA_CREATE: 'GMINA_DELETE',
   GMINA_DELETE: 'GMINA_CREATE',
+  ORGANIZATION_CREATE: 'ORGANIZATION_DELETE',
+  ORGANIZATION_DELETE: 'ORGANIZATION_CREATE',
   INVITE_CREATE: 'INVITE_REVOKE',
   INVITE_REVOKE: 'INVITE_CREATE',
 };
@@ -349,6 +387,9 @@ export async function revertAuditLog(
           case 'GMINA':
             stepResult = await revertGmina(tx, effectiveAction(step), step.entityId, before, after);
             break;
+          case 'ORGANIZATION':
+            stepResult = await revertOrganization(tx, effectiveAction(step), step.entityId, before, after);
+            break;
           case 'INVITE_TOKEN':
             stepResult = await revertInvite(tx, effectiveAction(step), step.entityId, before, after);
             break;
@@ -442,7 +483,7 @@ async function revertUser(
     name: (after.name as string | null | undefined) ?? null,
     email: after.email as string | undefined,
     role: after.role as never,
-    organization: (after.organization as string | null | undefined) ?? null,
+    organizationId: (after.organizationId as string | null | undefined) ?? null,
     phone: (after.phone as string | null | undefined) ?? null,
     gminaId: (after.gminaId as string | null | undefined) ?? null,
     isActive: after.isActive as boolean | undefined,
@@ -458,7 +499,7 @@ async function revertUser(
         name: (before.name as string | null) ?? null,
         email: before.email as string | undefined,
         role: nextRole as never,
-        organization: (before.organization as string | null) ?? null,
+        organizationId: (before.organizationId as string | null) ?? null,
         phone: (before.phone as string | null) ?? null,
         gminaId: nextGminaId,
         isActive: nextIsActive,
@@ -473,6 +514,12 @@ async function revertUser(
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return badRequest('Konto dla tego adresu email już istnieje.');
+    }
+    // organizationId is a real FK now (unlike the old free-text organization
+    // column) — restoring it can fail if that organization was deleted since
+    // this action was recorded.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return badRequest('Organizacja przypisana w tym wpisie już nie istnieje — nie można przywrócić.');
     }
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }
@@ -496,7 +543,7 @@ async function revertGmina(
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
         return conflict(
-          'Nie można cofnąć utworzenia tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty lub zaproszenia.'
+          'Nie można cofnąć utworzenia tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty, zaproszenia lub organizacje.'
         );
       }
       return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
@@ -570,6 +617,140 @@ async function revertGmina(
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return badRequest('Gmina o tej nazwie już istnieje.');
+    }
+    return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+  }
+  return { ok: true };
+}
+
+async function revertOrganization(
+  tx: Prisma.TransactionClient,
+  action: AuditAction,
+  entityId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>
+): Promise<StepResult> {
+  if (action === 'ORGANIZATION_CREATE') {
+    try {
+      // deleteMany (not delete) so "does it still exist" and "delete it" are
+      // one atomic statement instead of a separate check-then-act.
+      const result = await tx.organization.deleteMany({ where: { id: entityId } });
+      if (result.count === 0) return conflict('Organizacja została już usunięta.');
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        return conflict('Nie można cofnąć utworzenia tej organizacji, ponieważ są z nią powiązani użytkownicy.');
+      }
+      return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
+    }
+    return { ok: true };
+  }
+
+  if (action === 'ORGANIZATION_DELETE') {
+    const existing = await tx.organization.findUnique({ where: { id: entityId } });
+    if (existing) return conflict('Organizacja już istnieje — nie ma czego przywracać.');
+    const gminaId = before.gminaId as string;
+    const nameCollision = await tx.organization.findFirst({
+      where: { gminaId, name: { equals: before.name as string, mode: 'insensitive' } },
+    });
+    if (nameCollision) return badRequest('Organizacja o tej nazwie już istnieje w tej gminie — nie można przywrócić.');
+    try {
+      await tx.organization.create({
+        data: {
+          id: entityId,
+          name: before.name as string,
+          street: (before.street as string | null) ?? null,
+          houseNumber: (before.houseNumber as string | null) ?? null,
+          apartmentNumber: (before.apartmentNumber as string | null) ?? null,
+          city: (before.city as string | null) ?? null,
+          postalCode: (before.postalCode as string | null) ?? null,
+          gminaId,
+          contactFirstName: (before.contactFirstName as string | null) ?? null,
+          contactLastName: (before.contactLastName as string | null) ?? null,
+          contactPhone: (before.contactPhone as string | null) ?? null,
+          contactEmail: (before.contactEmail as string | null) ?? null,
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        return conflict('Nie można przywrócić organizacji — jej gmina już nie istnieje.');
+      }
+      return { ok: false, status: 500, error: 'Nie udało się przywrócić organizacji.' };
+    }
+    return { ok: true };
+  }
+
+  // ORGANIZATION_UPDATE
+  const target = await tx.organization.findUnique({ where: { id: entityId } });
+  if (!target) return notFound('Organizacja nie istnieje (mogła zostać usunięta).');
+  const beforeName = before.name as string | undefined;
+  const beforeGminaId = (before.gminaId as string | undefined) ?? target.gminaId;
+  if (
+    beforeName &&
+    (beforeName.toLowerCase() !== target.name.toLowerCase() || beforeGminaId !== target.gminaId)
+  ) {
+    const nameCollision = await tx.organization.findFirst({
+      where: { gminaId: beforeGminaId, name: { equals: beforeName, mode: 'insensitive' } },
+    });
+    if (nameCollision && nameCollision.id !== target.id) {
+      return badRequest('Organizacja o tej nazwie już istnieje w tej gminie.');
+    }
+  }
+
+  // Same guard PATCH /api/admin/organizations/[id] applies when moving an
+  // organization between gminas: every CURRENT user of this org has their
+  // own gminaId set to the org's CURRENT gmina, so reverting a gmina change
+  // here would silently strand them the same way a fresh reassignment would.
+  if (beforeGminaId !== target.gminaId) {
+    const usersCount = await tx.user.count({ where: { organizationId: target.id } });
+    if (usersCount > 0) {
+      return conflict(
+        'Nie można cofnąć zmiany gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do obecnej gminy.'
+      );
+    }
+  }
+
+  // Conditioned on the actual admin-managed fields, not `updatedAt` — same
+  // reasoning as revertUser/revertGmina.
+  const expectedFields: Prisma.OrganizationWhereInput = {
+    name: after.name as string | undefined,
+    street: (after.street as string | null | undefined) ?? null,
+    houseNumber: (after.houseNumber as string | null | undefined) ?? null,
+    apartmentNumber: (after.apartmentNumber as string | null | undefined) ?? null,
+    city: (after.city as string | null | undefined) ?? null,
+    postalCode: (after.postalCode as string | null | undefined) ?? null,
+    gminaId: (after.gminaId as string | undefined) ?? target.gminaId,
+    contactFirstName: (after.contactFirstName as string | null | undefined) ?? null,
+    contactLastName: (after.contactLastName as string | null | undefined) ?? null,
+    contactPhone: (after.contactPhone as string | null | undefined) ?? null,
+    contactEmail: (after.contactEmail as string | null | undefined) ?? null,
+  };
+
+  try {
+    const result = await tx.organization.updateMany({
+      where: { id: entityId, ...expectedFields },
+      data: {
+        name: before.name as string,
+        street: (before.street as string | null) ?? null,
+        houseNumber: (before.houseNumber as string | null) ?? null,
+        apartmentNumber: (before.apartmentNumber as string | null) ?? null,
+        city: (before.city as string | null) ?? null,
+        postalCode: (before.postalCode as string | null) ?? null,
+        gminaId: beforeGminaId,
+        contactFirstName: (before.contactFirstName as string | null) ?? null,
+        contactLastName: (before.contactLastName as string | null) ?? null,
+        contactPhone: (before.contactPhone as string | null) ?? null,
+        contactEmail: (before.contactEmail as string | null) ?? null,
+      },
+    });
+    if (result.count === 0) {
+      return conflict('Stan organizacji zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
+    }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return badRequest('Organizacja o tej nazwie już istnieje w tej gminie.');
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return badRequest('Wybrana gmina nie istnieje.');
     }
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }

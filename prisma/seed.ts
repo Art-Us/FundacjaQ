@@ -17,11 +17,12 @@ async function seedAdmin() {
   }
 
   const passwordHash = await hashPassword(password);
-  // ADMIN is site-wide (not tied to one gmina), so gminaId stays unset —
-  // every other field is filled in so the account renders fully on admin/users.
+  // ADMIN is site-wide (not tied to one gmina), so gminaId stays unset — and
+  // since Organization.gminaId is required, an ADMIN account has nothing to
+  // scope an organization to either, so organizationId stays unset too.
+  // Every other field is filled in so the account renders fully on admin/users.
   const data = {
     name: 'Administrator Systemu',
-    organization: 'QFundation',
     phone: '+48 600 000 000',
     passwordHash,
     role: 'ADMIN' as const,
@@ -69,7 +70,99 @@ async function seedKategorie() {
   return created;
 }
 
-async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
+async function seedOrganizacje(gminy: Awaited<ReturnType<typeof seedGminy>>) {
+  const organizacje: Array<{
+    name: string;
+    gminaId: string;
+    street: string;
+    houseNumber: string;
+    apartmentNumber?: string;
+    city: string;
+    postalCode: string;
+    contactFirstName: string;
+    contactLastName: string;
+    contactPhone: string;
+    contactEmail: string;
+  }> = [
+    {
+      name: 'Urząd Gminy Wieliczka',
+      gminaId: gminy[0].id,
+      street: 'Powstania Warszawskiego',
+      houseNumber: '1',
+      city: 'Wieliczka',
+      postalCode: '32-020',
+      contactFirstName: 'Katarzyna',
+      contactLastName: 'Nowak',
+      contactPhone: '+48 601 234 567',
+      contactEmail: 'k.nowak@wieliczka.pl',
+    },
+    {
+      name: 'Urząd Gminy Sanok',
+      gminaId: gminy[1].id,
+      street: 'Rynek',
+      houseNumber: '1',
+      city: 'Sanok',
+      postalCode: '38-500',
+      contactFirstName: 'Tomasz',
+      contactLastName: 'Wójcik',
+      contactPhone: '+48 605 111 222',
+      contactEmail: 't.wojcik@sanok.pl',
+    },
+    {
+      name: 'Polski Czerwony Krzyż',
+      gminaId: gminy[1].id,
+      street: 'Jana Pawła II',
+      houseNumber: '5',
+      city: 'Sanok',
+      postalCode: '38-500',
+      contactFirstName: 'Elżbieta',
+      contactLastName: 'Kaczmarek',
+      contactPhone: '+48 13 463 12 34',
+      contactEmail: 'sanok@pck.org.pl',
+    },
+    {
+      name: 'Ochotnicza Straż Pożarna Kłodzko',
+      gminaId: gminy[2].id,
+      street: 'Strażacka',
+      houseNumber: '3',
+      city: 'Kłodzko',
+      postalCode: '57-300',
+      contactFirstName: 'Grzegorz',
+      contactLastName: 'Baran',
+      contactPhone: '+48 74 867 45 12',
+      contactEmail: 'osp@klodzko.pl',
+    },
+    {
+      name: 'Caritas Diecezji Krakowskiej',
+      gminaId: gminy[0].id,
+      street: 'Krakowska',
+      houseNumber: '8',
+      apartmentNumber: '2',
+      city: 'Wieliczka',
+      postalCode: '32-020',
+      contactFirstName: 'Magdalena',
+      contactLastName: 'Sikora',
+      contactPhone: '+48 12 429 56 78',
+      contactEmail: 'wieliczka@caritas.pl',
+    },
+  ];
+
+  const created: Record<string, { id: string }> = {};
+  for (const o of organizacje) {
+    const { name, gminaId, ...fields } = o;
+    created[name] = await prisma.organization.upsert({
+      where: { name_gminaId: { name, gminaId } },
+      update: fields,
+      create: { name, gminaId, ...fields },
+    });
+  }
+  return created;
+}
+
+async function seedTestUsers(
+  gminy: Awaited<ReturnType<typeof seedGminy>>,
+  organizacje: Awaited<ReturnType<typeof seedOrganizacje>>
+) {
   const users: Array<{
     email: string;
     name: string;
@@ -147,11 +240,18 @@ async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
   const passwordHash = await hashPassword(TEST_PASSWORD);
 
   for (const u of users) {
+    const organization = organizacje[u.organization];
+    if (!organization) {
+      throw new Error(
+        `seedTestUsers: no seeded organization named "${u.organization}" (check it matches a name in seedOrganizacje exactly).`
+      );
+    }
+
     const data = {
       name: u.name,
       role: u.role,
       gminaId: u.gminaId,
-      organization: u.organization,
+      organizationId: organization.id,
       phone: u.phone,
       passwordHash,
       isActive: u.isActive,
@@ -242,7 +342,8 @@ async function main() {
 
   const gminy = await seedGminy();
   const kategorie = await seedKategorie();
-  await seedTestUsers(gminy);
+  const organizacje = await seedOrganizacje(gminy);
+  await seedTestUsers(gminy, organizacje);
   await seedZasoby(gminy, kategorie);
   await seedAlerty(gminy, admin?.id ?? null);
 

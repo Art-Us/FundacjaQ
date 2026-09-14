@@ -64,7 +64,7 @@ export async function GET() {
   const gminas = await prisma.gmina.findMany({
     orderBy: { name: 'asc' },
     include: {
-      _count: { select: { users: true, resources: true, alerts: true, inviteTokens: true } },
+      _count: { select: { users: true, resources: true, alerts: true, inviteTokens: true, organizations: true } },
     },
   });
 

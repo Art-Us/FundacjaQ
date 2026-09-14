@@ -118,7 +118,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       return NextResponse.json(
         {
           error:
-            'Nie można usunąć tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty lub zaproszenia.',
+            'Nie można usunąć tej gminy, ponieważ są z nią powiązani użytkownicy, zasoby, alerty, zaproszenia lub organizacje.',
         },
         { status: 409 }
       );

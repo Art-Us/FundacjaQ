@@ -9,4 +9,5 @@ export interface GminaListItem {
   resourcesCount: number;
   alertsCount: number;
   inviteTokensCount: number;
+  organizationsCount: number;
 }

@@ -21,7 +21,7 @@ export default async function AdminUsersPage() {
   // null means "coordinator with no gmina of their own" — fail closed, never {}.
   const gminaFilter = scopedGminaWhere(currentUser);
 
-  const [users, gminas] = await Promise.all([
+  const [users, gminas, organizations] = await Promise.all([
     gminaFilter === null
       ? Promise.resolve([])
       : prisma.user.findMany({
@@ -34,6 +34,9 @@ export default async function AdminUsersPage() {
     isAdmin
       ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
       : Promise.resolve([]),
+    isAdmin
+      ? prisma.organization.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, gminaId: true } })
+      : Promise.resolve([]),
   ]);
 
   const items: UserListItem[] = users.map((user) => ({
@@ -41,7 +44,7 @@ export default async function AdminUsersPage() {
     name: user.name,
     email: user.email,
     role: user.role,
-    organization: user.organization,
+    organization: user.organization ? { id: user.organization.id, name: user.organization.name } : null,
     phone: user.phone,
     isActive: user.isActive,
     lastActivatedAt: user.lastActivatedAt ? formatDate(user.lastActivatedAt) : null,
@@ -64,7 +67,7 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UsersDirectory users={items} gminas={gminas} isAdmin={isAdmin} />
+      <UsersDirectory users={items} gminas={gminas} organizations={organizations} isAdmin={isAdmin} />
     </main>
   );
 }

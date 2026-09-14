@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended';
-import type { PrismaClient, User, Gmina, InviteToken } from '@prisma/client';
+import type { PrismaClient, User, Gmina, Organization, InviteToken } from '@prisma/client';
 
 vi.mock('./prisma');
 vi.mock('./authz', async () => {
@@ -18,6 +18,7 @@ import {
   recordAudit,
   snapshotUser,
   snapshotGmina,
+  snapshotOrganization,
   snapshotInvite,
   canRevert,
   revertAuditLog,
@@ -35,7 +36,7 @@ function fullUser(overrides: Partial<User> = {}): User {
     email: 'jan@example.com',
     passwordHash: 'super-secret-hash',
     role: 'VOLUNTEER',
-    organization: null,
+    organizationId: null,
     phone: null,
     gminaId: 'gmina-1',
     emailVerified: null,
@@ -66,6 +67,26 @@ function fullGmina(overrides: Partial<Gmina> = {}): Gmina {
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   } as Gmina;
+}
+
+function fullOrganization(overrides: Partial<Organization> = {}): Organization {
+  return {
+    id: 'org-1',
+    name: 'Caritas',
+    street: null,
+    houseNumber: null,
+    apartmentNumber: null,
+    city: null,
+    postalCode: null,
+    gminaId: 'gmina-1',
+    contactFirstName: null,
+    contactLastName: null,
+    contactPhone: null,
+    contactEmail: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  } as Organization;
 }
 
 function fullInvite(overrides: Partial<InviteToken> = {}): InviteToken {
@@ -133,6 +154,13 @@ describe('snapshot*', () => {
   it('snapshotGmina captures the editable fields', () => {
     const snap = snapshotGmina(fullGmina({ name: 'Kraków' }));
     expect(snap.name).toBe('Kraków');
+  });
+
+  it('snapshotOrganization captures the editable fields, including its gmina and contact person', () => {
+    const snap = snapshotOrganization(fullOrganization({ name: 'PCK', contactFirstName: 'Jan' }));
+    expect(snap.name).toBe('PCK');
+    expect(snap.gminaId).toBe('gmina-1');
+    expect(snap.contactFirstName).toBe('Jan');
   });
 
   it('snapshotInvite never includes tokenHash', () => {
@@ -251,7 +279,7 @@ describe('revertAuditLog — USER (single step)', () => {
       name: 'New Name',
       email: 'jan@example.com',
       role: 'VOLUNTEER',
-      organization: null,
+      organizationId: null,
       phone: null,
       gminaId: 'gmina-1',
       isActive: true,
@@ -277,7 +305,7 @@ describe('revertAuditLog — USER (single step)', () => {
         name: 'New Name',
         email: 'jan@example.com',
         role: 'VOLUNTEER',
-        organization: null,
+        organizationId: null,
         phone: null,
         gminaId: 'gmina-1',
         isActive: true,
@@ -305,7 +333,7 @@ describe('revertAuditLog — USER (single step)', () => {
       name: 'Jan',
       email: 'jan@example.com',
       role: 'VOLUNTEER',
-      organization: null,
+      organizationId: null,
       phone: null,
       gminaId: 'gmina-1',
       isActive: true,
@@ -394,6 +422,28 @@ describe('revertAuditLog — USER (single step)', () => {
 
     expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
     expect(prisma.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: organizationId is a real FK now (unlike the old
+  // free-text organization column) — restoring a since-deleted organization
+  // must report a clear, specific error, not fall through to a generic 500.
+  it('reports a clear error (not a generic 500) when the organization to restore no longer exists', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const before = { organizationId: 'deleted-org' };
+    const log = baseLog({ before, after: {} });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.user.findUnique.mockResolvedValue(fullUser() as any);
+    prisma.user.updateMany.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
   });
 });
 
@@ -513,6 +563,181 @@ describe('revertAuditLog — GMINA (single step)', () => {
 
     expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
     expect(prisma.auditLog.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('revertAuditLog — ORGANIZATION (single step)', () => {
+  it('reverts an ORGANIZATION_CREATE by deleting the organization (delete + existence check as one atomic deleteMany)', async () => {
+    const log = baseLog({ action: 'ORGANIZATION_CREATE', entityType: 'ORGANIZATION', entityId: 'org-1' });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
+    expect(prisma.organization.deleteMany).toHaveBeenCalledWith({ where: { id: 'org-1' } });
+  });
+
+  it('reports a conflict when the organization was already deleted by something else since', async () => {
+    const log = baseLog({ action: 'ORGANIZATION_CREATE', entityType: 'ORGANIZATION', entityId: 'org-1' });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.deleteMany.mockResolvedValue({ count: 0 });
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+  });
+
+  it('reports a conflict when the created organization already has users assigned (P2003)', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const log = baseLog({ action: 'ORGANIZATION_CREATE', entityType: 'ORGANIZATION', entityId: 'org-1' });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.deleteMany.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('FK', { code: 'P2003', clientVersion: '5.19.1' })
+    );
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+  });
+
+  it('reverts an ORGANIZATION_DELETE by recreating it from the snapshot', async () => {
+    const before = {
+      name: 'Caritas',
+      street: null,
+      houseNumber: null,
+      apartmentNumber: null,
+      city: null,
+      postalCode: null,
+      gminaId: 'gmina-1',
+      contactFirstName: null,
+      contactLastName: null,
+      contactPhone: null,
+      contactEmail: null,
+    };
+    const log = baseLog({ action: 'ORGANIZATION_DELETE', entityType: 'ORGANIZATION', entityId: 'org-1', before });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(null);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockResolvedValue({} as any);
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
+    expect(prisma.organization.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ id: 'org-1', name: 'Caritas', gminaId: 'gmina-1' }) })
+    );
+  });
+
+  // Regression coverage: if the organization's own gmina was itself deleted
+  // after the organization was (now possible, since deleting the org already
+  // clears the only RESTRICT dependent that would otherwise block it),
+  // recreating the organization must report a clear error, not an opaque 500.
+  it('reports a clear error (not a generic 500) when restoring an organization whose gmina no longer exists', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const before = { name: 'Caritas', gminaId: 'deleted-gmina' };
+    const log = baseLog({ action: 'ORGANIZATION_DELETE', entityType: 'ORGANIZATION', entityId: 'org-1', before });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(null);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('FK', { code: 'P2003', clientVersion: '5.19.1' })
+    );
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+  });
+
+  it('refuses to restore a deleted organization whose (name, gmina) was taken by a new one since', async () => {
+    const before = { name: 'Caritas', gminaId: 'gmina-1' };
+    const log = baseLog({ action: 'ORGANIZATION_DELETE', entityType: 'ORGANIZATION', entityId: 'org-1', before });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(null);
+    prisma.organization.findFirst.mockResolvedValue(fullOrganization({ id: 'org-2' }) as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
+    expect(prisma.organization.create).not.toHaveBeenCalled();
+  });
+
+  it('reverts an ORGANIZATION_UPDATE back to the before snapshot via a conditional write keyed on the admin-managed fields', async () => {
+    const before = {
+      name: 'Stara Nazwa',
+      street: null,
+      houseNumber: null,
+      apartmentNumber: null,
+      city: null,
+      postalCode: null,
+      gminaId: 'gmina-1',
+      contactFirstName: null,
+      contactLastName: null,
+      contactPhone: null,
+      contactEmail: null,
+    };
+    const after = { ...before, name: 'Nowa Nazwa' };
+    const log = baseLog({ action: 'ORGANIZATION_UPDATE', entityType: 'ORGANIZATION', entityId: 'org-1', before, after });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(fullOrganization({ name: 'Nowa Nazwa' }) as any);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
+    expect(prisma.organization.updateMany).toHaveBeenCalledWith({
+      where: { id: 'org-1', ...after },
+      data: expect.objectContaining({ name: 'Stara Nazwa' }),
+    });
+  });
+
+  it('blocks an ORGANIZATION_UPDATE revert when the organization changed again since — the conditional write matches 0 rows', async () => {
+    const after = { name: 'Nowa Nazwa', gminaId: 'gmina-1' };
+    const log = baseLog({ action: 'ORGANIZATION_UPDATE', entityType: 'ORGANIZATION', entityId: 'org-1', after });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(fullOrganization() as any);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+    expect(prisma.auditLog.update).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: mirrors the same guard PATCH
+  // /api/admin/organizations/[id] applies — every CURRENT user of this org
+  // has their own gminaId set to the org's CURRENT gmina, so reverting a
+  // gmina change here must not silently strand them either.
+  it('blocks reverting an ORGANIZATION_UPDATE gmina change when the organization still has users assigned', async () => {
+    const before = { name: 'Caritas', gminaId: 'gmina-old' };
+    const after = { name: 'Caritas', gminaId: 'gmina-new' };
+    const log = baseLog({ action: 'ORGANIZATION_UPDATE', entityType: 'ORGANIZATION', entityId: 'org-1', before, after });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(fullOrganization({ gminaId: 'gmina-new' }) as any);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.user.count.mockResolvedValue(1);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+    expect(prisma.organization.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -908,6 +1133,61 @@ describe('revertAuditLog — reverting a revert ("redo")', () => {
     // "recreate" branch (which would hit "już istnieje" instead).
     expect(prisma.gmina.deleteMany).toHaveBeenCalledWith({ where: { id: 'gmina-1' } });
     expect(prisma.gmina.create).not.toHaveBeenCalled();
+  });
+
+  it('recreates the organization when reverting the revert-record of an ORGANIZATION_CREATE', async () => {
+    const revertRow = baseLog({
+      id: 'log-revert-1',
+      action: 'ORGANIZATION_CREATE',
+      entityType: 'ORGANIZATION',
+      entityId: 'org-1',
+      isRevert: true,
+      before: { name: 'Odzyskana', gminaId: 'gmina-1' },
+      after: {},
+    });
+    prisma.auditLog.findUnique.mockResolvedValue(revertRow as any);
+    mockChain([revertRow]);
+    prisma.organization.findUnique.mockResolvedValue(null); // currently deleted
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockResolvedValue({} as any);
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-revert-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-revert-1'] });
+    // Must take ORGANIZATION_DELETE's "recreate" branch, not attempt to
+    // delete an already-deleted organization a second time.
+    expect(prisma.organization.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ id: 'org-1', name: 'Odzyskana' }) })
+    );
+    expect(prisma.organization.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('deletes the organization again when reverting the revert-record of an ORGANIZATION_DELETE', async () => {
+    const revertRow = baseLog({
+      id: 'log-revert-1',
+      action: 'ORGANIZATION_DELETE',
+      entityType: 'ORGANIZATION',
+      entityId: 'org-1',
+      isRevert: true,
+      before: {},
+      after: { name: 'Odzyskana', gminaId: 'gmina-1' },
+    });
+    prisma.auditLog.findUnique.mockResolvedValue(revertRow as any);
+    mockChain([revertRow]);
+    prisma.organization.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-revert-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-revert-1'] });
+    // Must take ORGANIZATION_CREATE's "delete" branch, not
+    // ORGANIZATION_DELETE's own "recreate" branch (which would hit "już
+    // istnieje" instead).
+    expect(prisma.organization.deleteMany).toHaveBeenCalledWith({ where: { id: 'org-1' } });
+    expect(prisma.organization.create).not.toHaveBeenCalled();
   });
 
   it('still restores a plain field edit normally when reverting the revert-record of a GMINA_UPDATE (no direction flip needed)', async () => {

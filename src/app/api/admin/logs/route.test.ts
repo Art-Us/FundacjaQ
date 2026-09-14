@@ -110,7 +110,7 @@ describe('GET /api/admin/logs', () => {
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: { in: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE'] },
+          action: { in: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'ORGANIZATION_UPDATE'] },
         }),
       })
     );
