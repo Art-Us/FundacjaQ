@@ -14,6 +14,9 @@ export default async function AdminOrganizationsPage() {
   const [organizations, gminas] = await Promise.all([
     prisma.organization.findMany({
       orderBy: { name: 'asc' },
+      // Same cap as the users directory page — this is a listing view, not
+      // a dropdown data source, so it doesn't need every row.
+      take: 200,
       include: {
         gmina: { select: { id: true, name: true } },
         _count: { select: { users: true } },

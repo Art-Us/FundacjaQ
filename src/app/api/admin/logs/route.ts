@@ -4,6 +4,7 @@ import { AuditEntityType, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { canRevert, ACTION_KINDS, ACTION_KIND_MAP } from '@/lib/auditLog';
+import { escapeLikePattern } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,15 @@ const querySchema = z.object({
   gminaId: z.string().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  // Free-text search across who/what the entry is about — matched
+  // server-side so it covers the whole (filtered) log, not just whatever
+  // page the client happens to have already loaded. Whitespace-only
+  // collapses to "no search" rather than a validation error.
+  q: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
 });
 
 export async function GET(req: NextRequest) {
@@ -39,7 +49,7 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Nieprawidłowe parametry filtrowania.' }, { status: 400 });
   }
-  const { take, cursor, entityType, actionKind, actorId, entityId, gminaId, from, to } = parsed.data;
+  const { take, cursor, entityType, actionKind, actorId, entityId, gminaId, from, to, q } = parsed.data;
 
   const where: Prisma.AuditLogWhereInput = {
     ...(entityType ? { entityType } : {}),
@@ -48,19 +58,33 @@ export async function GET(req: NextRequest) {
     ...(entityId ? { entityId } : {}),
     ...(gminaId ? { gminaId } : {}),
     ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+    ...(q
+      ? {
+          OR: [
+            { actorEmail: { contains: escapeLikePattern(q), mode: 'insensitive' } },
+            { actorName: { contains: escapeLikePattern(q), mode: 'insensitive' } },
+            { entityId: { contains: escapeLikePattern(q), mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
 
-  const logs = await prisma.auditLog.findMany({
-    where,
-    // Ordered by `seq` (a real, unique, monotonic DB counter), not
-    // `createdAt`: a cascading revert can write several rows inside one
-    // transaction that all get the identical Postgres CURRENT_TIMESTAMP, and
-    // cursor pagination over a non-unique sort column can then skip or
-    // duplicate rows whenever a page boundary lands inside such a tied group.
-    orderBy: { seq: 'desc' },
-    take: (take ?? DEFAULT_TAKE) + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
+  let logs;
+  try {
+    logs = await prisma.auditLog.findMany({
+      where,
+      // Ordered by `seq` (a real, unique, monotonic DB counter), not
+      // `createdAt`: a cascading revert can write several rows inside one
+      // transaction that all get the identical Postgres CURRENT_TIMESTAMP, and
+      // cursor pagination over a non-unique sort column can then skip or
+      // duplicate rows whenever a page boundary lands inside such a tied group.
+      orderBy: { seq: 'desc' },
+      take: (take ?? DEFAULT_TAKE) + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać dziennika zdarzeń.' }, { status: 500 });
+  }
 
   const hasMore = logs.length > (take ?? DEFAULT_TAKE);
   const page = hasMore ? logs.slice(0, -1) : logs;

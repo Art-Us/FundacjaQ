@@ -34,7 +34,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const target = await prisma.organization.findUnique({ where: { id: params.id } });
+  let target;
+  try {
+    target = await prisma.organization.findUnique({ where: { id: params.id } });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać organizacji.' }, { status: 500 });
+  }
   if (!target) {
     return NextResponse.json({ error: 'Organizacja nie istnieje.' }, { status: 404 });
   }
@@ -86,8 +91,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   if (name !== undefined) data.name = effectiveName;
-  if (gminaId !== undefined && gminaId !== target.gminaId) {
-    const gmina = await prisma.gmina.findUnique({ where: { id: gminaId }, select: { id: true } });
+  const isReassigningGmina = gminaId !== undefined && gminaId !== target.gminaId;
+  if (isReassigningGmina) {
+    let gmina;
+    try {
+      gmina = await prisma.gmina.findUnique({ where: { id: gminaId }, select: { id: true } });
+    } catch {
+      return NextResponse.json(
+        { error: 'Nie udało się zaktualizować organizacji. Sprawdź podane dane.' },
+        { status: 400 }
+      );
+    }
     if (!gmina) {
       return NextResponse.json({ error: 'Wybrana gmina nie istnieje.' }, { status: 400 });
     }
@@ -122,7 +136,25 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (contactEmail !== undefined) data.contactEmail = contactEmail || null;
 
   try {
-    const organization = await prisma.organization.update({ where: { id: target.id }, data });
+    const organization = await prisma.$transaction(async (tx) => {
+      // Re-check right before the write: a concurrent POST/PATCH
+      // /api/admin/users could have assigned a user to this organization in
+      // the time since the usersCount check above (e.g. while this request
+      // was still validating the new gmina/name). Doesn't eliminate the race
+      // (no lock is held), but closes all but a same-transaction-sized
+      // window, matching the same accepted-risk posture as
+      // isLastActiveAdmin's count-then-act check.
+      if (isReassigningGmina) {
+        const usersCount = await tx.user.count({ where: { organizationId: target.id } });
+        if (usersCount > 0) {
+          throw new TransactionAbort(
+            409,
+            'Nie można zmienić gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do poprzedniej gminy.'
+          );
+        }
+      }
+      return tx.organization.update({ where: { id: target.id }, data });
+    });
     await recordAudit({
       actor: admin,
       action: 'ORGANIZATION_UPDATE',
@@ -135,6 +167,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     });
     return NextResponse.json({ organization });
   } catch (err) {
+    if (err instanceof TransactionAbort) {
+      return NextResponse.json({ error: err.error }, { status: err.status });
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return NextResponse.json({ error: 'Organizacja o tej nazwie już istnieje w tej gminie.' }, { status: 409 });
     }
@@ -145,13 +180,28 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
+/** Thrown from inside a $transaction callback to abort+rollback it while carrying a typed HTTP response back out. */
+class TransactionAbort extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly error: string
+  ) {
+    super(error);
+  }
+}
+
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   const admin = await requireAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const target = await prisma.organization.findUnique({ where: { id: params.id } });
+  let target;
+  try {
+    target = await prisma.organization.findUnique({ where: { id: params.id } });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się usunąć organizacji.' }, { status: 500 });
+  }
   if (!target) {
     return NextResponse.json({ error: 'Organizacja nie istnieje.' }, { status: 404 });
   }

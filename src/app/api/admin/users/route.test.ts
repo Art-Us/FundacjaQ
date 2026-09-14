@@ -21,6 +21,10 @@ vi.mock('@/lib/password', async () => {
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
+// Imported by its real path purely so vi.mock('@/lib/prisma') (resolved via
+// this project's __mocks__/prisma.ts) and this specifier refer to the same
+// on-disk module at runtime.
+import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { hashPassword, isPasswordPwned } from '@/lib/password';
 import { GET, POST } from './route';
@@ -39,6 +43,11 @@ function makeRequest(body: unknown) {
 
 beforeEach(() => {
   mockReset(prisma);
+  // mockReset wipes the $transaction implementation the shared mock installs
+  // at module load — POST runs the organization re-check + user.create
+  // through prisma.$transaction(async (tx) => ...), so it must be
+  // reinstalled here (see the doc comment on installTransactionMock).
+  installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
   vi.mocked(hashPassword).mockReset().mockResolvedValue('hashed');
   vi.mocked(isPasswordPwned).mockReset().mockResolvedValue(false);
@@ -272,6 +281,31 @@ describe('POST /api/admin/users', () => {
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
+  // Regression coverage: ADMIN doesn't require a gmina (requiresGmina('ADMIN')
+  // is false), so effectiveGminaId can stay undefined for an ADMIN create —
+  // the mismatch check must still fire in that case instead of being skipped,
+  // otherwise the created user ends up with an organizationId pointing at a
+  // gmina-scoped org while the user itself has no gmina at all, a state
+  // PATCH /api/admin/users/[id] would then reject on every future edit.
+  it('rejects assigning an organization when the resulting user has no gmina at all (e.g. ADMIN + organizationId)', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'ADMIN',
+        organizationId: 'org-1',
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('innej gminy');
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
   it('accepts an organization that belongs to the SAME gmina as the user', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
@@ -293,6 +327,33 @@ describe('POST /api/admin/users', () => {
     expect(prisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
     );
+  });
+
+  // Regression coverage for the org/gmina TOCTOU race: the organization is
+  // checked once before the (slow, external) isPasswordPwned call, then
+  // re-checked immediately before the actual write inside the transaction.
+  // If a concurrent PATCH /api/admin/organizations/[id] reassigns the org's
+  // gmina in that window, the second read must catch it and abort the create.
+  it('aborts with 409 when the organization changes gmina between the precheck and the write', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique
+      .mockResolvedValueOnce({ id: 'org-1', gminaId: 'g1' } as any)
+      .mockResolvedValueOnce({ id: 'org-1', gminaId: 'g2' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    const res = await POST(
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
+    );
+
+    expect(res.status).toBe(409);
+    expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
   it('does not log a GMINA_CREATE entry when an existing gmina is reused by name', async () => {

@@ -13,6 +13,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 beforeEach(() => {
   mockReset(prisma);
+  vi.mocked(prisma.$queryRaw).mockResolvedValue([{ locked: true }] as any);
   prisma.loginAttempt.deleteMany.mockResolvedValue({ count: 0 } as any);
   prisma.inviteToken.deleteMany.mockResolvedValue({ count: 0 } as any);
   prisma.passwordResetToken.deleteMany.mockResolvedValue({ count: 0 } as any);
@@ -66,5 +67,34 @@ describe('runRetentionCleanup', () => {
 
   it('does not throw when all four deletes report zero rows removed', async () => {
     await expect(runRetentionCleanup()).resolves.toBeUndefined();
+  });
+
+  // Regression coverage: instrumentation.ts schedules this cron job in every
+  // server process, so a horizontally-scaled deployment would otherwise run
+  // the exact same deletes on every instance at once — the advisory lock
+  // means only the instance that acquires it does any work.
+  it('skips all deletes when another instance already holds the retention lock', async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce([{ locked: false }] as any);
+
+    await runRetentionCleanup();
+
+    expect(prisma.loginAttempt.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.inviteToken.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.passwordResetToken.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('releases the advisory lock after a successful run', async () => {
+    await runRetentionCleanup();
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2); // acquire + release
+  });
+
+  it('releases the advisory lock even when a delete fails', async () => {
+    prisma.auditLog.deleteMany.mockRejectedValue(new Error('connection lost'));
+
+    await expect(runRetentionCleanup()).rejects.toThrow('connection lost');
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2); // acquire + release (in `finally`)
   });
 });

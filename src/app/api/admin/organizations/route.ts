@@ -78,13 +78,21 @@ export async function GET() {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const organizations = await prisma.organization.findMany({
-    orderBy: { name: 'asc' },
-    include: {
-      gmina: { select: { id: true, name: true } },
-      _count: { select: { users: true } },
-    },
-  });
+  let organizations;
+  try {
+    organizations = await prisma.organization.findMany({
+      orderBy: { name: 'asc' },
+      // Same cap as GET /api/admin/users — this is a directory listing, not a
+      // dropdown data source, so it doesn't need every row.
+      take: 200,
+      include: {
+        gmina: { select: { id: true, name: true } },
+        _count: { select: { users: true } },
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać listy organizacji.' }, { status: 500 });
+  }
 
   return NextResponse.json({ organizations });
 }

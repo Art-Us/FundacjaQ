@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin, isLastActiveAdmin } from '@/lib/authz';
+import { requireAdmin, isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
@@ -61,7 +61,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Nie możesz dezaktywować własnego konta.' }, { status: 403 });
   }
 
-  if (parsed.data.isActive === false && (await isLastActiveAdmin(target))) {
+  // Resolved once, up front: what role/isActive this user will end up with
+  // after this PATCH, whether or not this request actually touches those
+  // fields. Needed both for the last-admin guard below (which must catch a
+  // role change away from ADMIN just as much as isActive:false — either one
+  // strips "active admin" status) and for requiresGmina() further down.
+  const nextRole = parsed.data.role ?? target.role;
+  const nextIsActive = parsed.data.isActive ?? target.isActive;
+
+  if (wouldLoseActiveAdminStatus(target, { role: nextRole, isActive: nextIsActive }) && (await isLastActiveAdmin(target))) {
     return NextResponse.json(
       { error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' },
       { status: 403 }
@@ -98,8 +106,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // their gmina (explicit gminaId: null, or a role change with no gminaId
   // in the same request). That broke gmina-scoped visibility for the
   // affected user elsewhere (see scopedGminaWhere in lib/gmina.ts).
-  const effectiveRole = parsed.data.role ?? target.role;
-  if (requiresGmina(effectiveRole) && !effectiveGminaId) {
+  if (requiresGmina(nextRole) && !effectiveGminaId) {
     return NextResponse.json({ error: 'Ta rola wymaga przypisanej gminy.' }, { status: 400 });
   }
 
@@ -134,10 +141,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   try {
-    const user = await prisma.user.update({
-      where: { id: target.id },
-      data,
-      select: adminUserSelect,
+    const user = await prisma.$transaction(async (tx) => {
+      // Re-check the organization's gmina one more time, right before the
+      // write: the precheck above ran before the email-collision lookup,
+      // widening the window for a concurrent PATCH
+      // /api/admin/organizations/[id] to reassign this organization to a
+      // different gmina in between. Doesn't eliminate the race (no lock is
+      // held), but closes all but a same-transaction-sized window.
+      if (effectiveOrganizationId) {
+        const organization = await tx.organization.findUnique({
+          where: { id: effectiveOrganizationId },
+          select: { gminaId: true },
+        });
+        if (!organization || organization.gminaId !== effectiveGminaId) {
+          throw new TransactionAbort(
+            409,
+            'Wybrana organizacja zmieniła gminę w trakcie aktualizacji użytkownika — spróbuj ponownie.'
+          );
+        }
+      }
+      return tx.user.update({
+        where: { id: target.id },
+        data,
+        select: adminUserSelect,
+      });
     });
     await recordAudit({
       actor: admin,
@@ -151,6 +178,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     });
     return NextResponse.json({ user });
   } catch (err) {
+    if (err instanceof TransactionAbort) {
+      return NextResponse.json({ error: err.error }, { status: err.status });
+    }
     // The email-collision check above already covers the common case — this
     // only fires on a genuine race (two concurrent updates to the same new
     // email), a real P2002 unique-constraint hit. Anything else is a real
@@ -216,4 +246,14 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   }
 
   return NextResponse.json({ message: 'Użytkownik został usunięty.' });
+}
+
+/** Thrown from inside a $transaction callback to abort+rollback it while carrying a typed HTTP response back out. */
+class TransactionAbort extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly error: string
+  ) {
+    super(error);
+  }
 }

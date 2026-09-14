@@ -13,6 +13,7 @@ vi.mock('@/lib/authz', async () => {
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
+import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { GET, PATCH, DELETE } from './route';
 
@@ -51,6 +52,11 @@ function callDelete(id = 'target-1') {
 
 beforeEach(() => {
   mockReset(prisma);
+  // mockReset wipes the $transaction implementation the shared mock installs
+  // at module load — PATCH runs the organization re-check + user.update
+  // through prisma.$transaction(async (tx) => ...), so it must be
+  // reinstalled here (see the doc comment on installTransactionMock).
+  installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
 });
 
@@ -182,6 +188,37 @@ describe('PATCH /api/admin/users/[id]', () => {
     prisma.user.update.mockResolvedValue({} as any);
 
     const res = await callPatch({ isActive: false }, 'admin-2');
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalled();
+  });
+
+  // Regression coverage: the last-admin guard used to only fire on an
+  // explicit isActive:false — a role change away from ADMIN (with isActive
+  // left true/untouched) has the exact same effect on the active-admin count
+  // and went completely unchecked.
+  it('blocks demoting the only remaining active admin\'s role away from ADMIN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(
+      baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true, gminaId: 'gmina-1' }) as any
+    );
+    prisma.user.count.mockResolvedValue(1);
+
+    const res = await callPatch({ role: 'COORDINATOR' }, 'admin-2');
+
+    expect(res.status).toBe(403);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows demoting an admin\'s role when another active admin remains', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(
+      baseUser({ id: 'admin-2', role: 'ADMIN', isActive: true, gminaId: 'gmina-1' }) as any
+    );
+    prisma.user.count.mockResolvedValue(2);
+    prisma.user.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ role: 'COORDINATOR' }, 'admin-2');
 
     expect(res.status).toBe(200);
     expect(prisma.user.update).toHaveBeenCalled();
@@ -324,6 +361,24 @@ describe('PATCH /api/admin/users/[id]', () => {
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
     );
+  });
+
+  // Regression coverage for the org/gmina TOCTOU race: the organization is
+  // re-checked immediately before the write, inside the transaction, so a
+  // concurrent PATCH /api/admin/organizations/[id] reassigning its gmina in
+  // between the precheck and the write is caught rather than silently
+  // producing a mismatched user/organization pair.
+  it('aborts with 409 when the organization changes gmina between the precheck and the write', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+    prisma.organization.findUnique
+      .mockResolvedValueOnce({ id: 'org-1', gminaId: 'gmina-1' } as any)
+      .mockResolvedValueOnce({ id: 'org-1', gminaId: 'gmina-2' } as any);
+
+    const res = await callPatch({ organizationId: 'org-1' });
+
+    expect(res.status).toBe(409);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   // Regression coverage: even when THIS request doesn't touch

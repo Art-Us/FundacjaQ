@@ -78,3 +78,18 @@ export async function isLastActiveAdmin(
   const activeAdminCount = await client.user.count({ where: { role: 'ADMIN', isActive: true } });
   return activeAdminCount <= 1;
 }
+
+/**
+ * Whether applying `next` to `target` would leave it no longer an active
+ * ADMIN — i.e. the role changing away from ADMIN, or isActive being turned
+ * off. Deactivation alone used to be the only trigger checked against
+ * isLastActiveAdmin(); a role change away from ADMIN (with isActive left
+ * untouched) needs the exact same guard, since it has the same effect on the
+ * active-admin count.
+ */
+export function wouldLoseActiveAdminStatus(
+  target: { role: string; isActive: boolean },
+  next: { role: string; isActive: boolean }
+): boolean {
+  return target.role === 'ADMIN' && target.isActive && (next.role !== 'ADMIN' || !next.isActive);
+}

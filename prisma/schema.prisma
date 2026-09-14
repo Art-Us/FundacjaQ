@@ -131,6 +131,13 @@ model LoginAttempt {
   userAgent String?
   createdAt DateTime @default(now())
 
+  // GET /api/admin/login-attempts also supports a substring search on email
+  // (Prisma `contains`, translated to a leading-wildcard ILIKE), which this
+  // plain btree index can't accelerate — that would need a pg_trgm GIN index
+  // on email, requiring the extension to be enabled on the database. Left as
+  // a known trade-off for now: the 90-day retention cleanup (lib/cleanup.ts)
+  // bounds this table's size, so a full scan stays cheap unless login volume
+  // grows substantially.
   @@index([email, createdAt])
 }
 
@@ -255,6 +262,11 @@ model AuditLog {
   @@index([entityType, entityId, seq])
   @@index([actorId, createdAt])
   @@index([createdAt])
+  // GET /api/admin/logs also supports filtering by gminaId alone (or
+  // combined with a date range), always ordered by seq — without this, that
+  // filter combination falls back to scanning the createdAt/seq order or the
+  // whole table as the log grows within its retention window.
+  @@index([gminaId, seq])
 }
 
 model Alert {

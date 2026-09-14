@@ -39,16 +39,24 @@ ALTER TABLE "User" ADD COLUMN "organizationId" TEXT;
 -- real Organization row (scoped to that user's own gmina, since
 -- Organization.gminaId is NOT NULL), and every user sharing the same
 -- (organization text, gmina) pair is pointed at the SAME new row rather than
--- one each. A user with no gmina (only possible for a pre-existing ADMIN —
--- see requiresGmina() in lib/gmina.ts) has nothing to scope a new
--- Organization row to, so their free-text value is dropped here rather than
--- left half-migrated; Organization was never a concept the old plain-text
--- field actually enforced per-gmina, so this is a real, if narrow, one-time
--- data loss for that specific case, not an oversight.
+-- one each — matched case/whitespace-insensitively via the same
+-- trim+collapse-internal-whitespace rule as normalizeOrganizationName() in
+-- lib/organization.ts, so "Caritas" and " caritas  " for the same gmina
+-- become one row instead of two silently-duplicate ones. A user with no
+-- gmina has nothing to scope a new Organization row to, so their free-text
+-- value is dropped here rather than left half-migrated; note gminaId is only
+-- guaranteed non-null going forward (enforced in application code at
+-- create/update time, not as a DB constraint — see requiresGmina() in
+-- lib/gmina.ts), so this can drop data for any old COORDINATOR/VOLUNTEER row
+-- that predates that rule being enforced, not only pre-existing ADMINs.
+-- Before running this against production data, check how many affected rows
+-- actually exist:
+--   SELECT count(*) FROM "User"
+--   WHERE "gminaId" IS NULL AND "organization" IS NOT NULL AND btrim("organization") <> '';
 INSERT INTO "Organization" ("id", "name", "gminaId", "createdAt", "updatedAt")
-SELECT DISTINCT ON (u."organization", u."gminaId")
+SELECT DISTINCT ON (lower(regexp_replace(btrim(u."organization"), '\s+', ' ', 'g')), u."gminaId")
   md5(random()::text || clock_timestamp()::text || u."id"),
-  u."organization",
+  regexp_replace(btrim(u."organization"), '\s+', ' ', 'g'),
   u."gminaId",
   now(),
   now()
@@ -56,7 +64,7 @@ FROM "User" u
 WHERE u."organization" IS NOT NULL
   AND btrim(u."organization") <> ''
   AND u."gminaId" IS NOT NULL
-ORDER BY u."organization", u."gminaId", u."id";
+ORDER BY lower(regexp_replace(btrim(u."organization"), '\s+', ' ', 'g')), u."gminaId", u."id";
 
 UPDATE "User" u
 SET "organizationId" = o."id"
@@ -64,7 +72,7 @@ FROM "Organization" o
 WHERE u."organization" IS NOT NULL
   AND btrim(u."organization") <> ''
   AND u."gminaId" IS NOT NULL
-  AND o."name" = u."organization"
+  AND lower(o."name") = lower(regexp_replace(btrim(u."organization"), '\s+', ' ', 'g'))
   AND o."gminaId" = u."gminaId";
 
 -- AlterTable: drop the old free-text column now that any preservable values have been migrated

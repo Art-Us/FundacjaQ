@@ -3,23 +3,12 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
+import { escapeLikePattern } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
 const MAX_TAKE = 100;
 const DEFAULT_TAKE = 50;
-
-// Postgres's (I)LIKE treats `%` and `_` as wildcards even when the value
-// arrives as a bound parameter — that's pattern-matching semantics applied
-// at match time, not a SQL-injection concern. Left unescaped, searching for
-// an email containing a literal underscore (a perfectly ordinary character
-// in an email local-part, e.g. "jan_kowalski@…") would also match
-// "jan.kowalski@…", "janXkowalski@…", etc. Escaping with the backslash
-// Postgres's LIKE/ILIKE already treats as its default escape character
-// makes `contains` match the literal substring the admin typed.
-function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
 
 // Read-only, ADMIN-only — same reasoning as GET /api/admin/logs: no
 // gmina-scoped view exists yet, and this is a security-relevant trail, so
@@ -51,14 +40,19 @@ export async function GET(req: NextRequest) {
     ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
 
-  const attempts = await prisma.loginAttempt.findMany({
-    where,
-    // `id` as a tiebreaker so cursor pagination stays deterministic across
-    // rows sharing the same createdAt millisecond.
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: (take ?? DEFAULT_TAKE) + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
+  let attempts;
+  try {
+    attempts = await prisma.loginAttempt.findMany({
+      where,
+      // `id` as a tiebreaker so cursor pagination stays deterministic across
+      // rows sharing the same createdAt millisecond.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: (take ?? DEFAULT_TAKE) + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać dziennika logowań.' }, { status: 500 });
+  }
 
   const hasMore = attempts.length > (take ?? DEFAULT_TAKE);
   const page = hasMore ? attempts.slice(0, -1) : attempts;

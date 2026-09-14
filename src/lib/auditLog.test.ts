@@ -409,6 +409,59 @@ describe('revertAuditLog — USER (single step)', () => {
     expect(isLastActiveAdmin).toHaveBeenCalledWith(expect.anything(), prisma);
   });
 
+  // Regression coverage: the last-admin guard used to only fire when
+  // isActive was ending up false — reverting a log that changes `role` away
+  // from ADMIN (leaving isActive untouched) has the same effect on the
+  // active-admin count and went completely unchecked.
+  it('blocks reverting a role change that would demote the last active admin', async () => {
+    const before = { role: 'VOLUNTEER' };
+    const log = baseLog({ before, after: { role: 'ADMIN' } });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.user.findUnique.mockResolvedValue(fullUser({ role: 'ADMIN', isActive: true }) as any);
+    vi.mocked(isLastActiveAdmin).mockResolvedValue(true);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 403, error: expect.any(String) });
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: restoring before.organizationId from the snapshot
+  // used to trust the snapshot's gmina blindly — if the organization was
+  // reassigned to a different gmina after this action was recorded but
+  // before it's reverted, the user would end up in an organization that
+  // belongs to someone else's gmina.
+  it("blocks restoring a user's organization when that organization has since moved to a different gmina", async () => {
+    const before = { organizationId: 'org-1', gminaId: 'gmina-old' };
+    const log = baseLog({ before, after: {} });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.user.findUnique.mockResolvedValue(fullUser({ gminaId: 'gmina-old' }) as any);
+    prisma.organization.findUnique.mockResolvedValue(fullOrganization({ gminaId: 'gmina-new' }) as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows restoring a user\'s organization when it still belongs to the restored gmina', async () => {
+    const before = { organizationId: 'org-1', gminaId: 'gmina-1' };
+    const log = baseLog({ before, after: { organizationId: null, gminaId: 'gmina-1' } });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.user.findUnique.mockResolvedValue(fullUser({ gminaId: 'gmina-1', organizationId: null }) as any);
+    prisma.organization.findUnique.mockResolvedValue(fullOrganization({ gminaId: 'gmina-1' }) as any);
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
+  });
+
   it('rejects the revert when the restored email now belongs to someone else', async () => {
     const before = { email: 'taken@example.com' };
     const log = baseLog({ before, after: {} });
@@ -518,6 +571,28 @@ describe('revertAuditLog — GMINA (single step)', () => {
 
     expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
     expect(prisma.gmina.create).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: the pre-check above is case-insensitive but
+  // Gmina.name's unique index is case-sensitive, so a concurrent create of a
+  // differently-cased name can race past that check and only collide at the
+  // DB level — this must surface the same "already exists" message, not a
+  // generic 500.
+  it('reports "already exists" (not a generic 500) when a differently-cased name races past the pre-check', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const before = { name: 'Warszawa' };
+    const log = baseLog({ action: 'GMINA_DELETE', entityType: 'GMINA', entityId: 'gmina-1', before });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.gmina.findUnique.mockResolvedValue(null);
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.19.1' })
+    );
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
   });
 
   it('reverts a GMINA_UPDATE back to the before snapshot via a conditional write keyed on the admin-managed fields', async () => {
@@ -670,6 +745,28 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
 
     expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
     expect(prisma.organization.create).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: the pre-check above is case-insensitive but the
+  // (name, gminaId) unique index is case-sensitive, so a concurrent create
+  // of a differently-cased name in the same gmina can race past that check
+  // and only collide at the DB level — this must surface the same "already
+  // exists" message, not a generic 500.
+  it('reports "already exists" (not a generic 500) when a differently-cased name races past the pre-check', async () => {
+    const { Prisma } = await import('@prisma/client');
+    const before = { name: 'Caritas', gminaId: 'gmina-1' };
+    const log = baseLog({ action: 'ORGANIZATION_DELETE', entityType: 'ORGANIZATION', entityId: 'org-1', before });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+    prisma.organization.findUnique.mockResolvedValue(null);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.19.1' })
+    );
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
   });
 
   it('reverts an ORGANIZATION_UPDATE back to the before snapshot via a conditional write keyed on the admin-managed fields', async () => {

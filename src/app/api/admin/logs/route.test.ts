@@ -116,6 +116,57 @@ describe('GET /api/admin/logs', () => {
     );
   });
 
+  // Regression coverage: the client-side search used to only filter logs
+  // already loaded in the browser, silently missing anything not yet paged
+  // in. Matching server-side against actorEmail/actorName/entityId covers
+  // the whole (filtered) log instead.
+  it('applies the free-text q filter as a case-insensitive OR across actor/entity fields', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?q=jan.kowalski%40example.com');
+
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { actorEmail: { contains: 'jan.kowalski@example.com', mode: 'insensitive' } },
+            { actorName: { contains: 'jan.kowalski@example.com', mode: 'insensitive' } },
+            { entityId: { contains: 'jan.kowalski@example.com', mode: 'insensitive' } },
+          ],
+        }),
+      })
+    );
+  });
+
+  it('escapes LIKE wildcard characters in q so they match literally', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?q=jan_kowalski');
+
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{ actorEmail: { contains: 'jan\\_kowalski', mode: 'insensitive' } }]),
+        }),
+      })
+    );
+  });
+
+  it('ignores a blank q instead of matching every row', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?q=%20%20');
+
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ OR: expect.anything() }),
+      })
+    );
+  });
+
   it('rejects an invalid enum filter value before querying the DB', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
 

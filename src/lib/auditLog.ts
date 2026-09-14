@@ -1,6 +1,6 @@
 import { AuditAction, AuditEntityType, Prisma, type Gmina, type InviteToken, type Organization, type User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { isLastActiveAdmin } from '@/lib/authz';
+import { isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/lib/authz';
 import { requiresGmina } from '@/lib/gmina';
 import { parseClientIp } from '@/lib/clientIp';
 
@@ -453,7 +453,10 @@ async function revertUser(
   if (target.id === actor.id && nextIsActive === false && target.isActive) {
     return { ok: false, status: 403, error: 'Nie możesz dezaktywować własnego konta.' };
   }
-  if (nextIsActive === false && target.isActive && (await isLastActiveAdmin(target, tx))) {
+  if (
+    wouldLoseActiveAdminStatus(target, { role: nextRole, isActive: nextIsActive }) &&
+    (await isLastActiveAdmin(target, tx))
+  ) {
     return { ok: false, status: 403, error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' };
   }
   if (requiresGmina(nextRole as never) && !nextGminaId) {
@@ -463,6 +466,25 @@ async function revertUser(
     const existing = await tx.user.findUnique({ where: { email: before.email as string } });
     if (existing && existing.id !== target.id) {
       return badRequest('Konto dla tego adresu email już istnieje.');
+    }
+  }
+
+  // Organization is itself gmina-scoped — restoring before.organizationId is
+  // only safe if that organization's CURRENT gmina still matches the gmina
+  // being restored onto the user. The organization may have been reassigned
+  // to a different gmina (PATCH /api/admin/organizations/[id]) at any point
+  // after this action was recorded but before it's reverted; the P2003 catch
+  // below only catches the organization being deleted outright, not this.
+  // Mirrors the equivalent gmina-match guard in revertOrganization.
+  if (before.organizationId) {
+    const organization = await tx.organization.findUnique({
+      where: { id: before.organizationId as string },
+      select: { gminaId: true },
+    });
+    if (organization && organization.gminaId !== nextGminaId) {
+      return conflict(
+        'Nie można przywrócić tej zmiany — organizacja przypisana w tym wpisie należy teraz do innej gminy.'
+      );
     }
   }
 
@@ -569,7 +591,16 @@ async function revertGmina(
           longitude: (before.longitude as number | null) ?? null,
         },
       });
-    } catch {
+    } catch (err) {
+      // The findFirst check above is case-insensitive but Gmina.name's
+      // unique index is case-sensitive — a concurrent create of a
+      // differently-cased name (e.g. "Warszawa" vs "WARSZAWA") can race past
+      // that check and only collide here. Same message as the pre-check,
+      // not a generic 500, since this is the identical "already exists"
+      // condition, just caught one statement later.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        return badRequest('Gmina o tej nazwie już istnieje — nie można przywrócić.');
+      }
       return { ok: false, status: 500, error: 'Nie udało się przywrócić gminy.' };
     }
     return { ok: true };
@@ -673,6 +704,15 @@ async function revertOrganization(
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
         return conflict('Nie można przywrócić organizacji — jej gmina już nie istnieje.');
+      }
+      // The findFirst check above is case-insensitive but the (name, gminaId)
+      // unique index is case-sensitive — a concurrent create of a
+      // differently-cased name in the same gmina can race past that check
+      // and only collide here. Same message as the pre-check, not a generic
+      // 500, since this is the identical "already exists" condition, just
+      // caught one statement later.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        return badRequest('Organizacja o tej nazwie już istnieje w tej gminie — nie można przywrócić.');
       }
       return { ok: false, status: 500, error: 'Nie udało się przywrócić organizacji.' };
     }

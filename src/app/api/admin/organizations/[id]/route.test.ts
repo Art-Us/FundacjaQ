@@ -10,6 +10,7 @@ vi.mock('@/lib/authz', async () => {
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
+import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { PATCH, DELETE } from './route';
 
@@ -51,6 +52,11 @@ function callDelete(id = 'target-1') {
 
 beforeEach(() => {
   mockReset(prisma);
+  // mockReset wipes the $transaction implementation the shared mock installs
+  // at module load — PATCH runs the users-count re-check + organization.update
+  // through prisma.$transaction(async (tx) => ...), so it must be
+  // reinstalled here (see the doc comment on installTransactionMock).
+  installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
 });
 
@@ -160,6 +166,23 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     expect(prisma.organization.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ gmina: { connect: { id: 'g2' } } }) })
     );
+  });
+
+  // Regression coverage for the org/gmina TOCTOU race: usersCount is
+  // re-checked immediately before the write, inside the transaction, so a
+  // concurrent POST/PATCH /api/admin/users assigning a user to this
+  // organization in between the precheck and the write is caught rather
+  // than silently stranding that user in a now-wrong gmina.
+  it('aborts with 409 when a user gets assigned to the organization between the precheck and the write', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g2' } as any);
+    prisma.user.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+    const res = await callPatch({ gminaId: 'g2' });
+
+    expect(res.status).toBe(409);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
   });
 
   it('rejects reassignment to a nonexistent gmina', async () => {
