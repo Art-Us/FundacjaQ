@@ -78,6 +78,13 @@ export function OrganizationSelect({
         className={selectClasses}
       >
         {!required && <option value="">— Brak —</option>}
+        {/* Same fix as GminaSelect: a required select with no matching
+            <option value=""> can't render blank, so the browser falls back to
+            visually showing the first real option as selected while `value`
+            (and the form's actual state) stays null — desyncing the UI from
+            state until the user manually reselects something. Currently no
+            caller passes required, but keep this correct for when one does. */}
+        {required && !value && <option value="" disabled hidden />}
         {options.map((o) => (
           <option key={o.id} value={o.id}>
             {o.name}

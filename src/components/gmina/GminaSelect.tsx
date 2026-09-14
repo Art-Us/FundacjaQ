@@ -83,6 +83,14 @@ export function GminaSelect({
         className={selectClasses}
       >
         {!required && !creatingNew && <option value="">— Brak —</option>}
+        {/* Placeholder for "required, nothing picked yet": without a matching
+            <option value="">, the browser can't render the select as blank and
+            falls back to visually showing the first real option as selected —
+            while `value.gminaId` (and thus the form's actual state) stays null.
+            That silently desyncs the UI from the state until the user manually
+            reselects something, so the form can then reject a submit as
+            "gmina required" even though a gmina APPEARS to be chosen. */}
+        {required && !creatingNew && !value.gminaId && <option value="" disabled hidden />}
         {creatingNew && <option value="" disabled hidden />}
         {options.map((g) => (
           <option key={g.id} value={g.id}>
