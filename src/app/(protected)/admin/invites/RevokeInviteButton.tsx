@@ -13,17 +13,22 @@ export function RevokeInviteButton({ inviteId }: { inviteId: string }) {
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/admin/invites/${inviteId}/revoke`, { method: 'POST' });
-    const data = await res.json();
+    try {
+      const res = await fetch(`/api/admin/invites/${inviteId}/revoke`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
 
-    setLoading(false);
+      if (!res.ok) {
+        setError(data.error ?? 'Coś poszło nie tak.');
+        return;
+      }
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
-      return;
+      router.refresh();
+    } catch (err) {
+      console.error('[RevokeInviteButton] request failed:', err);
+      setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
+    } finally {
+      setLoading(false);
     }
-
-    router.refresh();
   }
 
   return (

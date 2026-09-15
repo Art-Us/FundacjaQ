@@ -38,6 +38,12 @@ describe('checkLoginPairBlock', () => {
 
     expect((await checkLoginPairBlock(EMAIL, IP)).blocked).toBe(false);
   });
+
+  it('fails open (not blocked) instead of throwing when Redis errors', async () => {
+    vi.mocked(redis.get).mockRejectedValue(new Error('connection lost'));
+
+    await expect(checkLoginPairBlock(EMAIL, IP)).resolves.toEqual({ blocked: false, until: null });
+  });
 });
 
 describe('recordFailedLoginPair', () => {
@@ -83,5 +89,19 @@ describe('clearLoginPairFailures', () => {
 
     expect(redis.del).toHaveBeenCalledWith(`login-pair-fails:${EMAIL}:${IP}`);
     expect(redis.del).toHaveBeenCalledWith(`login-pair-block:${EMAIL}:${IP}`);
+  });
+
+  it('does not throw (never blocks an already-authenticated login) when Redis errors', async () => {
+    vi.mocked(redis.del).mockRejectedValue(new Error('connection lost'));
+
+    await expect(clearLoginPairFailures(EMAIL, IP)).resolves.toBeUndefined();
+  });
+});
+
+describe('recordFailedLoginPair resilience', () => {
+  it('does not throw (never masks the caller\'s own error) when Redis errors', async () => {
+    vi.mocked(redis.incr).mockRejectedValue(new Error('connection lost'));
+
+    await expect(recordFailedLoginPair(EMAIL, IP)).resolves.toBeUndefined();
   });
 });

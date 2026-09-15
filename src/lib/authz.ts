@@ -1,10 +1,18 @@
 import { getServerSession } from 'next-auth';
+import type { Prisma } from '@prisma/client';
 import { authOptions } from './auth';
+import { prisma } from './prisma';
 
 export interface AuthorizedUser {
   id: string;
   role: string;
   gminaId: string | null;
+  // Present on the real NextAuth session (see types/next-auth.d.ts,
+  // DefaultSession['user']) but optional here so existing call sites/tests
+  // that only care about id/role/gminaId don't need to supply them. Used for
+  // attributing audit log entries (see lib/auditLog.ts) to a human-readable actor.
+  email?: string | null;
+  name?: string | null;
 }
 
 /** Returns the current session user if they're ADMIN or COORDINATOR, otherwise null. */
@@ -12,6 +20,16 @@ export async function requireAdminOrCoordinator(): Promise<AuthorizedUser | null
   const session = await getServerSession(authOptions);
   const user = session?.user;
   if (!user || (user.role !== 'ADMIN' && user.role !== 'COORDINATOR')) {
+    return null;
+  }
+  return user;
+}
+
+/** Returns the current session user if they're ADMIN, otherwise null. */
+export async function requireAdmin(): Promise<AuthorizedUser | null> {
+  const session = await getServerSession(authOptions);
+  const user = session?.user;
+  if (!user || user.role !== 'ADMIN') {
     return null;
   }
   return user;
@@ -32,4 +50,46 @@ export function canManageUser(
   if (actor.id === target.id) return false;
   if (actor.role === 'ADMIN') return true;
   return target.role === 'VOLUNTEER' && target.gminaId !== null && target.gminaId === actor.gminaId;
+}
+
+/**
+ * Whether deleting or deactivating `target` would leave the system with zero
+ * active ADMIN accounts — the only way anyone could get back in at that point
+ * is a direct database/seed-script fix, so this must never be allowed,
+ * regardless of who requests it or whether they're acting on themselves or
+ * someone else. Only meaningful for a target that IS currently an active
+ * admin; anyone else can never affect the active-admin count by definition.
+ *
+ * This is a plain count-then-act check — two admins deactivating/deleting
+ * each other in the exact same instant, via two different transactions,
+ * could in theory still both pass it. That residual race is accepted as
+ * effectively impossible to hit in practice, not engineered around with
+ * row locking. Pass `client` (a `tx` from `prisma.$transaction(async tx =>
+ * ...)`) when calling this from inside a transaction that itself acts on
+ * the count's result — e.g. lib/auditLog.ts's revertUser — so the count is
+ * at least read through that same transaction rather than a second,
+ * unrelated connection.
+ */
+export async function isLastActiveAdmin(
+  target: { role: string; isActive: boolean },
+  client: Pick<Prisma.TransactionClient, 'user'> = prisma
+): Promise<boolean> {
+  if (target.role !== 'ADMIN' || !target.isActive) return false;
+  const activeAdminCount = await client.user.count({ where: { role: 'ADMIN', isActive: true } });
+  return activeAdminCount <= 1;
+}
+
+/**
+ * Whether applying `next` to `target` would leave it no longer an active
+ * ADMIN — i.e. the role changing away from ADMIN, or isActive being turned
+ * off. Deactivation alone used to be the only trigger checked against
+ * isLastActiveAdmin(); a role change away from ADMIN (with isActive left
+ * untouched) needs the exact same guard, since it has the same effect on the
+ * active-admin count.
+ */
+export function wouldLoseActiveAdminStatus(
+  target: { role: string; isActive: boolean },
+  next: { role: string; isActive: boolean }
+): boolean {
+  return target.role === 'ADMIN' && target.isActive && (next.role !== 'ADMIN' || !next.isActive);
 }

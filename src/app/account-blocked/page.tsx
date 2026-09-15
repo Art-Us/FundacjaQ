@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { signOut } from 'next-auth/react';
+import { ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function AccountBlockedPage() {
@@ -16,11 +17,18 @@ export default function AccountBlockedPage() {
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-4 py-16 text-center">
-      <h1 className="text-2xl font-bold text-slate-100 mb-4">Konto zostało zablokowane</h1>
-      <p className="text-slate-400 max-w-md mb-8">
-        Twoje konto zostało dezaktywowane. Skontaktuj się z administratorem, aby przywrócić dostęp.
-      </p>
-      <Button onClick={() => signOut({ callbackUrl: '/login' })}>Przejdź do logowania</Button>
+      <div className="w-full max-w-sm rounded-3xl bg-white p-8 shadow-sm border border-slate-200/80">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 mb-4 shadow-xs">
+          <ShieldAlert className="h-7 w-7" />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">Konto zostało zablokowane</h1>
+        <p className="text-xs text-slate-500 mb-6">
+          Twoje konto zostało dezaktywowane. Skontaktuj się z administratorem, aby przywrócić dostęp.
+        </p>
+        <Button onClick={() => signOut({ callbackUrl: '/login' })} className="w-full">
+          Przejdź do logowania
+        </Button>
+      </div>
     </main>
   );
 }

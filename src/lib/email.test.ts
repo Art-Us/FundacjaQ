@@ -52,6 +52,7 @@ describe('email sending', () => {
         to: 'volunteer@example.com',
         subject: expect.stringContaining('Zaproszenie'),
         text: expect.stringContaining('https://example.com/invite/abc'),
+        html: expect.stringContaining('href="https://example.com/invite/abc"'),
       })
     );
   });

@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import { headers } from 'next/headers';
 import './globals.css';
 import { SessionProvider } from '@/components/providers/SessionProvider';
+
+const inter = Inter({ subsets: ['latin', 'latin-ext'], weight: ['300', '400', '500', '600', '700', '800'] });
 
 export const metadata: Metadata = {
   title: 'QFundation',
@@ -19,7 +22,7 @@ export default async function RootLayout({
   headers();
   return (
     <html lang="pl">
-      <body className="bg-slate-950 text-slate-100 antialiased min-h-screen flex flex-col">
+      <body className={`${inter.className} bg-[#f4f7fb] text-slate-800 antialiased min-h-screen flex flex-col`}>
         <SessionProvider>
           <div className="flex-1 flex flex-col">{children}</div>
         </SessionProvider>

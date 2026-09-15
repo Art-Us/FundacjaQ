@@ -5,6 +5,8 @@ const prisma = new PrismaClient();
 
 const TEST_PASSWORD = 'Test1234!';
 
+const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
 async function seedAdmin() {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
@@ -15,17 +17,24 @@ async function seedAdmin() {
   }
 
   const passwordHash = await hashPassword(password);
+  // ADMIN is site-wide (not tied to one gmina), so gminaId stays unset — and
+  // since Organization.gminaId is required, an ADMIN account has nothing to
+  // scope an organization to either, so organizationId stays unset too.
+  // Every other field is filled in so the account renders fully on admin/users.
+  const data = {
+    name: 'Administrator Systemu',
+    phone: '+48 600 000 000',
+    passwordHash,
+    role: 'ADMIN' as const,
+    isActive: true,
+    lastActivatedAt: daysAgo(120),
+    emailVerified: daysAgo(120),
+  };
 
   await prisma.user.upsert({
     where: { email },
-    update: { passwordHash },
-    create: {
-      email,
-      passwordHash,
-      role: 'ADMIN',
-      isActive: true,
-      emailVerified: new Date(),
-    },
+    update: data,
+    create: { email, ...data },
   });
 
   console.log(`🌱 Konto admina gotowe: ${email}`);
@@ -69,29 +78,35 @@ async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
   const passwordHash = await hashPassword(TEST_PASSWORD);
 
   for (const u of users) {
+    const organization = organizacje[u.organization];
+    if (!organization) {
+      throw new Error(
+        `seedTestUsers: no seeded organization named "${u.organization}" (check it matches a name in seedOrganizacje exactly).`
+      );
+    }
+
+    const data = {
+      name: u.name,
+      role: u.role,
+      gminaId: u.gminaId,
+      organizationId: organization.id,
+      phone: u.phone,
+      passwordHash,
+      isActive: u.isActive,
+      lastActivatedAt: u.lastActivatedAt,
+      lastDeactivatedAt: u.lastDeactivatedAt,
+      deactivationReason: u.deactivationReason,
+      emailVerified: daysAgo(90),
+    };
     await prisma.user.upsert({
       where: { email: u.email },
-      update: {
-        name: u.name,
-        role: u.role,
-        gminaId: u.gminaId,
-        passwordHash,
-        isActive: true,
-      },
-      create: {
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        gminaId: u.gminaId,
-        passwordHash,
-        isActive: true,
-        emailVerified: new Date(),
-      },
+      update: data,
+      create: { email: u.email, ...data },
     });
   }
 
   console.log(`🌱 Konta testowe gotowe (hasło: ${TEST_PASSWORD}):`);
-  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]`));
+  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]${u.isActive ? '' : ' (nieaktywne)'}`));
 }
 
 async function seedZasoby(gminy: Awaited<ReturnType<typeof seedGminy>>, kategorie: Awaited<ReturnType<typeof seedKategorie>>) {
@@ -186,7 +201,8 @@ async function main() {
 
   const gminy = await seedGminy();
   const kategorie = await seedKategorie();
-  await seedTestUsers(gminy);
+  const organizacje = await seedOrganizacje(gminy);
+  await seedTestUsers(gminy, organizacje);
   await seedZasoby(gminy, kategorie);
   await seedAlerty(gminy, admin?.id ?? null);
   await cleanupObsoleteGminy(gminy.map((g) => g.id));

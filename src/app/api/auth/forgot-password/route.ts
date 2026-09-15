@@ -83,13 +83,21 @@ export async function POST(req: NextRequest) {
   }
 
   const rawToken = generateToken();
-  await prisma.passwordResetToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
-    },
-  });
+  try {
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(rawToken),
+        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      },
+    });
+  } catch (err) {
+    // Stay opaque to the client either way (don't reveal that something broke
+    // server-side, and don't create a code path an attacker could use to
+    // distinguish "no such account" from "infra error") — just log it.
+    console.error('[forgot-password] failed to create password reset token:', err);
+    return genericResponse();
+  }
 
   const resetUrl = `${process.env.NEXTAUTH_URL}/reset-password/${rawToken}`;
   await sendPasswordResetEmail(user.email, resetUrl);

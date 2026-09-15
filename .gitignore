@@ -18,8 +18,9 @@ dist/
 .env.production.local
 deploy/azure-provision.env
 
-# Logs
-logs/
+# Logs (root-level runtime log output only — anchored so it doesn't also
+# match src/app/api/admin/logs or src/app/(protected)/admin/logs)
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

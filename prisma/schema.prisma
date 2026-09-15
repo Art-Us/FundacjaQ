@@ -62,23 +62,57 @@ enum ResourceStatus {
   DEPLETED
 }
 
+enum AuditAction {
+  USER_CREATE
+  USER_UPDATE
+  USER_DELETE
+  USER_ACTIVATE
+  USER_DEACTIVATE
+  GMINA_CREATE
+  GMINA_UPDATE
+  GMINA_DELETE
+  ORGANIZATION_CREATE
+  ORGANIZATION_UPDATE
+  ORGANIZATION_DELETE
+  INVITE_CREATE
+  INVITE_REVOKE
+}
+
+enum AuditEntityType {
+  USER
+  GMINA
+  ORGANIZATION
+  INVITE_TOKEN
+}
+
 model User {
-  id                String    @id @default(cuid())
-  name              String?
-  email             String    @unique
-  passwordHash      String
-  role              Role      @default(VOLUNTEER)
-  organization      String?
-  phone             String?
-  gminaId           String?
-  gmina             Gmina?    @relation(fields: [gminaId], references: [id])
-  emailVerified     DateTime?
-  isActive          Boolean   @default(true)
-  failedAttempts    Int       @default(0)
-  lockedUntil       DateTime?
-  passwordChangedAt DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  name               String?
+  email              String    @unique
+  passwordHash       String
+  role               Role      @default(VOLUNTEER)
+  organizationId     String?
+  // Optional relation, but deliberately RESTRICT (not Prisma's SET-NULL
+  // default for an optional FK) — an org with users still assigned to it
+  // must not be deletable out from under them. gminaId below stays SET NULL
+  // by contrast: that FK predates this one and hasn't been revisited, but a
+  // gmina delete silently detaching its users while the delete route's own
+  // error message claims it would be blocked is a known pre-existing
+  // inconsistency, not a pattern to copy here.
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  phone              String?
+  gminaId            String?
+  gmina              Gmina?    @relation(fields: [gminaId], references: [id])
+  emailVerified      DateTime?
+  isActive           Boolean   @default(true)
+  lastActivatedAt    DateTime?
+  lastDeactivatedAt  DateTime?
+  deactivationReason String?
+  failedAttempts     Int       @default(0)
+  lockedUntil        DateTime?
+  passwordChangedAt  DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   alertsCreated       Alert[]
   invitesCreated      InviteToken[]
@@ -125,6 +159,13 @@ model LoginAttempt {
   userAgent String?
   createdAt DateTime @default(now())
 
+  // GET /api/admin/login-attempts also supports a substring search on email
+  // (Prisma `contains`, translated to a leading-wildcard ILIKE), which this
+  // plain btree index can't accelerate — that would need a pg_trgm GIN index
+  // on email, requiring the extension to be enabled on the database. Left as
+  // a known trade-off for now: the 90-day retention cleanup (lib/cleanup.ts)
+  // bounds this table's size, so a full scan stays cheap unless login volume
+  // grows substantially.
   @@index([email, createdAt])
 }
 
@@ -140,10 +181,41 @@ model Gmina {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  users        User[]
-  alerts       Alert[]
-  resources    Resource[]
-  inviteTokens InviteToken[]
+  users         User[]
+  alerts        Alert[]
+  resources     Resource[]
+  inviteTokens  InviteToken[]
+  organizations Organization[]
+}
+
+model Organization {
+  id              String   @id @default(cuid())
+  name            String
+  street          String?
+  houseNumber     String?
+  apartmentNumber String?
+  city            String?
+  postalCode      String?
+  gminaId         String
+  gmina           Gmina    @relation(fields: [gminaId], references: [id])
+  // Contact person for this organization — deliberately separate from any
+  // User account (an organization's day-to-day contact may not be, or ever
+  // become, a user of this system).
+  contactFirstName String?
+  contactLastName  String?
+  contactPhone     String?
+  contactEmail     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users User[]
+
+  // Scoped to (name, gmina) rather than a global unique name — the same
+  // organization name plausibly recurs across different gminas (e.g. a local
+  // branch of a national charity), so only an exact duplicate within the
+  // same gmina is treated as "the same organization" (mirrors createGmina's
+  // case/whitespace-insensitive matching, see lib/organization.ts).
+  @@unique([name, gminaId])
 }
 
 model ResourceCategory {
@@ -171,6 +243,58 @@ model Resource {
   gmina       Gmina            @relation(fields: [gminaId], references: [id])
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+}
+
+// Append-only admin action trail: who did what, to which record, when, and
+// what it looked like before/after — with an optional revert. Deliberately
+// has NO foreign keys to User/Gmina/InviteToken: those rows can be deleted
+// (see the P2003 RESTRICT handling in the admin CRUD routes) and a RESTRICT
+// here would block deleting the very thing being audited, so actor/entity
+// identity is captured as a plain id plus a point-in-time snapshot instead
+// of a live relation. `before`/`after` are built from an explicit per-entity
+// allowlist (see lib/auditLog.ts) that never includes passwordHash or tokenHash.
+model AuditLog {
+  id  String @id @default(cuid())
+  // A real DB-assigned monotonic sequence, used ONLY to order same-entity
+  // rows for the cascading-revert chain (lib/auditLog.ts) — cuids are
+  // roughly time-ordered but not guaranteed to be, so two rows created in
+  // the same millisecond (or by different app instances) could otherwise
+  // sort in the wrong causal order and make revertAuditLog undo them out of
+  // sequence. Postgres serializes concurrent inserts' sequence assignment,
+  // so this is reliable in a way `createdAt`/`id` alone are not.
+  seq Int @default(autoincrement())
+  actorId    String
+  actorEmail String
+  actorName  String?
+  actorRole  Role
+  action     AuditAction
+  entityType AuditEntityType
+  entityId   String
+  gminaId    String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime        @default(now())
+
+  // Set on THIS row once someone reverts the action it records.
+  revertedAt   DateTime?
+  revertedById String?
+
+  // Set on the row created BY a revert, pointing back at what it reverted.
+  isRevert  Boolean    @default(false)
+  revertOfId String?
+  revertOf   AuditLog?  @relation("AuditRevertChain", fields: [revertOfId], references: [id])
+  revertedBy AuditLog[] @relation("AuditRevertChain")
+
+  @@index([entityType, entityId, seq])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  // GET /api/admin/logs also supports filtering by gminaId alone (or
+  // combined with a date range), always ordered by seq — without this, that
+  // filter combination falls back to scanning the createdAt/seq order or the
+  // whole table as the log grows within its retention window.
+  @@index([gminaId, seq])
 }
 
 model Alert {

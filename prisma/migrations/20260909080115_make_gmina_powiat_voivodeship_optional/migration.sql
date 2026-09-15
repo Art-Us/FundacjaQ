@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Gmina" ALTER COLUMN "powiat" DROP NOT NULL,
+ALTER COLUMN "voivodeship" DROP NOT NULL;

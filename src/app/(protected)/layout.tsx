@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
+import { ProtectedShell } from '@/components/layout/ProtectedShell';
 
 // The authoritative session check for every non-public page. Unlike middleware.ts
 // (which only decrypts the cookie), getSession() runs authOptions.callbacks.jwt()
@@ -21,5 +22,16 @@ export default async function ProtectedLayout({ children }: { children: React.Re
     redirect(session?.blocked ? '/account-blocked' : '/login');
   }
 
-  return <>{children}</>;
+  const { role } = session.user;
+  const canManageInvites = role === 'ADMIN' || role === 'COORDINATOR';
+
+  return (
+    <ProtectedShell
+      name={session.user.name ?? session.user.email ?? 'Użytkownik'}
+      role={role}
+      canManageInvites={canManageInvites}
+    >
+      {children}
+    </ProtectedShell>
+  );
 }

@@ -87,6 +87,18 @@ describe('POST /api/auth/forgot-password', () => {
     expect(sendPasswordResetEmail).toHaveBeenCalledWith('user@example.com', expect.stringContaining('/reset-password/'));
   });
 
+  it('still returns the generic response (not a raw crash) when creating the reset token fails', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'user@example.com', isActive: true } as any);
+    prisma.passwordResetToken.create.mockRejectedValue(new Error('connection lost'));
+
+    const res = await POST(makeRequest({ email: 'user@example.com' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.message).toContain('Jeśli podany adres istnieje');
+    expect(sendPasswordResetEmail).not.toHaveBeenCalled();
+  });
+
   it('does not create a token for a nonexistent email', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
 
