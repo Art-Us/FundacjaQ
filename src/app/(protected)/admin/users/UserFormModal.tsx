@@ -1,19 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { GminaSelect, type GminaSelectValue } from '@/components/gmina/GminaSelect';
 import { OrganizationSelect, type OrganizationOption } from '@/components/organization/OrganizationSelect';
+import { ROLE_LABELS } from '@/lib/users';
 import type { UserGmina, UserListItem, UserRole } from './types';
 
-const ROLES: { value: UserRole; label: string }[] = [
-  { value: 'VOLUNTEER', label: 'Wolontariusz' },
-  { value: 'COORDINATOR', label: 'Koordynator' },
-  { value: 'ADMIN', label: 'Administrator' },
-];
+const ROLES: { value: UserRole; label: string }[] = (['VOLUNTEER', 'COORDINATOR', 'ADMIN'] as const).map((value) => ({
+  value,
+  label: ROLE_LABELS[value],
+}));
 
 const inputClasses =
   'w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-sm text-slate-900 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition';
@@ -25,10 +24,11 @@ interface UserFormModalProps {
   gminas: UserGmina[];
   organizations: OrganizationOption[];
   onClose: () => void;
+  /** Called after a successful create/edit, before onClose — lets the caller refetch its own list instead of relying on router.refresh(). */
+  onSaved?: () => void;
 }
 
-export function UserFormModal({ mode, user, gminas, organizations, onClose }: UserFormModalProps) {
-  const router = useRouter();
+export function UserFormModal({ mode, user, gminas, organizations, onClose, onSaved }: UserFormModalProps) {
   const [email, setEmail] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState(user?.name ?? '');
@@ -116,7 +116,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose }: Us
         return;
       }
 
-      router.refresh();
+      onSaved?.();
       onClose();
     } catch (err) {
       console.error('[UserFormModal] request failed:', err);

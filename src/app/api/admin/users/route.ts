@@ -2,15 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireAdmin, requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
-import { adminUserSelect } from '@/lib/users';
-import { requiresGmina, resolveGminaId } from '@/lib/gmina';
+import { adminUserSelect, ROLE_LABELS } from '@/lib/users';
+import { requiresGmina, resolveGminaId, scopedGminaWhere } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
+import { escapeLikePattern } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
 const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
+const DEFAULT_PAGE_SIZE = 30;
+const MAX_PAGE_SIZE = 100;
+const SORT_FIELDS = ['createdAt', 'lastActivatedAt', 'lastDeactivatedAt', 'name'] as const;
+const SORT_DIRS = ['asc', 'desc'] as const;
+type SortField = (typeof SORT_FIELDS)[number];
+type SortDir = (typeof SORT_DIRS)[number];
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -23,19 +30,133 @@ const createUserSchema = z.object({
   phone: z.string().optional(),
 });
 
-export async function GET() {
-  const admin = await requireAdmin();
-  if (!admin) {
+const listQuerySchema = z.object({
+  page: z.coerce.number().int().positive().max(1_000_000).optional().default(1),
+  pageSize: z.coerce.number().int().positive().max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
+  q: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+  role: z.enum(ROLES).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  onlyPending: z.enum(['true', 'false']).optional(),
+  gminaId: z.string().optional(),
+  organizationId: z.string().optional(),
+  sortBy: z.enum(SORT_FIELDS).optional().default('createdAt'),
+  sortDir: z.enum(SORT_DIRS).optional().default('desc'),
+});
+
+/**
+ * `id` as a stable tiebreaker: two rows sharing the same sort value (e.g. two
+ * users created in the same millisecond, or two with no lastActivatedAt)
+ * would otherwise have no guaranteed relative order across pages — a row
+ * could be skipped or repeated when paginating. Direction-independent of the
+ * primary sort; it only needs to be consistent, not meaningful.
+ */
+function buildOrderBy(sortBy: SortField, sortDir: SortDir): Prisma.UserOrderByWithRelationInput[] {
+  const primary: Prisma.UserOrderByWithRelationInput =
+    sortBy === 'name'
+      ? { name: sortDir }
+      : sortBy === 'lastActivatedAt'
+        ? { lastActivatedAt: sortDir }
+        : sortBy === 'lastDeactivatedAt'
+          ? { lastDeactivatedAt: sortDir }
+          : { createdAt: sortDir };
+  return [primary, { id: 'asc' }];
+}
+
+/**
+ * Free-text search across the same fields the (now server-side) search used
+ * to check client-side: name/email/phone/deactivation reason as substring
+ * matches, plus organization/gmina name through their relations, plus a
+ * "does the query match this role/status's displayed LABEL" check — so
+ * typing "administrator" or "nieaktywny" still works, not just raw column
+ * values a user would never type.
+ */
+function buildSearchOr(q: string): Prisma.UserWhereInput[] {
+  const escaped = escapeLikePattern(q);
+  const lower = q.toLowerCase();
+  const conditions: Prisma.UserWhereInput[] = [
+    { name: { contains: escaped, mode: 'insensitive' } },
+    { email: { contains: escaped, mode: 'insensitive' } },
+    { phone: { contains: escaped, mode: 'insensitive' } },
+    { deactivationReason: { contains: escaped, mode: 'insensitive' } },
+    { organization: { name: { contains: escaped, mode: 'insensitive' } } },
+    { gmina: { name: { contains: escaped, mode: 'insensitive' } } },
+  ];
+  const matchingRoles = (Object.keys(ROLE_LABELS) as Array<keyof typeof ROLE_LABELS>).filter((r) =>
+    ROLE_LABELS[r].toLowerCase().includes(lower)
+  );
+  if (matchingRoles.length > 0) conditions.push({ role: { in: matchingRoles } });
+  if ('aktywny'.includes(lower)) conditions.push({ isActive: true });
+  if ('nieaktywny'.includes(lower)) conditions.push({ isActive: false });
+  return conditions;
+}
+
+export async function GET(req: NextRequest) {
+  const actor = await requireAdminOrCoordinator();
+  if (!actor) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 200,
-    select: adminUserSelect,
-  });
+  const parsed = listQuerySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Nieprawidłowe parametry filtrowania.' }, { status: 400 });
+  }
+  const { page, pageSize, q, role, status, onlyPending, gminaId, organizationId, sortBy, sortDir } = parsed.data;
 
-  return NextResponse.json({ users });
+  // Mirrors every other gmina-scoped list in this codebase: ADMIN sees
+  // everything ({}), a coordinator sees only their own gmina, and a
+  // coordinator with NO gmina of their own sees nothing — never silently
+  // falls back to "no restriction" (see the 2026-09-10 audit finding this
+  // exact fail-open pattern already caused an IDOR elsewhere).
+  const gminaFilter = scopedGminaWhere(actor);
+  if (gminaFilter === null) {
+    return NextResponse.json({ users: [], total: 0, page, pageSize, totalPages: 0 });
+  }
+
+  const where: Prisma.UserWhereInput = {
+    ...gminaFilter,
+    ...(role ? { role } : {}),
+    ...(status === 'ACTIVE' ? { isActive: true } : {}),
+    ...(status === 'INACTIVE' ? { isActive: false } : {}),
+    ...(onlyPending === 'true' ? { lastActivatedAt: null } : {}),
+    ...(organizationId ? { organizationId } : {}),
+    // Only ADMIN's explicit gminaId is honored here, spread AFTER
+    // ...gminaFilter so it can only ever narrow an ADMIN's unrestricted `{}`
+    // — never applied for a COORDINATOR, since the same key would otherwise
+    // silently overwrite (and widen) their own fail-closed gmina scope above.
+    ...(actor.role === 'ADMIN' && gminaId ? { gminaId } : {}),
+    ...(q ? { OR: buildSearchOr(q) } : {}),
+  };
+
+  try {
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: buildOrderBy(sortBy, sortDir),
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: { ...adminUserSelect, gmina: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    return NextResponse.json({
+      users: users.map((user) => ({
+        ...user,
+        isSelf: user.id === actor.id,
+        canManage: canManageUser(actor, user),
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać listy użytkowników.' }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {

@@ -1,12 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export function DeleteUserButton({ userId, userLabel }: { userId: string; userLabel: string }) {
-  const router = useRouter();
+interface DeleteUserButtonProps {
+  userId: string;
+  userLabel: string;
+  /** Called after a successful delete so the caller can refetch its own list. */
+  onSuccess?: () => void;
+}
+
+export function DeleteUserButton({ userId, userLabel, onSuccess }: DeleteUserButtonProps) {
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +29,7 @@ export function DeleteUserButton({ userId, userLabel }: { userId: string; userLa
         return;
       }
 
-      router.refresh();
+      onSuccess?.();
     } catch (err) {
       console.error('[DeleteUserButton] request failed:', err);
       setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');

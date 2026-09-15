@@ -5,6 +5,7 @@ import { Mail, Phone, Building2, MapPin, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
 import type { OrganizationOption } from '@/components/organization/OrganizationSelect';
+import { ROLE_LABELS } from '@/lib/users';
 import { DeleteUserButton } from './DeleteUserButton';
 import { UserFormModal } from './UserFormModal';
 import type { UserGmina, UserListItem } from './types';
@@ -15,20 +16,16 @@ const ROLE_BADGE: Record<string, string> = {
   VOLUNTEER: 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
-const ROLE_LABEL: Record<string, string> = {
-  ADMIN: 'Administrator',
-  COORDINATOR: 'Koordynator',
-  VOLUNTEER: 'Wolontariusz',
-};
-
 interface UserCardProps {
   user: UserListItem;
   isAdmin: boolean;
   gminas: UserGmina[];
   organizations: OrganizationOption[];
+  /** Called after any mutation (edit/activate/deactivate/delete) that should refresh the parent's currently-loaded page. */
+  onChanged: () => void;
 }
 
-export function UserCard({ user, isAdmin, gminas, organizations }: UserCardProps) {
+export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: UserCardProps) {
   const [showEdit, setShowEdit] = useState(false);
   const canDelete = isAdmin && !user.isSelf;
 
@@ -41,7 +38,7 @@ export function UserCard({ user, isAdmin, gminas, organizations }: UserCardProps
             <span
               className={`inline-block mt-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-lg border ${ROLE_BADGE[user.role]}`}
             >
-              {ROLE_LABEL[user.role]}
+              {ROLE_LABELS[user.role]}
             </span>
           </div>
           {user.isActive ? (
@@ -105,9 +102,13 @@ export function UserCard({ user, isAdmin, gminas, organizations }: UserCardProps
               Edytuj
             </Button>
           )}
-          {user.canManage && <ToggleUserActiveButton userId={user.id} isActive={user.isActive} />}
+          {user.canManage && (
+            <ToggleUserActiveButton userId={user.id} isActive={user.isActive} onSuccess={onChanged} />
+          )}
         </div>
-        {canDelete && <DeleteUserButton userId={user.id} userLabel={user.name ?? user.email} />}
+        {canDelete && (
+          <DeleteUserButton userId={user.id} userLabel={user.name ?? user.email} onSuccess={onChanged} />
+        )}
       </div>
 
       {showEdit && (
@@ -117,6 +118,7 @@ export function UserCard({ user, isAdmin, gminas, organizations }: UserCardProps
           gminas={gminas}
           organizations={organizations}
           onClose={() => setShowEdit(false)}
+          onSaved={onChanged}
         />
       )}
     </article>

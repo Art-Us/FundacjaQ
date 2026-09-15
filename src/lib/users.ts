@@ -1,4 +1,13 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
+
+// Shared between GET /api/admin/users (server-side "does this label match the
+// search text" check) and UsersDirectory's role filter dropdown, so the two
+// never drift apart.
+export const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: 'Administrator',
+  COORDINATOR: 'Koordynator',
+  VOLUNTEER: 'Wolontariusz',
+};
 
 // Shared by the admin user CRUD routes — never include passwordHash here.
 export const adminUserSelect = {

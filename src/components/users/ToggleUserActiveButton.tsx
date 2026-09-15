@@ -1,11 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
-export function ToggleUserActiveButton({ userId, isActive }: { userId: string; isActive: boolean }) {
-  const router = useRouter();
+interface ToggleUserActiveButtonProps {
+  userId: string;
+  isActive: boolean;
+  /** Called after a successful activate/deactivate so the caller can refetch its own list — this button no longer assumes a server component owns that data. */
+  onSuccess?: () => void;
+}
+
+export function ToggleUserActiveButton({ userId, isActive, onSuccess }: ToggleUserActiveButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showReasonInput, setShowReasonInput] = useState(false);
@@ -32,7 +37,7 @@ export function ToggleUserActiveButton({ userId, isActive }: { userId: string; i
 
       setShowReasonInput(false);
       setReason('');
-      router.refresh();
+      onSuccess?.();
     } catch (err) {
       console.error('[ToggleUserActiveButton] request failed:', err);
       setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');

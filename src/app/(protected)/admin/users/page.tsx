@@ -1,13 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { formatDate } from '@/lib/utils';
-import { canManageUser } from '@/lib/authz';
-import { scopedGminaWhere } from '@/lib/gmina';
-import { adminUserSelect } from '@/lib/users';
 import { RefreshOnMount } from '@/components/RefreshOnMount';
 import { UsersDirectory } from './UsersDirectory';
-import type { UserListItem } from './types';
 
 export default async function AdminUsersPage() {
   const session = await getSession();
@@ -15,22 +10,14 @@ export default async function AdminUsersPage() {
     redirect('/');
   }
 
-  const currentUser = session.user;
-  const isAdmin = currentUser.role === 'ADMIN';
-  // Mirrors admin/invites: a coordinator only ever sees their own gmina.
-  // null means "coordinator with no gmina of their own" — fail closed, never {}.
-  const gminaFilter = scopedGminaWhere(currentUser);
+  const isAdmin = session.user.role === 'ADMIN';
 
-  const [users, gminas, organizations] = await Promise.all([
-    gminaFilter === null
-      ? Promise.resolve([])
-      : prisma.user.findMany({
-          where: gminaFilter,
-          orderBy: { createdAt: 'desc' },
-          take: 200,
-          select: { ...adminUserSelect, gmina: { select: { id: true, name: true } } },
-        }),
-    // Only ADMIN can create/reassign users, so coordinators never need the full list.
+  // The user LIST itself is no longer fetched here — UsersDirectory loads it
+  // (paginated, filtered, searched) from GET /api/admin/users on its own,
+  // the same way AuditLogDirectory owns its own data fetching. Only these
+  // small lookup lists (for the create/edit form's dropdowns) stay
+  // server-rendered, since only ADMIN can create/reassign users anyway.
+  const [gminas, organizations] = await Promise.all([
     isAdmin
       ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
       : Promise.resolve([]),
@@ -38,22 +25,6 @@ export default async function AdminUsersPage() {
       ? prisma.organization.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, gminaId: true } })
       : Promise.resolve([]),
   ]);
-
-  const items: UserListItem[] = users.map((user) => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    organization: user.organization ? { id: user.organization.id, name: user.organization.name } : null,
-    phone: user.phone,
-    isActive: user.isActive,
-    lastActivatedAt: user.lastActivatedAt ? formatDate(user.lastActivatedAt) : null,
-    lastDeactivatedAt: user.lastDeactivatedAt ? formatDate(user.lastDeactivatedAt) : null,
-    deactivationReason: user.deactivationReason,
-    gmina: user.gmina ? { id: user.gmina.id, name: user.gmina.name } : null,
-    isSelf: user.id === currentUser.id,
-    canManage: canManageUser(currentUser, user),
-  }));
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
@@ -67,7 +38,7 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UsersDirectory users={items} gminas={gminas} organizations={organizations} isAdmin={isAdmin} />
+      <UsersDirectory gminas={gminas} organizations={organizations} isAdmin={isAdmin} />
     </main>
   );
 }
