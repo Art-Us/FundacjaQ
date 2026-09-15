@@ -2,7 +2,9 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Captcha } from '@/components/ui/Captcha';
 import { useCaptchaGate } from '@/hooks/useCaptchaGate';
 import { acceptInvite } from './actions';
@@ -44,43 +46,48 @@ export function AcceptInviteForm({ token }: { token: string }) {
   }
 
   if (success) {
-    return <p className="text-sm text-emerald-400">Konto utworzone. Przekierowywanie do logowania…</p>;
+    return (
+      <div className="rounded-2xl bg-emerald-50 p-4 border border-emerald-200 text-center space-y-2">
+        <CheckCircle2 className="h-6 w-6 text-emerald-600 mx-auto" />
+        <p className="text-xs font-semibold text-emerald-800">Konto utworzone. Przekierowywanie do logowania…</p>
+      </div>
+    );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full">
       <div>
-        <label className="block text-sm text-slate-400 mb-1" htmlFor="password">
+        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="password">
           Hasło
         </label>
-        <input
+        <PasswordInput
           id="password"
-          type="password"
           required
           minLength={12}
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
         />
       </div>
       <div>
-        <label className="block text-sm text-slate-400 mb-1" htmlFor="confirmPassword">
+        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5" htmlFor="confirmPassword">
           Powtórz hasło
         </label>
-        <input
+        <PasswordInput
           id="confirmPassword"
-          type="password"
           required
           minLength={12}
           autoComplete="new-password"
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
-          className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500"
         />
       </div>
       {captcha.required && <Captcha ref={captcha.ref} onToken={captcha.setToken} />}
-      {error && <p className="text-sm text-rose-500">{error}</p>}
+      {error && (
+        <div className="flex items-start gap-2 rounded-2xl bg-red-50 p-3 border border-red-200 text-red-700 text-xs font-medium">
+          {error}
+        </div>
+      )}
       <Button type="submit" disabled={loading || captcha.disabled} className="w-full">
         {loading ? 'Tworzenie konta…' : 'Utwórz konto'}
       </Button>

@@ -32,8 +32,8 @@ function makeRequest(body: unknown) {
   });
 }
 
-function mockSession(role: string | null, id = 'session-user') {
-  vi.mocked(getServerSession).mockResolvedValue(role ? ({ user: { id, role } } as any) : null);
+function mockSession(role: string | null, id = 'session-user', gminaId: string | null = null) {
+  vi.mocked(getServerSession).mockResolvedValue(role ? ({ user: { id, role, gminaId } } as any) : null);
 }
 
 beforeEach(() => {
@@ -103,22 +103,80 @@ describe('POST /api/admin/invites', () => {
     expect(prisma.inviteToken.create).not.toHaveBeenCalled();
   });
 
-  it('lets COORDINATOR create a VOLUNTEER invite', async () => {
-    mockSession('COORDINATOR', 'coord-1');
+  it('lets COORDINATOR create a VOLUNTEER invite in their own gmina', async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1');
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
     const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER' }));
 
     expect(res.status).toBe(200);
+    expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1' }) })
+    );
+  });
+
+  it('blocks a COORDINATOR with no gmina of their own from inviting anyone', async () => {
+    mockSession('COORDINATOR', 'coord-1', null);
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER' }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a gmina when ADMIN invites a COORDINATOR/VOLUNTEER', async () => {
+    mockSession('ADMIN', 'admin-1');
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER' }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+  });
+
+  it('lets ADMIN create a new gmina by name when inviting, logging its own GMINA_CREATE audit entry', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockResolvedValue({ id: 'new-gmina', name: 'Gmina Test' } as any);
+    prisma.inviteToken.create.mockResolvedValue({} as any);
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', newGminaName: 'Gmina Test' }));
+
+    expect(res.status).toBe(200);
+    expect(prisma.gmina.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'Gmina Test' } }));
+    expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'new-gmina' }) })
+    );
+    // Regression coverage: this inline "+ Nowa gmina" creation used to be
+    // invisible to the audit log — only the dedicated gmina-management CRUD
+    // route logged GMINA_CREATE.
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'GMINA_CREATE', entityType: 'GMINA', entityId: 'new-gmina' }),
+      })
+    );
+  });
+
+  it('returns a clean 500 (not an unhandled crash) when creating the invite token fails', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.inviteToken.create.mockRejectedValue(new Error('connection lost'));
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+
+    expect(res.status).toBe(500);
+    expect(sendInviteEmail).not.toHaveBeenCalled();
   });
 
   it('never stores the raw token — the stored tokenHash differs from the token in the emailed URL', async () => {
     mockSession('ADMIN', 'admin-1');
     prisma.user.findUnique.mockResolvedValue(null);
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
-    await POST(makeRequest({ email: 'new@example.com', role: 'VOLUNTEER' }));
+    await POST(makeRequest({ email: 'new@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
 
     const createCall = prisma.inviteToken.create.mock.calls[0][0] as any;
     const emailedUrl = vi.mocked(sendInviteEmail).mock.calls[0][1] as string;
@@ -129,9 +187,10 @@ describe('POST /api/admin/invites', () => {
 
   it('rejects a duplicate email with 400 and does not create a token', async () => {
     mockSession('ADMIN');
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
     prisma.user.findUnique.mockResolvedValue({ id: 'existing' } as any);
 
-    const res = await POST(makeRequest({ email: 'existing@example.com', role: 'VOLUNTEER' }));
+    const res = await POST(makeRequest({ email: 'existing@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
 
     expect(res.status).toBe(400);
     expect(prisma.inviteToken.create).not.toHaveBeenCalled();

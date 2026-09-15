@@ -5,6 +5,8 @@ const prisma = new PrismaClient();
 
 const TEST_PASSWORD = 'Test1234!';
 
+const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
 async function seedAdmin() {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
@@ -15,17 +17,24 @@ async function seedAdmin() {
   }
 
   const passwordHash = await hashPassword(password);
+  // ADMIN is site-wide (not tied to one gmina), so gminaId stays unset — and
+  // since Organization.gminaId is required, an ADMIN account has nothing to
+  // scope an organization to either, so organizationId stays unset too.
+  // Every other field is filled in so the account renders fully on admin/users.
+  const data = {
+    name: 'Administrator Systemu',
+    phone: '+48 600 000 000',
+    passwordHash,
+    role: 'ADMIN' as const,
+    isActive: true,
+    lastActivatedAt: daysAgo(120),
+    emailVerified: daysAgo(120),
+  };
 
   await prisma.user.upsert({
     where: { email },
-    update: { passwordHash },
-    create: {
-      email,
-      passwordHash,
-      role: 'ADMIN',
-      isActive: true,
-      emailVerified: new Date(),
-    },
+    update: data,
+    create: { email, ...data },
   });
 
   console.log(`🌱 Konto admina gotowe: ${email}`);
@@ -61,33 +70,205 @@ async function seedKategorie() {
   return created;
 }
 
-async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
-  const users: Array<{ email: string; name: string; role: Role; gminaId: string | null }> = [
-    { email: 'koordynator@example.com', name: 'Katarzyna Nowak', role: 'COORDINATOR', gminaId: gminy[0].id },
-    { email: 'wolontariusz@example.com', name: 'Anna Wiśniewska', role: 'VOLUNTEER', gminaId: gminy[1].id },
-    { email: 'wolontariusz2@example.com', name: 'Marek Zieliński', role: 'VOLUNTEER', gminaId: gminy[2].id },
+async function seedOrganizacje(gminy: Awaited<ReturnType<typeof seedGminy>>) {
+  const organizacje: Array<{
+    name: string;
+    gminaId: string;
+    street: string;
+    houseNumber: string;
+    apartmentNumber?: string;
+    city: string;
+    postalCode: string;
+    contactFirstName: string;
+    contactLastName: string;
+    contactPhone: string;
+    contactEmail: string;
+  }> = [
+    {
+      name: 'Urząd Gminy Wieliczka',
+      gminaId: gminy[0].id,
+      street: 'Powstania Warszawskiego',
+      houseNumber: '1',
+      city: 'Wieliczka',
+      postalCode: '32-020',
+      contactFirstName: 'Katarzyna',
+      contactLastName: 'Nowak',
+      contactPhone: '+48 601 234 567',
+      contactEmail: 'k.nowak@wieliczka.pl',
+    },
+    {
+      name: 'Urząd Gminy Sanok',
+      gminaId: gminy[1].id,
+      street: 'Rynek',
+      houseNumber: '1',
+      city: 'Sanok',
+      postalCode: '38-500',
+      contactFirstName: 'Tomasz',
+      contactLastName: 'Wójcik',
+      contactPhone: '+48 605 111 222',
+      contactEmail: 't.wojcik@sanok.pl',
+    },
+    {
+      name: 'Polski Czerwony Krzyż',
+      gminaId: gminy[1].id,
+      street: 'Jana Pawła II',
+      houseNumber: '5',
+      city: 'Sanok',
+      postalCode: '38-500',
+      contactFirstName: 'Elżbieta',
+      contactLastName: 'Kaczmarek',
+      contactPhone: '+48 13 463 12 34',
+      contactEmail: 'sanok@pck.org.pl',
+    },
+    {
+      name: 'Ochotnicza Straż Pożarna Kłodzko',
+      gminaId: gminy[2].id,
+      street: 'Strażacka',
+      houseNumber: '3',
+      city: 'Kłodzko',
+      postalCode: '57-300',
+      contactFirstName: 'Grzegorz',
+      contactLastName: 'Baran',
+      contactPhone: '+48 74 867 45 12',
+      contactEmail: 'osp@klodzko.pl',
+    },
+    {
+      name: 'Caritas Diecezji Krakowskiej',
+      gminaId: gminy[0].id,
+      street: 'Krakowska',
+      houseNumber: '8',
+      apartmentNumber: '2',
+      city: 'Wieliczka',
+      postalCode: '32-020',
+      contactFirstName: 'Magdalena',
+      contactLastName: 'Sikora',
+      contactPhone: '+48 12 429 56 78',
+      contactEmail: 'wieliczka@caritas.pl',
+    },
+  ];
+
+  const created: Record<string, { id: string }> = {};
+  for (const o of organizacje) {
+    const { name, gminaId, ...fields } = o;
+    created[name] = await prisma.organization.upsert({
+      where: { name_gminaId: { name, gminaId } },
+      update: fields,
+      create: { name, gminaId, ...fields },
+    });
+  }
+  return created;
+}
+
+async function seedTestUsers(
+  gminy: Awaited<ReturnType<typeof seedGminy>>,
+  organizacje: Awaited<ReturnType<typeof seedOrganizacje>>
+) {
+  const users: Array<{
+    email: string;
+    name: string;
+    role: Role;
+    gminaId: string;
+    organization: string;
+    phone: string;
+    isActive: boolean;
+    lastActivatedAt: Date | null;
+    lastDeactivatedAt: Date | null;
+    deactivationReason: string | null;
+  }> = [
+    {
+      email: 'koordynator@example.com',
+      name: 'Katarzyna Nowak',
+      role: 'COORDINATOR',
+      gminaId: gminy[0].id,
+      organization: 'Urząd Gminy Wieliczka',
+      phone: '+48 601 234 567',
+      isActive: true,
+      lastActivatedAt: daysAgo(30),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'koordynator2@example.com',
+      name: 'Tomasz Wójcik',
+      role: 'COORDINATOR',
+      gminaId: gminy[1].id,
+      organization: 'Urząd Gminy Sanok',
+      phone: '+48 605 111 222',
+      isActive: true,
+      lastActivatedAt: daysAgo(20),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'wolontariusz@example.com',
+      name: 'Anna Wiśniewska',
+      role: 'VOLUNTEER',
+      gminaId: gminy[1].id,
+      organization: 'Polski Czerwony Krzyż',
+      phone: '+48 602 345 678',
+      isActive: false,
+      lastActivatedAt: daysAgo(60),
+      lastDeactivatedAt: daysAgo(4),
+      deactivationReason: 'Zakończony okres wolontariatu',
+    },
+    {
+      email: 'wolontariusz2@example.com',
+      name: 'Marek Zieliński',
+      role: 'VOLUNTEER',
+      gminaId: gminy[2].id,
+      organization: 'Ochotnicza Straż Pożarna Kłodzko',
+      phone: '+48 603 456 789',
+      isActive: true,
+      lastActivatedAt: daysAgo(15),
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
+    {
+      email: 'wolontariusz3@example.com',
+      name: 'Piotr Kowalski',
+      role: 'VOLUNTEER',
+      gminaId: gminy[0].id,
+      organization: 'Caritas Diecezji Krakowskiej',
+      phone: '+48 606 789 012',
+      isActive: false,
+      lastActivatedAt: null,
+      lastDeactivatedAt: null,
+      deactivationReason: null,
+    },
   ];
 
   const passwordHash = await hashPassword(TEST_PASSWORD);
 
   for (const u of users) {
+    const organization = organizacje[u.organization];
+    if (!organization) {
+      throw new Error(
+        `seedTestUsers: no seeded organization named "${u.organization}" (check it matches a name in seedOrganizacje exactly).`
+      );
+    }
+
+    const data = {
+      name: u.name,
+      role: u.role,
+      gminaId: u.gminaId,
+      organizationId: organization.id,
+      phone: u.phone,
+      passwordHash,
+      isActive: u.isActive,
+      lastActivatedAt: u.lastActivatedAt,
+      lastDeactivatedAt: u.lastDeactivatedAt,
+      deactivationReason: u.deactivationReason,
+      emailVerified: daysAgo(90),
+    };
     await prisma.user.upsert({
       where: { email: u.email },
-      update: {},
-      create: {
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        gminaId: u.gminaId,
-        passwordHash,
-        isActive: true,
-        emailVerified: new Date(),
-      },
+      update: data,
+      create: { email: u.email, ...data },
     });
   }
 
   console.log(`🌱 Konta testowe gotowe (hasło: ${TEST_PASSWORD}):`);
-  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]`));
+  users.forEach((u) => console.log(`   - ${u.email} [${u.role}]${u.isActive ? '' : ' (nieaktywne)'}`));
 }
 
 async function seedZasoby(gminy: Awaited<ReturnType<typeof seedGminy>>, kategorie: Awaited<ReturnType<typeof seedKategorie>>) {
@@ -161,7 +342,8 @@ async function main() {
 
   const gminy = await seedGminy();
   const kategorie = await seedKategorie();
-  await seedTestUsers(gminy);
+  const organizacje = await seedOrganizacje(gminy);
+  await seedTestUsers(gminy, organizacje);
   await seedZasoby(gminy, kategorie);
   await seedAlerty(gminy, admin?.id ?? null);
 

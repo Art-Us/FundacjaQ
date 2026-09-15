@@ -1,6 +1,7 @@
 'use server';
 
 import { headers } from 'next/headers';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { hashToken } from '@/lib/tokens';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
@@ -103,7 +104,7 @@ export async function acceptInvite(
           gminaId: invite.gminaId,
           passwordHash,
           emailVerified: new Date(),
-          isActive: true,
+          isActive: false,
         },
       });
       return true;
@@ -112,8 +113,16 @@ export async function acceptInvite(
     if (!created) {
       return { ok: false, error: 'Link zaproszenia został już wykorzystany.' };
     }
-  } catch {
-    return { ok: false, error: 'Konto dla tego adresu email już istnieje.' };
+  } catch (err) {
+    // The `existing` check above already covers the common case — this only
+    // fires on a genuine race (two concurrent accepts for the same email), a
+    // real P2002 unique-constraint hit. Anything else is a real server error,
+    // not "this email is already registered".
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return { ok: false, error: 'Konto dla tego adresu email już istnieje.' };
+    }
+    console.error('[invite] failed to accept invite:', err);
+    return { ok: false, error: 'Nie udało się utworzyć konta. Spróbuj ponownie później.' };
   }
 
   return { ok: true };

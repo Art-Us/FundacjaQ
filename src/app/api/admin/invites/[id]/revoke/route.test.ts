@@ -108,4 +108,14 @@ describe('POST /api/admin/invites/[id]/revoke', () => {
     expect(res.status).toBe(200);
     expect(prisma.inviteToken.update).not.toHaveBeenCalled();
   });
+
+  it('returns a clean 500 (not an unhandled crash) when the update fails', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite() as any);
+    prisma.inviteToken.update.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callRoute();
+
+    expect(res.status).toBe(500);
+  });
 });

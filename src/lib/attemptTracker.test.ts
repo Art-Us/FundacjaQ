@@ -30,6 +30,12 @@ describe('recordAttempt', () => {
 
     expect(redis.expire).not.toHaveBeenCalled();
   });
+
+  it('fails open (returns 0) instead of throwing when Redis errors', async () => {
+    vi.mocked(redis.incr).mockRejectedValue(new Error('connection lost'));
+
+    await expect(recordAttempt('login-account', 'user@example.com')).resolves.toBe(0);
+  });
 });
 
 describe('getAttemptCount', () => {
@@ -44,6 +50,12 @@ describe('getAttemptCount', () => {
 
     expect(await getAttemptCount('login-ip', '1.2.3.4')).toBe(4);
   });
+
+  it('fails open (returns 0) instead of throwing when Redis errors', async () => {
+    vi.mocked(redis.get).mockRejectedValue(new Error('connection lost'));
+
+    await expect(getAttemptCount('login-ip', '1.2.3.4')).resolves.toBe(0);
+  });
 });
 
 describe('clearAttempts', () => {
@@ -51,5 +63,11 @@ describe('clearAttempts', () => {
     await clearAttempts('login-account', 'user@example.com');
 
     expect(redis.del).toHaveBeenCalledWith('attempts:login-account:user@example.com');
+  });
+
+  it('does not throw when Redis errors', async () => {
+    vi.mocked(redis.del).mockRejectedValue(new Error('connection lost'));
+
+    await expect(clearAttempts('login-account', 'user@example.com')).resolves.toBeUndefined();
   });
 });

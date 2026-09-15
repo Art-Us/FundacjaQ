@@ -52,19 +52,25 @@ export async function POST(req: NextRequest) {
 
   const passwordHash = await hashPassword(password);
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const result = await tx.passwordResetToken.updateMany({
-      where: { id: resetToken.id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-    if (result.count === 0) return false;
+  let updated: boolean;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.passwordResetToken.updateMany({
+        where: { id: resetToken.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (result.count === 0) return false;
 
-    await tx.user.update({
-      where: { id: resetToken.userId },
-      data: { passwordHash, passwordChangedAt: new Date(), failedAttempts: 0, lockedUntil: null },
+      await tx.user.update({
+        where: { id: resetToken.userId },
+        data: { passwordHash, passwordChangedAt: new Date(), failedAttempts: 0, lockedUntil: null },
+      });
+      return true;
     });
-    return true;
-  });
+  } catch (err) {
+    console.error('[reset-password] transaction failed:', err);
+    return NextResponse.json({ error: 'Nie udało się zresetować hasła. Spróbuj ponownie.' }, { status: 500 });
+  }
 
   if (!updated) {
     return invalidResponse;

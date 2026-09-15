@@ -75,6 +75,27 @@ describe('checkLockout', () => {
     expect(result.locked).toBe(false);
     expect(prisma.user.findUnique).toHaveBeenCalled();
   });
+
+  it('falls back to Postgres instead of throwing when Redis errors on the initial read', async () => {
+    vi.mocked(redis.get).mockRejectedValue(new Error('connection lost'));
+    prisma.user.findUnique.mockResolvedValue({ lockedUntil: null } as any);
+
+    const result = await checkLockout('user@example.com');
+
+    expect(result.locked).toBe(false);
+    expect(prisma.user.findUnique).toHaveBeenCalled();
+  });
+
+  it('still reports locked (from Postgres) even if repopulating the Redis cache fails', async () => {
+    vi.mocked(redis.get).mockResolvedValue(null);
+    const lockedUntil = new Date(Date.now() + 60_000);
+    prisma.user.findUnique.mockResolvedValue({ lockedUntil } as any);
+    vi.mocked(redis.set).mockRejectedValue(new Error('connection lost'));
+
+    const result = await checkLockout('user@example.com');
+
+    expect(result.locked).toBe(true);
+  });
 });
 
 describe('recordFailedAttempt', () => {
@@ -105,6 +126,14 @@ describe('recordFailedAttempt', () => {
     await expect(recordFailedAttempt('nobody@example.com')).resolves.toBeUndefined();
     expect(redis.set).not.toHaveBeenCalled();
   });
+
+  it('does not throw (never masks the caller\'s own error) when escalating to a lockout fails', async () => {
+    prisma.user.update
+      .mockResolvedValueOnce({ failedAttempts: 20 } as any)
+      .mockRejectedValueOnce(new Error('connection lost'));
+
+    await expect(recordFailedAttempt('user@example.com')).resolves.toBeUndefined();
+  });
 });
 
 describe('resetAttempts', () => {
@@ -124,5 +153,12 @@ describe('resetAttempts', () => {
     prisma.user.update.mockRejectedValue(new Error('Record to update not found'));
 
     await expect(resetAttempts('nobody@example.com')).resolves.toBeUndefined();
+  });
+
+  it('does not throw (never blocks an already-authenticated login) when Redis errors', async () => {
+    vi.mocked(redis.del).mockRejectedValue(new Error('connection lost'));
+    prisma.user.update.mockResolvedValue({} as any);
+
+    await expect(resetAttempts('user@example.com')).resolves.toBeUndefined();
   });
 });

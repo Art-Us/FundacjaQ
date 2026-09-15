@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
+import { requireAdminOrCoordinator, canManageUser, isLastActiveAdmin } from '@/lib/authz';
+import { recordAudit, requestMeta, snapshotUser } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
 
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+const deactivateSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+export async function POST(req: Request, { params }: { params: { id: string } }) {
   const user = await requireAdminOrCoordinator();
   if (!user) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
@@ -23,9 +29,38 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ message: 'Konto jest już nieaktywne.' });
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { isActive: false },
+  if (await isLastActiveAdmin(target)) {
+    return NextResponse.json(
+      { error: 'Nie można dezaktywować jedynego aktywnego administratora w systemie.' },
+      { status: 403 }
+    );
+  }
+
+  const parsed = deactivateSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
+  }
+
+  let updated;
+  try {
+    updated = await prisma.user.update({
+      where: { id: target.id },
+      data: { isActive: false, lastDeactivatedAt: new Date(), deactivationReason: parsed.data.reason ?? null },
+    });
+  } catch (err) {
+    console.error('[users] failed to deactivate user:', err);
+    return NextResponse.json({ error: 'Nie udało się dezaktywować konta.' }, { status: 500 });
+  }
+
+  await recordAudit({
+    actor: user,
+    action: 'USER_DEACTIVATE',
+    entityType: 'USER',
+    entityId: target.id,
+    gminaId: updated.gminaId,
+    before: snapshotUser(target),
+    after: snapshotUser(updated),
+    meta: requestMeta(req),
   });
 
   return NextResponse.json({ message: 'Konto zostało dezaktywowane.' });

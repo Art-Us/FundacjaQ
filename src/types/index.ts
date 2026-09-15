@@ -9,8 +9,8 @@ export type ResourceStatus = 'AVAILABLE' | 'RESERVED' | 'IN_USE' | 'DEPLETED';
 export interface GminaData {
     id: string;
     name: string;
-    powiat: string;
-    voivodeship: string;
+    powiat: string | null;
+    voivodeship: string | null;
     contactEmail?: string | null;
     contactPhone?: string | null;
 }

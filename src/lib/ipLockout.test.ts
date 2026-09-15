@@ -35,6 +35,12 @@ describe('checkIpBlock', () => {
 
     expect((await checkIpBlock('1.2.3.4')).blocked).toBe(false);
   });
+
+  it('fails open (not blocked) instead of throwing when Redis errors', async () => {
+    vi.mocked(redis.get).mockRejectedValue(new Error('connection lost'));
+
+    await expect(checkIpBlock('1.2.3.4')).resolves.toEqual({ blocked: false, until: null });
+  });
 });
 
 describe('recordFailedLoginByIp', () => {
@@ -102,5 +108,19 @@ describe('clearIpFailures', () => {
 
     expect(redis.del).toHaveBeenCalledWith('ip-login-fails:1.2.3.4');
     expect(redis.del).toHaveBeenCalledWith('ip-login-block:1.2.3.4');
+  });
+
+  it('does not throw (never blocks an already-authenticated login) when Redis errors', async () => {
+    vi.mocked(redis.del).mockRejectedValue(new Error('connection lost'));
+
+    await expect(clearIpFailures('1.2.3.4')).resolves.toBeUndefined();
+  });
+});
+
+describe('recordFailedLoginByIp resilience', () => {
+  it('does not throw (never masks the caller\'s own error) when Redis errors', async () => {
+    vi.mocked(redis.incr).mockRejectedValue(new Error('connection lost'));
+
+    await expect(recordFailedLoginByIp('1.2.3.4')).resolves.toBeUndefined();
   });
 });
