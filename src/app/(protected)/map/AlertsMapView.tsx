@@ -51,7 +51,7 @@ const AlertMap = dynamic(() => import('./AlertMap'), {
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
-const alertInclude = { gmina: true, author: true } satisfies Prisma.AlertInclude;
+const alertInclude = { gmina: true, author: { include: { organization: true } } } satisfies Prisma.AlertInclude;
 type AlertWithGmina = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
 
 type Timeframe = '24h' | '48h' | '72h' | 'tydzien' | 'miesiac' | 'rok' | 'wszystkie' | 'custom';
@@ -90,7 +90,7 @@ function matchesSearch(alert: AlertWithGmina, query: string): boolean {
     alert.location,
     alert.gmina.name,
     alert.author?.name,
-    alert.author?.organization,
+    alert.author?.organization?.name,
   ]
     .filter(Boolean)
     .some((field) => field!.toLowerCase().includes(q));
@@ -233,11 +233,11 @@ export default function AlertsMapView({
   );
 
   const availableActiveOrgs = useMemo(
-    () => Array.from(new Set(activeBase.map((a) => a.author?.organization).filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b, 'pl')),
+    () => Array.from(new Set(activeBase.map((a) => a.author?.organization?.name).filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b, 'pl')),
     [activeBase]
   );
   const availableArchiveOrgs = useMemo(
-    () => Array.from(new Set(archivedBase.map((a) => a.author?.organization).filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b, 'pl')),
+    () => Array.from(new Set(archivedBase.map((a) => a.author?.organization?.name).filter((v): v is string => !!v))).sort((a, b) => a.localeCompare(b, 'pl')),
     [archivedBase]
   );
 
@@ -246,7 +246,7 @@ export default function AlertsMapView({
       (a) =>
         matchesTimeframe(a.createdAt, activeTimeframe, activeCustomStart, activeCustomEnd) &&
         (activeCategoryFilter === 'all' || a.category === activeCategoryFilter) &&
-        (activeOrgFilter === 'all' || a.author?.organization === activeOrgFilter) &&
+        (activeOrgFilter === 'all' || a.author?.organization?.name === activeOrgFilter) &&
         matchesSearch(a, activeSearch)
     );
     return sortAlerts(filtered, activeSort);
@@ -257,7 +257,7 @@ export default function AlertsMapView({
       (a) =>
         matchesTimeframe(a.createdAt, archiveTimeframe, archiveCustomStart, archiveCustomEnd) &&
         (archiveCategoryFilter === 'all' || a.category === archiveCategoryFilter) &&
-        (archiveOrgFilter === 'all' || a.author?.organization === archiveOrgFilter) &&
+        (archiveOrgFilter === 'all' || a.author?.organization?.name === archiveOrgFilter) &&
         matchesSearch(a, archiveSearch)
     );
     return sortAlerts(filtered, archiveSort);
@@ -854,7 +854,7 @@ export default function AlertsMapView({
                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500 pt-2 border-t border-slate-800">
                       <div className="flex items-center gap-1">
                         <Building className="h-3.5 w-3.5 text-slate-500" />
-                        <span>{alert.author?.organization || alert.gmina.name}</span>
+                        <span>{alert.author?.organization?.name || alert.gmina.name}</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-indigo-300 font-mono font-semibold">
                         <Clock className="h-3.5 w-3.5 text-indigo-400" />
@@ -1090,7 +1090,7 @@ export default function AlertsMapView({
                       </span>
                       <span className="flex items-center gap-1 bg-slate-800 px-2.5 py-1 rounded-lg text-slate-500">
                         <Building className="h-3.5 w-3.5 text-slate-500" />
-                        <span>{alert.author?.organization || alert.gmina.name}</span>
+                        <span>{alert.author?.organization?.name || alert.gmina.name}</span>
                       </span>
                     </div>
 

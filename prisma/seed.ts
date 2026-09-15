@@ -68,11 +68,39 @@ async function seedKategorie() {
   return created;
 }
 
-async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>) {
-  const users: Array<{ email: string; name: string; role: Role; gminaId: string | null }> = [
-    { email: 'koordynator@example.com', name: 'Katarzyna Nowak', role: 'COORDINATOR', gminaId: gminy[0].id },
-    { email: 'wolontariusz@example.com', name: 'Anna Wiśniewska', role: 'VOLUNTEER', gminaId: gminy[0].id },
-    { email: 'wolontariusz2@example.com', name: 'Marek Zieliński', role: 'VOLUNTEER', gminaId: gminy[0].id },
+async function seedOrganizacje(gminy: Awaited<ReturnType<typeof seedGminy>>) {
+  const organizacje = [
+    { name: 'Ochotnicza Straż Pożarna Nowa Dęba', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 111 222', contactEmail: 'osp@nowadeba.pl' },
+    { name: 'Caritas Diecezji Sandomierskiej', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 333 444', contactEmail: 'caritas@nowadeba.pl' },
+  ];
+
+  const created: Record<string, Awaited<ReturnType<typeof prisma.organization.upsert>>> = {};
+  for (const o of organizacje) {
+    created[o.name] = await prisma.organization.upsert({
+      where: { name_gminaId: { name: o.name, gminaId: o.gminaId } },
+      update: o,
+      create: o,
+    });
+  }
+  return created;
+}
+
+async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>, organizacje: Awaited<ReturnType<typeof seedOrganizacje>>) {
+  const users: Array<{
+    email: string;
+    name: string;
+    role: Role;
+    gminaId: string | null;
+    organization: string;
+    phone: string;
+    isActive: boolean;
+    lastActivatedAt: Date | null;
+    lastDeactivatedAt: Date | null;
+    deactivationReason: string | null;
+  }> = [
+    { email: 'koordynator@example.com', name: 'Katarzyna Nowak', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Ochotnicza Straż Pożarna Nowa Dęba', phone: '+48 602 100 200', isActive: true, lastActivatedAt: daysAgo(90), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'wolontariusz@example.com', name: 'Anna Wiśniewska', role: 'VOLUNTEER', gminaId: gminy[0].id, organization: 'Caritas Diecezji Sandomierskiej', phone: '+48 602 300 400', isActive: true, lastActivatedAt: daysAgo(60), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'wolontariusz2@example.com', name: 'Marek Zieliński', role: 'VOLUNTEER', gminaId: gminy[0].id, organization: 'Caritas Diecezji Sandomierskiej', phone: '+48 602 500 600', isActive: false, lastActivatedAt: daysAgo(60), lastDeactivatedAt: daysAgo(5), deactivationReason: 'Zakończenie współpracy' },
   ];
 
   const passwordHash = await hashPassword(TEST_PASSWORD);
@@ -182,6 +210,7 @@ async function cleanupObsoleteGminy(currentGminaIds: string[]) {
   await prisma.resource.deleteMany({ where: { gminaId: { in: obsoleteIds } } });
   await prisma.inviteToken.deleteMany({ where: { gminaId: { in: obsoleteIds } } });
   await prisma.user.deleteMany({ where: { gminaId: { in: obsoleteIds } } });
+  await prisma.organization.deleteMany({ where: { gminaId: { in: obsoleteIds } } });
   await prisma.gmina.deleteMany({ where: { id: { in: obsoleteIds } } });
 
   console.log(`🧹 Usunięto nieaktualne gminy: ${obsolete.map((g) => g.name).join(', ')}`);
