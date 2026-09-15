@@ -172,8 +172,8 @@ model LoginAttempt {
 model Gmina {
   id           String   @id @default(cuid())
   name         String   @unique
-  powiat       String
-  voivodeship  String
+  powiat       String?
+  voivodeship  String?
   latitude     Float?
   longitude    Float?
   contactEmail String?

@@ -36,7 +36,7 @@ export interface MapAlert {
   longitude: number | null;
   createdAt: Date | string;
   gmina: { name: string };
-  author: { name: string | null; organization: string | null } | null;
+  author: { name: string | null; organization: { name: string } | null } | null;
 }
 
 interface AlertMapProps {
@@ -239,7 +239,7 @@ export default function AlertMap({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Building className="h-3 w-3 text-slate-500 shrink-0" />
-                      <span className="truncate">{alert.author?.organization || alert.author?.name || 'Służby'}</span>
+                      <span className="truncate">{alert.author?.organization?.name || alert.author?.name || 'Służby'}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Calendar className="h-3 w-3 text-slate-500 shrink-0" />

@@ -8,26 +8,6 @@ import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
 import { ROLE_LABELS } from '@/lib/roleLabels';
 import type { Role } from '@/types';
 
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Administrator',
-  COORDINATOR: 'Koordynator gminny',
-  VOLUNTEER: 'Wolontariusz',
-};
-
-const SEVERITY_STYLES: Record<string, string> = {
-  CRITICAL: 'bg-rose-50 text-rose-700 border-rose-200',
-  HIGH: 'bg-orange-50 text-orange-700 border-orange-200',
-  MEDIUM: 'bg-amber-50 text-amber-700 border-amber-200',
-  LOW: 'bg-slate-100 text-slate-700 border-slate-200',
-};
-
-const ALERT_STATUS_LABELS: Record<string, string> = {
-  ACTIVE: 'Aktywny',
-  IN_PROGRESS: 'W trakcie',
-  RESOLVED: 'Rozwiązany',
-  CANCELLED: 'Anulowany',
-};
-
 const RESOURCE_STATUS_LABELS: Record<string, string> = {
   AVAILABLE: 'Dostępny',
   RESERVED: 'Zarezerwowany',
@@ -54,7 +34,7 @@ export default async function HomePage() {
           </div>
           <p className="text-slate-500 text-xs sm:text-sm">Witaj, {session.user.name ?? session.user.email}</p>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Panel — {ROLE_LABELS[role] ?? role}
+            Panel — {ROLE_LABELS[role as Role] ?? role}
           </h1>
         </div>
       </div>
