@@ -27,6 +27,34 @@ enum AlertStatus {
   CANCELLED
 }
 
+// Zdarzenia codzienne (festyny, koncerty, zebrania) trzymamy w tej samej tabeli
+// Alert co komunikaty kryzysowe — format danych jest identyczny, różni je tylko
+// przeznaczenie. `kind` rozdziela oba widoki na mapie i chroni statystyki
+// kryzysowe (patrz lib/dashboard.ts) od liczenia wydarzeń jako alertów.
+enum AlertKind {
+  ALERT // Komunikat kryzysowy
+  EVENT // Zdarzenie codzienne
+}
+
+enum AlertCategory {
+  // Kategorie komunikatów kryzysowych (kind = ALERT)
+  HYDROLOGICAL // Ostrzeżenie hydrologiczne
+  ROAD // Komunikat drogowy
+  HUMANITARIAN // Pomoc humanitarna
+  FIRE // Zagrożenie pożarowe
+  INFRASTRUCTURE // Awaria infrastruktury
+  GENERAL // Informacja ogólna
+
+  // Kategorie zdarzeń codziennych (kind = EVENT)
+  FESTIVAL // Festyn / święto miasta
+  CONCERT // Koncert
+  SPORT // Wydarzenie sportowe
+  COMMUNITY // Spotkanie mieszkańców
+  FAIR // Targi / jarmark
+  CULTURE // Kultura / wystawa
+  OTHER_EVENT // Inne wydarzenie
+}
+
 enum ResourceStatus {
   AVAILABLE
   RESERVED
@@ -144,8 +172,8 @@ model LoginAttempt {
 model Gmina {
   id           String   @id @default(cuid())
   name         String   @unique
-  powiat       String?
-  voivodeship  String?
+  powiat       String
+  voivodeship  String
   latitude     Float?
   longitude    Float?
   contactEmail String?
@@ -270,17 +298,21 @@ model AuditLog {
 }
 
 model Alert {
-  id          String      @id @default(cuid())
+  id          String        @id @default(cuid())
   title       String
   description String
-  severity    Severity    @default(MEDIUM)
-  status      AlertStatus @default(ACTIVE)
+  kind        AlertKind     @default(ALERT)
+  severity    Severity      @default(MEDIUM)
+  status      AlertStatus   @default(ACTIVE)
+  category    AlertCategory @default(GENERAL)
   location    String?
+  latitude    Float?
+  longitude   Float?
   authorId    String?
-  author      User?       @relation(fields: [authorId], references: [id])
+  author      User?         @relation(fields: [authorId], references: [id])
   gminaId     String
-  gmina       Gmina       @relation(fields: [gminaId], references: [id])
+  gmina       Gmina         @relation(fields: [gminaId], references: [id])
   expiresAt   DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }

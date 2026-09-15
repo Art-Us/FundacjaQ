@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "AlertCategory" AS ENUM ('HYDROLOGICAL', 'ROAD', 'HUMANITARIAN', 'FIRE', 'INFRASTRUCTURE', 'GENERAL');
+
+-- AlterTable
+ALTER TABLE "Alert" ADD COLUMN     "category" "AlertCategory" NOT NULL DEFAULT 'GENERAL';

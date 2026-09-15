@@ -39,6 +39,26 @@ export const inviteCreateLimiter = new RateLimiterRedis({
   blockDuration: 60 * 60,
 });
 
+// Nominatim's usage policy caps free reverse-geocoding lookups at ~1
+// request/second per app — this backstops the client-side debounce in case
+// of a scripted/compromised client, so our server IP doesn't get rate-limited
+// or blocked by Nominatim for the whole app.
+//
+// This limiter is keyed per user, but Nominatim's ~1 req/s cap applies to
+// the app as a whole. It's fine at pilot scale (a handful of concurrent
+// ADMIN/COORDINATOR users), but doesn't actually enforce the app-wide limit
+// once there are multiple concurrent users geocoding — each user gets their
+// own 1 req/s budget. If usage grows, switch to a shared key (e.g. a fixed
+// string instead of the user id) or self-host a Nominatim instance to drop
+// the external cap entirely.
+export const geocodeLimiter = new RateLimiterRedis({
+  storeClient: redis,
+  keyPrefix: 'rl:geocode',
+  points: 1,
+  duration: 1,
+  blockDuration: 3,
+});
+
 /** Returns true if the action is allowed; false if rate-limited. Consumes on every call. */
 export async function consumeLimit(limiter: RateLimiterRedis, key: string): Promise<boolean> {
   try {

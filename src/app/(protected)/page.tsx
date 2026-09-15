@@ -4,6 +4,8 @@ import { ShieldCheck, UserPlus, BellRing, Building2, Users } from 'lucide-react'
 import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
 import { formatDate } from '@/lib/utils';
+import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
+import { ROLE_LABELS } from '@/lib/roleLabels';
 import type { Role } from '@/types';
 
 const ROLE_LABELS: Record<string, string> = {

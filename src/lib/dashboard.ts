@@ -34,6 +34,10 @@ export async function getDashboardData(role: Role, gminaId: string | null): Prom
   const gminaFilter = scopedGminaWhere({ role, gminaId });
   const noAccess = gminaFilter === null;
 
+  // Zdarzenia codzienne (kind = EVENT) dzielą tabelę z komunikatami
+  // kryzysowymi, ale panel kryzysowy musi liczyć i pokazywać wyłącznie alerty.
+  const crisisFilter = { ...gminaFilter, kind: 'ALERT' as const };
+
   const [activeAlerts, gminyCount, usersCount, alerts, resources] = await Promise.all([
     noAccess
       ? 0
