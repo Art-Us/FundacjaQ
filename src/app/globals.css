@@ -12,3 +12,37 @@ body {
   background: var(--background);
   min-height: 100vh;
 }
+
+/* A thin scrollbar for modal bodies — the OS-default scrollbar (~15-17px on
+   Windows) reads as extra space on the padding side it sits in, making that
+   side of the modal look wider than the other. Shrinking it keeps the left
+   and right insets visually equal. */
+.modal-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+.modal-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225);
+  border-radius: 9999px;
+}
+
+.modal-scrollbar-dark {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(71 85 105) transparent;
+}
+.modal-scrollbar-dark::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-scrollbar-dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal-scrollbar-dark::-webkit-scrollbar-thumb {
+  background-color: rgb(71 85 105);
+  border-radius: 9999px;
+}

@@ -103,7 +103,8 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-xl space-y-5">
+      <div className="w-full max-w-lg max-h-[90vh] rounded-3xl bg-white shadow-xl overflow-hidden flex flex-col">
+        <div className="modal-scrollbar min-h-0 overflow-y-auto p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 id="gmina-form-modal-title" className="text-lg font-bold text-slate-900">
             {mode === 'create' ? 'Nowa gmina' : 'Edytuj gminę'}
@@ -170,6 +171,7 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
             </Button>
           </div>
         </form>
+        </div>
       </div>
     </div>,
     document.body
