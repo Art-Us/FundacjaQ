@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/ui/PasswordInput';
@@ -126,7 +127,12 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
     }
   }
 
-  return (
+  // Rendered via a portal into document.body — a modal nested deep in the page
+  // tree is still visually "fixed", but keeping it there is one more ancestor
+  // that a future style change (transform/filter/contain) could turn into a
+  // containing block for it, breaking full-viewport coverage. A portal makes
+  // it the last child of <body> so it always paints above the rest of the page.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -136,7 +142,8 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-xl space-y-5">
+      <div className="w-full max-w-lg max-h-[90vh] rounded-3xl bg-white shadow-xl overflow-hidden flex flex-col">
+        <div className="modal-scrollbar min-h-0 overflow-y-auto p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 id="user-form-modal-title" className="text-lg font-bold text-slate-900">
             {mode === 'create' ? 'Nowy użytkownik' : 'Edytuj użytkownika'}
@@ -261,7 +268,9 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
             </Button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

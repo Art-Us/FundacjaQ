@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { X, Pencil, Save } from 'lucide-react';
@@ -88,9 +89,13 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
     onClose();
   }
 
-  return (
+  // Rendered via a portal into document.body, same as the other admin modals —
+  // keeps it the last element in <body> so it always paints above the rest of
+  // the page regardless of where in the tree it's opened from.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-xl max-h-[90vh] rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
+        <div className="modal-scrollbar-dark min-h-0 overflow-y-auto p-6 sm:p-8 space-y-5">
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-950/60 text-indigo-400">
@@ -235,7 +240,9 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
             </button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
