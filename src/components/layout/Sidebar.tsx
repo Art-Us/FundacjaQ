@@ -72,6 +72,15 @@ export function Sidebar({ isOpen, onCloseMobile, name, role, canManageInvites }:
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
               </Link>
+              <Link href="/map" onClick={onCloseMobile} className={linkClasses(pathname === '/map')}>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <span>Mapa</span>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Link>
             </div>
 
             {canManageInvites && (

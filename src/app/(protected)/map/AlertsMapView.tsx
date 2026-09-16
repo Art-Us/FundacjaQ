@@ -358,11 +358,11 @@ export default function AlertsMapView({
         <div>
           <div
             className={`flex items-center gap-2 font-semibold text-xs tracking-wider uppercase mb-1 ${
-              isEventView ? 'text-fuchsia-400' : 'text-indigo-400'
+              isEventView ? 'text-fuchsia-600' : 'text-indigo-600'
             }`}
           >
             {isEventView ? (
-              <CalendarDays className="h-4 w-4 text-fuchsia-400" />
+              <CalendarDays className="h-4 w-4 text-fuchsia-600" />
             ) : (
               <Radio className="h-4 w-4 text-red-500 animate-pulse" />
             )}
@@ -372,7 +372,7 @@ export default function AlertsMapView({
                 : 'Panel Operacyjny • Zarządzanie i Archiwum Zdarzeń'}
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-100 tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             {isEventView ? 'Zdarzenia Codzienne' : 'Alerty i Ostrzeżenia Kryzysowe'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -391,7 +391,7 @@ export default function AlertsMapView({
             type="button"
             onClick={() => setShowMap((v) => !v)}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition shadow-xs ${
-              showMap ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              showMap ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
             <MapIcon className="h-4 w-4" />
@@ -401,7 +401,7 @@ export default function AlertsMapView({
       </div>
 
       {/* Przełącznik rodzaju wpisów — nad mapą, "Alerty" domyślnie aktywne */}
-      <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-slate-800 p-1.5 w-full sm:w-auto sm:inline-flex">
+      <div className="flex items-center gap-2 rounded-2xl bg-white border border-slate-200 p-1.5 w-full sm:w-auto sm:inline-flex shadow-xs">
         <button
           type="button"
           onClick={() => switchView('ALERT')}
@@ -409,7 +409,7 @@ export default function AlertsMapView({
           className={`flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition ${
             !isEventView
               ? 'bg-red-600 text-white shadow-md shadow-red-600/20'
-              : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+              : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
           }`}
           title="Komunikaty i ostrzeżenia kryzysowe"
         >
@@ -417,7 +417,7 @@ export default function AlertsMapView({
           <span>Alerty</span>
           <span
             className={`ml-0.5 rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold ${
-              !isEventView ? 'bg-red-800/70 text-red-100' : 'bg-slate-800 text-slate-400'
+              !isEventView ? 'bg-red-800/70 text-red-100' : 'bg-slate-100 text-slate-500'
             }`}
           >
             {alertCount}
@@ -431,7 +431,7 @@ export default function AlertsMapView({
           className={`flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition ${
             isEventView
               ? 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/20'
-              : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+              : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
           }`}
           title="Festyny, koncerty, zebrania i inne wydarzenia w mieście"
         >
@@ -439,7 +439,7 @@ export default function AlertsMapView({
           <span>Zdarzenia codzienne</span>
           <span
             className={`ml-0.5 rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold ${
-              isEventView ? 'bg-fuchsia-800/70 text-fuchsia-100' : 'bg-slate-800 text-slate-400'
+              isEventView ? 'bg-fuchsia-800/70 text-fuchsia-100' : 'bg-slate-100 text-slate-500'
             }`}
           >
             {eventCount}
@@ -450,7 +450,7 @@ export default function AlertsMapView({
       {/* Filtry mapy — zawężają wyłącznie pinezki na mapie poniżej; listy kart
           "Aktywne"/"Archiwum" dalej na stronie mają własne, niezależne filtry. */}
       {showMap && (
-        <div className="rounded-3xl bg-slate-900 border border-slate-800 shadow-xs p-4 sm:p-5 space-y-4">
+        <div className="rounded-3xl bg-white border border-slate-200 shadow-xs p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
               <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -460,7 +460,7 @@ export default function AlertsMapView({
               <button
                 type="button"
                 onClick={resetMapFilters}
-                className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-slate-100 transition"
+                className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 transition"
               >
                 <X className="h-3 w-3" />
                 <span>Wyczyść filtry</span>
@@ -470,33 +470,33 @@ export default function AlertsMapView({
 
           <div className="flex flex-col lg:flex-row lg:items-center gap-3">
             <div className="relative flex-1 min-w-[180px]">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 value={mapSearch}
                 onChange={(e) => setMapSearch(e.target.value)}
                 placeholder={isEventView ? 'Szukaj wydarzeń na mapie...' : 'Szukaj alertów na mapie...'}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 pl-10 pr-9 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-9 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none"
               />
               {mapSearch && (
                 <button
                   type="button"
                   onClick={() => setMapSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
 
-            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl p-1 shrink-0">
+            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 shrink-0">
               {MAP_STATUS_OPTIONS.map((opt) => (
                 <button
                   key={opt.key}
                   type="button"
                   onClick={() => setMapStatus(opt.key)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                    mapStatus === opt.key ? 'bg-slate-700 text-slate-100 shadow-xs' : 'text-slate-500 hover:text-slate-300'
+                    mapStatus === opt.key ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   {opt.label}
@@ -504,7 +504,7 @@ export default function AlertsMapView({
               ))}
             </div>
 
-            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl p-1 shrink-0">
+            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 shrink-0">
               {MAP_TIME_RANGES.map((opt) => (
                 <button
                   key={opt.key}
@@ -515,7 +515,7 @@ export default function AlertsMapView({
                       ? isEventView
                         ? 'bg-fuchsia-600 text-white shadow-xs'
                         : 'bg-red-600 text-white shadow-xs'
-                      : 'text-slate-500 hover:text-slate-300'
+                      : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   {opt.label}
@@ -524,7 +524,7 @@ export default function AlertsMapView({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-800">
+          <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1 shrink-0">
               {isEventView ? 'Typ wydarzenia:' : 'Krytyczność:'}
             </span>
@@ -538,7 +538,7 @@ export default function AlertsMapView({
                   type="button"
                   onClick={() => (isEventView ? toggleMapCategory(key) : toggleMapSeverity(key))}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
-                    selected ? 'border-transparent text-white' : 'border-slate-700 text-slate-500 hover:text-slate-300'
+                    selected ? 'border-transparent text-white' : 'border-slate-200 text-slate-500 hover:text-slate-700'
                   }`}
                   style={selected ? { backgroundColor: color } : undefined}
                 >
@@ -558,11 +558,11 @@ export default function AlertsMapView({
       {showMap && (
         <section
           ref={mapSectionRef}
-          className="rounded-3xl bg-slate-900 p-5 border border-slate-800 shadow-xs space-y-3 scroll-mt-6"
+          className="rounded-3xl bg-white p-5 border border-slate-200 shadow-xs space-y-3 scroll-mt-6"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-100">
-              <MapPin className={`h-4 w-4 ${isEventView ? 'text-fuchsia-400' : 'text-red-500'}`} />
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+              <MapPin className={`h-4 w-4 ${isEventView ? 'text-fuchsia-600' : 'text-red-500'}`} />
               <span>
                 {isEventView
                   ? `Wydarzenia w mieście na mapie (${mapAlerts.length})`
@@ -591,7 +591,7 @@ export default function AlertsMapView({
             <button
               type="button"
               onClick={() => setShowForm(true)}
-              className="w-full rounded-3xl border border-dashed border-slate-800 bg-slate-900/50 hover:bg-slate-900 hover:border-slate-700 p-4 text-sm font-semibold text-slate-400 hover:text-slate-200 transition"
+              className="w-full rounded-3xl border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400 p-4 text-sm font-semibold text-slate-500 hover:text-slate-700 transition"
             >
               {isEventView ? '+ Dodaj nowe zdarzenie codzienne' : '+ Opublikuj nowy komunikat kryzysowy'}
             </button>
@@ -612,7 +612,7 @@ export default function AlertsMapView({
 
       {/* Sekcja aktywnych komunikatów */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
           <div className="flex items-center gap-2.5">
             {isEventView ? (
               <span className="inline-flex h-3 w-3 rounded-full bg-fuchsia-500" />
@@ -622,27 +622,27 @@ export default function AlertsMapView({
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600" />
               </span>
             )}
-            <h2 className="text-lg font-bold text-slate-100 tracking-tight">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">
               {isEventView
                 ? `Aktualne Wydarzenia (${activeAlerts.length})`
                 : `Aktywne Komunikaty (${activeAlerts.length})`}
             </h2>
           </div>
           {isEventView ? (
-            <span className="text-xs text-fuchsia-300 font-semibold bg-fuchsia-950/50 px-3 py-1 rounded-full border border-fuchsia-900/60">
+            <span className="text-xs text-fuchsia-700 font-semibold bg-fuchsia-50 px-3 py-1 rounded-full border border-fuchsia-200">
               Trwające i zaplanowane
             </span>
           ) : (
-            <span className="text-xs text-red-300 font-semibold bg-red-950/50 px-3 py-1 rounded-full border border-red-900/60">
+            <span className="text-xs text-red-700 font-semibold bg-red-50 px-3 py-1 rounded-full border border-red-200">
               Na żywo na tablicy
             </span>
           )}
         </div>
 
-        <div className="rounded-3xl bg-slate-900 p-5 border border-slate-800 shadow-xs space-y-4">
+        <div className="rounded-3xl bg-white p-5 border border-slate-200 shadow-xs space-y-4">
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <Calendar className={`h-3.5 w-3.5 ${isEventView ? 'text-fuchsia-400' : 'text-red-500'}`} />
+              <Calendar className={`h-3.5 w-3.5 ${isEventView ? 'text-fuchsia-600' : 'text-red-500'}`} />
               <span>{isEventView ? 'Zakres Czasowy Wydarzeń:' : 'Zakres Czasowy Aktywnych:'}</span>
             </label>
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -656,7 +656,7 @@ export default function AlertsMapView({
                       ? isEventView
                         ? 'bg-fuchsia-600 text-white shadow-xs'
                         : 'bg-red-600 text-white shadow-xs'
-                      : 'bg-slate-800 text-slate-400 hover:text-slate-100 hover:bg-slate-700/70'
+                      : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200'
                   }`}
                 >
                   {tf.label}
@@ -664,37 +664,37 @@ export default function AlertsMapView({
               ))}
             </div>
             {activeTimeframe === 'custom' && (
-              <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-800/60 p-3 rounded-2xl border border-slate-700">
-                <span className="text-slate-400 font-semibold">Od:</span>
+              <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                <span className="text-slate-500 font-semibold">Od:</span>
                 <input
                   type="date"
                   value={activeCustomStart}
                   onChange={(e) => setActiveCustomStart(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-700 py-1 px-2.5 text-slate-100 font-semibold"
+                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
                 />
-                <span className="text-slate-400 font-semibold">Do:</span>
+                <span className="text-slate-500 font-semibold">Do:</span>
                 <input
                   type="date"
                   value={activeCustomEnd}
                   onChange={(e) => setActiveCustomEnd(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-700 py-1 px-2.5 text-slate-100 font-semibold"
+                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
                 />
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-800">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-100">
             <div className="md:col-span-5 relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 value={activeSearch}
                 onChange={(e) => setActiveSearch(e.target.value)}
                 placeholder="Szukaj wśród aktywnych po treści, miejscu, autorze, organizacji..."
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 pl-10 pr-10 text-xs text-slate-100 placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-10 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:outline-none"
               />
               {activeSearch && (
-                <button onClick={() => setActiveSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                <button onClick={() => setActiveSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -704,7 +704,7 @@ export default function AlertsMapView({
               <select
                 value={activeCategoryFilter}
                 onChange={(e) => setActiveCategoryFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 px-3 text-xs text-slate-200 font-semibold focus:border-red-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-red-500 focus:outline-none"
               >
                 <option value="all">Wszystkie typy</option>
                 {categoriesForKind(view).map((c) => (
@@ -719,7 +719,7 @@ export default function AlertsMapView({
               <select
                 value={activeOrgFilter}
                 onChange={(e) => setActiveOrgFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 px-3 text-xs text-slate-200 font-semibold focus:border-red-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-red-500 focus:outline-none"
               >
                 <option value="all">Wszystkie organizacje</option>
                 {availableActiveOrgs.map((org) => (
@@ -731,12 +731,12 @@ export default function AlertsMapView({
             </div>
 
             <div className="md:col-span-3">
-              <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5">
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
                 <ArrowUpDown className="h-3.5 w-3.5 text-red-500 shrink-0" />
                 <select
                   value={activeSort}
                   onChange={(e) => setActiveSort(e.target.value as SortOption)}
-                  className="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none w-full cursor-pointer"
+                  className="bg-transparent text-xs text-slate-700 font-semibold focus:outline-none w-full cursor-pointer"
                 >
                   <option value="date-desc">Data: Od najnowszych</option>
                   <option value="date-asc">Data: Od najstarszych</option>
@@ -751,13 +751,13 @@ export default function AlertsMapView({
         </div>
 
         {activeAlerts.length === 0 ? (
-          <div className="rounded-3xl bg-slate-900 p-8 text-center border border-slate-800 shadow-xs">
+          <div className="rounded-3xl bg-white p-8 text-center border border-slate-200 shadow-xs">
             {isEventView ? (
-              <CalendarDays className="h-10 w-10 text-fuchsia-400 mx-auto mb-2 opacity-80" />
+              <CalendarDays className="h-10 w-10 text-fuchsia-500 mx-auto mb-2 opacity-80" />
             ) : (
               <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-2 opacity-80" />
             )}
-            <p className="text-slate-200 font-semibold text-sm">
+            <p className="text-slate-800 font-semibold text-sm">
               {activeSearch || activeCategoryFilter !== 'all' || activeOrgFilter !== 'all' || activeTimeframe !== 'wszystkie'
                 ? isEventView
                   ? 'Brak wydarzeń spełniających wybrane kryteria'
@@ -785,10 +785,10 @@ export default function AlertsMapView({
               return (
                 <div
                   key={alert.id}
-                  className={`rounded-3xl bg-slate-900 p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 ${
+                  className={`rounded-3xl bg-white p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 ${
                     isEventView
-                      ? 'border-slate-800 hover:border-fuchsia-800/70'
-                      : 'border-red-900/50 hover:border-red-700/70'
+                      ? 'border-slate-200 hover:border-fuchsia-300'
+                      : 'border-red-200 hover:border-red-300'
                   }`}
                 >
                   <div className="space-y-3">
@@ -818,14 +818,14 @@ export default function AlertsMapView({
                             {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold uppercase tracking-wider">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold uppercase tracking-wider">
                             <AlertTriangle className="h-3 w-3 text-slate-500" />
                             {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
                           </span>
                         )}
 
                         {alert.status === 'IN_PROGRESS' && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-xl bg-cyan-950/60 border border-cyan-800 text-cyan-300 text-xs font-bold uppercase tracking-wider">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-700 text-xs font-bold uppercase tracking-wider">
                             {ALERT_STATUS_LABELS.IN_PROGRESS}
                           </span>
                         )}
@@ -834,7 +834,7 @@ export default function AlertsMapView({
                       <button
                         type="button"
                         onClick={() => handleFocusOnMap(alert.id)}
-                        className="inline-flex items-center gap-1 text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-xl font-medium border border-slate-700 transition"
+                        className="inline-flex items-center gap-1 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-xl font-medium border border-slate-200 transition"
                         title="Pokaż tę lokalizację na mapie"
                       >
                         <MapPin className="h-3.5 w-3.5 text-red-500 shrink-0" />
@@ -845,19 +845,19 @@ export default function AlertsMapView({
                     </div>
 
                     <div className="space-y-1.5">
-                      <h3 className="text-base sm:text-lg font-extrabold text-slate-100 leading-snug tracking-tight">
+                      <h3 className="text-base sm:text-lg font-extrabold text-slate-900 leading-snug tracking-tight">
                         {alert.title}
                       </h3>
-                      <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">{alert.description}</p>
+                      <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">{alert.description}</p>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500 pt-2 border-t border-slate-800">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500 pt-2 border-t border-slate-100">
                       <div className="flex items-center gap-1">
                         <Building className="h-3.5 w-3.5 text-slate-500" />
                         <span>{alert.author?.organization?.name || alert.gmina.name}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-indigo-300 font-mono font-semibold">
-                        <Clock className="h-3.5 w-3.5 text-indigo-400" />
+                      <div className="flex items-center gap-1.5 text-indigo-700 font-mono font-semibold">
+                        <Clock className="h-3.5 w-3.5 text-indigo-600" />
                         <span>
                           {isEventView ? 'Dodano' : 'Trwa od'}: {formatDuration(liveDurationMs)}
                           {isEventView ? ' temu' : ''}
@@ -870,10 +870,10 @@ export default function AlertsMapView({
                     <button
                       type="button"
                       onClick={() => handleFocusOnMap(alert.id)}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 text-xs font-semibold border border-indigo-800/60 transition shrink-0"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition shrink-0"
                       title="Zlokalizuj to zdarzenie na mapie"
                     >
-                      <MapPin className="h-3.5 w-3.5 text-indigo-400" />
+                      <MapPin className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Na mapie</span>
                     </button>
 
@@ -881,7 +881,7 @@ export default function AlertsMapView({
                       <button
                         type="button"
                         onClick={() => setEditingAlert(alert)}
-                        className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition shrink-0"
+                        className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition shrink-0"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         <span>Edytuj</span>
@@ -904,25 +904,25 @@ export default function AlertsMapView({
       </section>
 
       {/* Sekcja zarchiwizowanych komunikatów */}
-      <section className="space-y-4 pt-6 border-t border-slate-800">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2.5 text-slate-400">
+      <section className="space-y-4 pt-6 border-t border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2.5 text-slate-500">
             <Archive className="h-5 w-5 text-slate-500" />
-            <h2 className="text-lg font-bold text-slate-100 tracking-tight">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">
               {isEventView
                 ? `Archiwum Wydarzeń (${archivedAlerts.length})`
                 : `Archiwum Komunikatów (${archivedAlerts.length})`}
             </h2>
           </div>
-          <span className="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
+          <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
             Wyszukiwanie i historia
           </span>
         </div>
 
-        <div className="rounded-3xl bg-slate-900 p-5 border border-slate-800 shadow-xs space-y-4">
+        <div className="rounded-3xl bg-white p-5 border border-slate-200 shadow-xs space-y-4">
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 text-indigo-400" />
+              <Calendar className="h-3.5 w-3.5 text-indigo-600" />
               <span>Zakres Czasowy Archiwum:</span>
             </label>
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -932,7 +932,7 @@ export default function AlertsMapView({
                   type="button"
                   onClick={() => setArchiveTimeframe(tf.key)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                    archiveTimeframe === tf.key ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-800 text-slate-400 hover:text-slate-100 hover:bg-slate-700/70'
+                    archiveTimeframe === tf.key ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200'
                   }`}
                 >
                   {tf.label}
@@ -940,37 +940,37 @@ export default function AlertsMapView({
               ))}
             </div>
             {archiveTimeframe === 'custom' && (
-              <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-800/60 p-3 rounded-2xl border border-slate-700">
-                <span className="text-slate-400 font-semibold">Od:</span>
+              <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                <span className="text-slate-500 font-semibold">Od:</span>
                 <input
                   type="date"
                   value={archiveCustomStart}
                   onChange={(e) => setArchiveCustomStart(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-700 py-1 px-2.5 text-slate-100 font-semibold"
+                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
                 />
-                <span className="text-slate-400 font-semibold">Do:</span>
+                <span className="text-slate-500 font-semibold">Do:</span>
                 <input
                   type="date"
                   value={archiveCustomEnd}
                   onChange={(e) => setArchiveCustomEnd(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-700 py-1 px-2.5 text-slate-100 font-semibold"
+                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
                 />
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-800">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-100">
             <div className="md:col-span-5 relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 value={archiveSearch}
                 onChange={(e) => setArchiveSearch(e.target.value)}
                 placeholder="Szukaj w archiwum po treści, miejscu, autorze, organizacji..."
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 pl-10 pr-10 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-10 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none"
               />
               {archiveSearch && (
-                <button onClick={() => setArchiveSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                <button onClick={() => setArchiveSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -980,7 +980,7 @@ export default function AlertsMapView({
               <select
                 value={archiveCategoryFilter}
                 onChange={(e) => setArchiveCategoryFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 px-3 text-xs text-slate-200 font-semibold focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none"
               >
                 <option value="all">Wszystkie typy</option>
                 {categoriesForKind(view).map((c) => (
@@ -995,7 +995,7 @@ export default function AlertsMapView({
               <select
                 value={archiveOrgFilter}
                 onChange={(e) => setArchiveOrgFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2.5 px-3 text-xs text-slate-200 font-semibold focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none"
               >
                 <option value="all">Wszystkie organizacje</option>
                 {availableArchiveOrgs.map((org) => (
@@ -1007,12 +1007,12 @@ export default function AlertsMapView({
             </div>
 
             <div className="md:col-span-3">
-              <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5">
-                <ArrowUpDown className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <ArrowUpDown className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
                 <select
                   value={archiveSort}
                   onChange={(e) => setArchiveSort(e.target.value as SortOption)}
-                  className="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none w-full cursor-pointer"
+                  className="bg-transparent text-xs text-slate-700 font-semibold focus:outline-none w-full cursor-pointer"
                 >
                   <option value="date-desc">Data: Od najnowszych</option>
                   <option value="date-asc">Data: Od najstarszych</option>
@@ -1027,9 +1027,9 @@ export default function AlertsMapView({
         </div>
 
         {archivedAlerts.length === 0 ? (
-          <div className="rounded-3xl bg-slate-900 p-10 text-center border border-slate-800 shadow-xs space-y-2">
-            <Archive className="h-8 w-8 text-slate-600 mx-auto" />
-            <p className="text-sm text-slate-200 font-semibold">
+          <div className="rounded-3xl bg-white p-10 text-center border border-slate-200 shadow-xs space-y-2">
+            <Archive className="h-8 w-8 text-slate-400 mx-auto" />
+            <p className="text-sm text-slate-800 font-semibold">
               {isEventView
                 ? 'Brak zakończonych wydarzeń w wybranym przedziale'
                 : 'Brak zarchiwizowanych komunikatów w wybranym przedziale'}
@@ -1046,7 +1046,7 @@ export default function AlertsMapView({
               return (
                 <div
                   key={alert.id}
-                  className="rounded-3xl bg-slate-900 p-6 border border-slate-800 hover:border-slate-700 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between"
+                  className="rounded-3xl bg-white p-6 border border-slate-200 hover:border-slate-300 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between"
                 >
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1060,7 +1060,7 @@ export default function AlertsMapView({
                           </span>
                         )}
 
-                        <span className="rounded-xl bg-slate-800 px-2.5 py-0.5 text-xs text-slate-300 font-bold uppercase tracking-wider">
+                        <span className="rounded-xl bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 font-bold uppercase tracking-wider">
                           {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
                         </span>
                       </div>
@@ -1068,8 +1068,8 @@ export default function AlertsMapView({
                       <span
                         className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-lg border flex items-center gap-1 ${
                           isResolved
-                            ? 'text-emerald-300 bg-emerald-950/50 border-emerald-800'
-                            : 'text-slate-400 bg-slate-800 border-slate-700'
+                            ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                            : 'text-slate-500 bg-slate-100 border-slate-200'
                         }`}
                       >
                         <span>{isResolved ? '✓' : '✕'} {ALERT_STATUS_LABELS[alert.status] ?? alert.status}</span>
@@ -1077,45 +1077,45 @@ export default function AlertsMapView({
                     </div>
 
                     <div className="space-y-1.5">
-                      <h3 className="text-base sm:text-lg font-extrabold text-slate-100 leading-snug tracking-tight">
+                      <h3 className="text-base sm:text-lg font-extrabold text-slate-900 leading-snug tracking-tight">
                         {alert.title}
                       </h3>
-                      <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">{alert.description}</p>
+                      <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">{alert.description}</p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      <span className="flex items-center gap-1 bg-slate-800 px-2.5 py-1 rounded-lg">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
                         <MapPin className="h-3.5 w-3.5 text-red-500" />
                         <strong>{alert.location || alert.gmina.name}</strong>
                       </span>
-                      <span className="flex items-center gap-1 bg-slate-800 px-2.5 py-1 rounded-lg text-slate-500">
+                      <span className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg text-slate-500">
                         <Building className="h-3.5 w-3.5 text-slate-500" />
                         <span>{alert.author?.organization?.name || alert.gmina.name}</span>
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-xs font-mono">
-                      <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-0.5">
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 text-xs font-mono">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-0.5">
                         <span className="text-[10px] text-slate-500 font-sans block">Czas trwania:</span>
-                        <span className="text-xs font-extrabold text-indigo-300">{formatDuration(durationMs)}</span>
+                        <span className="text-xs font-extrabold text-indigo-700">{formatDuration(durationMs)}</span>
                       </div>
-                      <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-0.5">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-0.5">
                         <span className="text-[10px] text-slate-500 font-sans block">Okres zdarzenia:</span>
-                        <span className="text-[11px] font-bold text-slate-300">
+                        <span className="text-[11px] font-bold text-slate-600">
                           {alert.createdAt.toLocaleDateString('pl-PL')} ➔ {alert.updatedAt.toLocaleDateString('pl-PL')}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
                     <button
                       type="button"
                       onClick={() => handleFocusOnMap(alert.id)}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-300 text-xs font-semibold border border-indigo-800/60 transition"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition"
                       title="Zlokalizuj to zdarzenie na mapie"
                     >
-                      <MapPin className="h-3.5 w-3.5 text-indigo-400" />
+                      <MapPin className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Na mapie</span>
                     </button>
 
@@ -1123,7 +1123,7 @@ export default function AlertsMapView({
                       <button
                         type="button"
                         onClick={() => setEditingAlert(alert)}
-                        className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+                        className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         <span>Edytuj</span>

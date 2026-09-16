@@ -69,7 +69,7 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
             type="button"
             onClick={() => setStatus('RESOLVED', 'resolve')}
             disabled={loading !== null}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition disabled:opacity-50"
           >
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
             <span>{loading === 'resolve' ? 'Zapisywanie…' : isEvent ? 'Zakończ' : 'Rozwiąż'}</span>
@@ -122,7 +122,7 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
           type="button"
           onClick={remove}
           disabled={loading !== null}
-          className="flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-950/70 text-rose-300 text-xs font-bold border border-rose-900/60 transition disabled:opacity-50 shrink-0"
+          className="flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition disabled:opacity-50 shrink-0"
           title="Całkowicie usuń ten alert (tylko Administrator)"
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -130,7 +130,7 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
         </button>
       )}
 
-      {error && <p className="text-xs text-rose-400 basis-full">{error}</p>}
+      {error && <p className="text-xs text-rose-600 basis-full">{error}</p>}
     </div>
   );
 }

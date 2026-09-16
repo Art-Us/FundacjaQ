@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { createPinIcon, createEventPinIcon } from './pinIcon';
 import 'leaflet/dist/leaflet.css';
-import './leaflet-dark.css';
+import './leaflet-theme.css';
 
 interface LocationPickerProps {
   center: [number, number];
@@ -46,7 +46,6 @@ export default function LocationPicker({ center, value, onPick, color, icon = 'a
   return (
     <div className="relative rounded-lg overflow-hidden border border-gray-300" style={{ height: 260 }}>
       <MapContainer
-        className="map-light"
         center={value ? [value.lat, value.lng] : center}
         zoom={14}
         style={{ height: '100%', width: '100%' }}
