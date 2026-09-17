@@ -79,6 +79,76 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     expect(res.status).toBe(404);
   });
 
+  it('returns 500 when the initial organization lookup itself throws', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ name: 'New Name' });
+
+    expect(res.status).toBe(500);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed contactEmail', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
+
+    const res = await callPatch({ contactEmail: 'not-an-email' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Nieprawidłowy adres email kontaktu.');
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid, non-empty contactEmail', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
+    prisma.organization.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ contactEmail: 'jan@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: 'target-1' },
+      data: { contactEmail: 'jan@example.com' },
+    });
+  });
+
+  it('applies every optional address/contact field when provided with a real (non-null) value', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
+    prisma.organization.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({
+      street: 'Długa',
+      houseNumber: '12',
+      apartmentNumber: '3A',
+      city: 'Kraków',
+      postalCode: '30-001',
+      contactFirstName: 'Jan',
+      contactLastName: 'Kowalski',
+      contactPhone: '+48 600 100 200',
+      contactEmail: 'jan@example.com',
+    });
+
+    expect(res.status).toBe(200);
+    expect(prisma.organization.update).toHaveBeenCalledWith({
+      where: { id: 'target-1' },
+      data: {
+        street: 'Długa',
+        houseNumber: '12',
+        apartmentNumber: '3A',
+        city: 'Kraków',
+        postalCode: '30-001',
+        contactFirstName: 'Jan',
+        contactLastName: 'Kowalski',
+        contactPhone: '+48 600 100 200',
+        contactEmail: 'jan@example.com',
+      },
+    });
+  });
+
   it('updates fields for an ADMIN session', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
@@ -224,6 +294,55 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     expect(res.status).toBe(409);
     expect(body.error).toBe('Organizacja o tej nazwie już istnieje w tej gminie.');
   });
+
+  it('rejects malformed JSON with 400 before touching the database', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
+    const req = new NextRequest('http://localhost/api/admin/organizations/target-1', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: '{not valid json',
+    });
+
+    const res = await PATCH(req, { params: { id: 'target-1' } });
+
+    expect(res.status).toBe(400);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean 400 when the rename/gmina-collision check itself fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization({ name: 'Caritas' }) as any);
+    prisma.organization.findFirst.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ name: 'PCK' });
+
+    expect(res.status).toBe(400);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean 400 when verifying the new gmina (on reassignment) itself fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+    prisma.gmina.findUnique.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ gminaId: 'g2' });
+
+    expect(res.status).toBe(400);
+    expect(prisma.organization.update).not.toHaveBeenCalled();
+  });
+
+  it('returns a generic 400 (not a false 409/200) when the update transaction fails for an unrelated reason', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);
+    prisma.organization.update.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callPatch({ city: 'Kraków' });
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Nie udało się zaktualizować organizacji. Sprawdź podane dane.');
+  });
 });
 
 describe('DELETE /api/admin/organizations/[id]', () => {
@@ -243,6 +362,16 @@ describe('DELETE /api/admin/organizations/[id]', () => {
     const res = await callDelete('missing');
 
     expect(res.status).toBe(404);
+  });
+
+  it('returns 500 when the initial lookup itself fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callDelete();
+
+    expect(res.status).toBe(500);
+    expect(prisma.organization.delete).not.toHaveBeenCalled();
   });
 
   it('lets ADMIN delete an organization with no dependents', async () => {

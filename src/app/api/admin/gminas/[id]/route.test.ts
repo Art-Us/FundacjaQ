@@ -110,6 +110,62 @@ describe('PATCH /api/admin/gminas/[id]', () => {
     expect(prisma.gmina.update).not.toHaveBeenCalled();
   });
 
+  it('clears powiat/voivodeship/latitude/longitude when explicitly set to null', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(
+      baseGmina({ powiat: 'warszawski', voivodeship: 'mazowieckie', latitude: 52.2, longitude: 21.0 }) as any
+    );
+    prisma.gmina.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ powiat: null, voivodeship: null, latitude: null, longitude: null });
+
+    expect(res.status).toBe(200);
+    expect(prisma.gmina.update).toHaveBeenCalledWith({
+      where: { id: 'target-1' },
+      data: { powiat: null, voivodeship: null, latitude: null, longitude: null },
+    });
+  });
+
+  it('updates latitude/longitude within range', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
+    prisma.gmina.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({ latitude: 52.2297, longitude: 21.0122 });
+
+    expect(res.status).toBe(200);
+    expect(prisma.gmina.update).toHaveBeenCalledWith({
+      where: { id: 'target-1' },
+      data: { latitude: 52.2297, longitude: 21.0122 },
+    });
+  });
+
+  it.each([
+    ['latitude', 91],
+    ['latitude', -91],
+    ['longitude', 181],
+    ['longitude', -181],
+  ])('rejects an out-of-range %s (%d) with 400 and no DB write', async (field, value) => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
+
+    const res = await callPatch({ [field]: value });
+
+    expect(res.status).toBe(400);
+    expect(prisma.gmina.update).not.toHaveBeenCalled();
+  });
+
+  it('performs a no-op update when no fields are given', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
+    prisma.gmina.update.mockResolvedValue({} as any);
+
+    const res = await callPatch({});
+
+    expect(res.status).toBe(200);
+    expect(prisma.gmina.update).toHaveBeenCalledWith({ where: { id: 'target-1' }, data: {} });
+  });
+
   it('rejects a blank name', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);

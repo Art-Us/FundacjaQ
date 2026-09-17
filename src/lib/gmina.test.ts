@@ -5,7 +5,14 @@ import type { PrismaClient } from '@prisma/client';
 vi.mock('./prisma');
 
 import { prisma as prismaImport } from './prisma';
-import { requiresGmina, scopedGminaWhere, normalizeGminaName, createGmina, resolveGminaId } from './gmina';
+import {
+  requiresGmina,
+  scopedGminaWhere,
+  normalizeGminaName,
+  createGmina,
+  resolveGminaId,
+  getGminaLocationOptions,
+} from './gmina';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
@@ -83,6 +90,39 @@ describe('resolveGminaId', () => {
 
     expect(result).toEqual({ error: 'Nie udało się zweryfikować gminy.' });
   });
+
+  it('creates (or reuses) a gmina from newGminaName when no gminaId is given', async () => {
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockResolvedValue({ id: 'new-1', name: 'Nowa Gmina' } as any);
+
+    const result = await resolveGminaId({ newGminaName: 'Nowa Gmina' });
+
+    expect(result).toEqual({ id: 'new-1', created: true, gmina: { id: 'new-1', name: 'Nowa Gmina' } });
+  });
+
+  it('prefers gminaId over newGminaName when both are given', async () => {
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+
+    const result = await resolveGminaId({ gminaId: 'g1', newGminaName: 'Ignored' });
+
+    expect(result).toEqual({ id: 'g1', created: false, gmina: null });
+    expect(prisma.gmina.findFirst).not.toHaveBeenCalled();
+    expect(prisma.gmina.create).not.toHaveBeenCalled();
+  });
+
+  it('propagates a createGmina error when newGminaName is blank', async () => {
+    const result = await resolveGminaId({ newGminaName: '   ' });
+
+    expect(result).toEqual({ error: 'Nazwa gminy jest wymagana.' });
+  });
+
+  it('errors when neither gminaId nor newGminaName is given', async () => {
+    const result = await resolveGminaId({});
+
+    expect(result).toEqual({ error: 'Gmina jest wymagana.' });
+    expect(prisma.gmina.findUnique).not.toHaveBeenCalled();
+    expect(prisma.gmina.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 describe('createGmina', () => {
@@ -142,10 +182,22 @@ describe('createGmina', () => {
     prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.create.mockResolvedValue({ id: 'g1', name: 'Warszawa' } as any);
 
-    await createGmina({ name: 'Warszawa', powiat: 'warszawski', voivodeship: 'mazowieckie' });
+    await createGmina({
+      name: 'Warszawa',
+      powiat: 'warszawski',
+      voivodeship: 'mazowieckie',
+      latitude: 52.2297,
+      longitude: 21.0122,
+    });
 
     expect(prisma.gmina.create).toHaveBeenCalledWith({
-      data: { name: 'Warszawa', powiat: 'warszawski', voivodeship: 'mazowieckie' },
+      data: {
+        name: 'Warszawa',
+        powiat: 'warszawski',
+        voivodeship: 'mazowieckie',
+        latitude: 52.2297,
+        longitude: 21.0122,
+      },
     });
   });
 
@@ -162,5 +214,80 @@ describe('createGmina', () => {
     const result = await createGmina({ name: 'Warszawa' });
 
     expect(result).toEqual({ gmina: { id: 'race-1', name: 'Warszawa' }, created: false });
+  });
+
+  it('falls through to a generic error when a P2002 race is not actually a name collision (row not found on recheck)', async () => {
+    const { Prisma } = await import('@prisma/client');
+    // Both the initial check AND the post-race recheck find nothing — the
+    // P2002 must have been caused by something other than the name collision
+    // this function is written to recover from.
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const result = await createGmina({ name: 'Warszawa' });
+
+    expect(result).toEqual({ error: 'Nie udało się utworzyć gminy.' });
+  });
+});
+
+describe('getGminaLocationOptions', () => {
+  beforeEach(() => {
+    mockReset(prisma);
+  });
+
+  it('only queries gminas that have a voivodeship set, distinct by voivodeship+powiat', async () => {
+    prisma.gmina.findMany.mockResolvedValue([]);
+
+    await getGminaLocationOptions();
+
+    expect(prisma.gmina.findMany).toHaveBeenCalledWith({
+      where: { voivodeship: { not: null } },
+      select: { voivodeship: true, powiat: true },
+      distinct: ['voivodeship', 'powiat'],
+    });
+  });
+
+  it('returns an empty array when nothing matches', async () => {
+    prisma.gmina.findMany.mockResolvedValue([]);
+
+    expect(await getGminaLocationOptions()).toEqual([]);
+  });
+
+  it('groups powiats under every voivodeship they appear in, sorted and deduplicated, tolerating a null powiat', async () => {
+    prisma.gmina.findMany.mockResolvedValue([
+      { voivodeship: 'mazowieckie', powiat: 'zamojski' },
+      { voivodeship: 'mazowieckie', powiat: 'warszawski' },
+      { voivodeship: 'lubelskie', powiat: 'zamojski' },
+      { voivodeship: 'lubelskie', powiat: 'zamojski' },
+      { voivodeship: 'podlaskie', powiat: null },
+    ] as any);
+
+    const result = await getGminaLocationOptions();
+
+    expect(result).toEqual([
+      { voivodeship: 'lubelskie', powiats: ['zamojski'] },
+      { voivodeship: 'mazowieckie', powiats: ['warszawski', 'zamojski'] },
+      { voivodeship: 'podlaskie', powiats: [] },
+    ]);
+  });
+
+  it('skips a row with no voivodeship instead of grouping it under an empty key', async () => {
+    // The real query filters `voivodeship: { not: null }` at the DB level, so
+    // this can't happen through a genuine call — but the grouping loop itself
+    // has its own defensive guard, and a mocked row can bypass the where
+    // clause the same way a stale/inconsistent read could in principle.
+    prisma.gmina.findMany.mockResolvedValue([
+      { voivodeship: null, powiat: 'zamojski' },
+      { voivodeship: 'lubelskie', powiat: 'zamojski' },
+    ] as any);
+
+    const result = await getGminaLocationOptions();
+
+    expect(result).toEqual([{ voivodeship: 'lubelskie', powiats: ['zamojski'] }]);
   });
 });

@@ -194,6 +194,27 @@ describe('authorize()', () => {
       expect.objectContaining({ data: expect.objectContaining({ success: false }) })
     );
   });
+
+  it('uses only the first entry when x-forwarded-for arrives as an array (repeated header)', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    const req = { headers: { 'x-forwarded-for': ['5.6.7.8', '9.9.9.9'], 'user-agent': 'vitest' } };
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, req)).rejects.toThrow();
+
+    expect(recordFailedLoginByIp).toHaveBeenCalledWith('5.6.7.8');
+    expect(recordFailedLoginPair).toHaveBeenCalledWith('user@example.com', '5.6.7.8');
+  });
+
+  it('records "unknown" as the user-agent when the request has none', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    const req = { headers: { 'x-forwarded-for': '1.2.3.4' } };
+
+    await expect(authorize({ email: 'user@example.com', password: 'x' }, req)).rejects.toThrow();
+
+    expect(prisma.loginAttempt.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userAgent: 'unknown' }) })
+    );
+  });
 });
 
 describe('captcha gate', () => {
@@ -265,10 +286,10 @@ describe('jwt callback', () => {
   it('embeds role/gminaId on initial sign-in', async () => {
     const token = await jwt({
       token: {},
-      user: { id: 'u1', role: 'ADMIN', gminaId: 'g1' } as any,
+      user: { id: 'u1', role: 'ADMIN', gminaId: 'g1', organizationId: 'o1' } as any,
     } as any);
 
-    expect(token).toMatchObject({ role: 'ADMIN', gminaId: 'g1', invalid: false });
+    expect(token).toMatchObject({ role: 'ADMIN', gminaId: 'g1', organizationId: 'o1', invalid: false });
   });
 
   it('keeps the token valid on re-validation when nothing changed', async () => {
@@ -278,11 +299,13 @@ describe('jwt callback', () => {
       passwordChangedAt: new Date(0),
       role: 'VOLUNTEER',
       gminaId: null,
+      organizationId: 'org1',
     } as any);
 
     const token = await jwt({ token: { sub: 'u1', iat: Math.floor(Date.now() / 1000) } } as any);
 
     expect(token.invalid).toBe(false);
+    expect(token.organizationId).toBe('org1');
   });
 
   it('invalidates the token when the account has been deactivated, tagged as "deactivated"', async () => {
@@ -339,6 +362,25 @@ describe('jwt callback', () => {
     expect(token.invalid).toBe(true);
     expect(token.invalidReason).toBe('deactivated');
   });
+
+  it('treats a missing/non-numeric token.iat as issued-at-epoch-0 instead of throwing', async () => {
+    // passwordChangedAt is just after the real epoch (0), so if issuedAtMs is
+    // correctly falling back to 0 (rather than e.g. NaN or undefined, which
+    // would make every ">" comparison false), passwordChangedAfterIssue must
+    // come out true and the token must be marked stale.
+    prisma.user.findUnique.mockResolvedValue({
+      isActive: true,
+      lockedUntil: null,
+      passwordChangedAt: new Date(1000),
+      role: 'VOLUNTEER',
+      gminaId: null,
+    } as any);
+
+    const token = await jwt({ token: { sub: 'u1' } } as any);
+
+    expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('stale');
+  });
 });
 
 describe('session callback', () => {
@@ -368,9 +410,9 @@ describe('session callback', () => {
   it('populates session.user from the token when valid', async () => {
     const result = await session({
       session: { user: {}, expires: 'later' } as any,
-      token: { invalid: false, sub: 'u1', role: 'COORDINATOR', gminaId: 'g1' } as any,
+      token: { invalid: false, sub: 'u1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'org1' } as any,
     } as any);
 
-    expect((result as any).user).toMatchObject({ id: 'u1', role: 'COORDINATOR', gminaId: 'g1' });
+    expect((result as any).user).toMatchObject({ id: 'u1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'org1' });
   });
 });

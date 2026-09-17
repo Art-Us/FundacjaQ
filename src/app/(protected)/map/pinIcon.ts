@@ -66,3 +66,27 @@ export function createEventPinIcon(color: string, size = 28): L.DivIcon {
     popupAnchor: [0, -size / 2],
   });
 }
+
+// Klasyczna kropla lokalizacji (bez pulsowania i bez glifu kategorii) — do
+// zwykłego wskazywania punktu na mapie (np. siedziba gminy), gdzie pinezka nie
+// ma reprezentować ani alertu, ani zdarzenia.
+const LOCATION_PIN_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+  '<circle cx="12" cy="12" r="4"/>' +
+  '</svg>';
+
+export function createLocationPinIcon(color: string, size = 30): L.DivIcon {
+  const html = `
+    <div class="relative flex items-center justify-center text-white" style="width: ${size}px; height: ${size}px; background-color: ${color}; border: 2.5px solid #0f172a; border-radius: 9999px; box-shadow: 0 2px 8px rgba(0,0,0,0.55);">
+      ${LOCATION_PIN_SVG}
+    </div>
+  `;
+
+  return L.divIcon({
+    className: '',
+    html,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}

@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
-import { createPinIcon, createEventPinIcon } from './pinIcon';
+import { createPinIcon, createEventPinIcon, createLocationPinIcon } from './pinIcon';
 import 'leaflet/dist/leaflet.css';
 import './leaflet-theme.css';
 
@@ -12,8 +12,9 @@ interface LocationPickerProps {
   onPick: (lat: number, lng: number) => void;
   color: string;
   // Podgląd pinezki musi używać tego samego glifu co docelowy marker na mapie
-  // przeglądowej — trójkąt ostrzegawczy dla alertów, kalendarz dla zdarzeń.
-  icon?: 'alert' | 'event';
+  // przeglądowej — trójkąt ostrzegawczy dla alertów, kalendarz dla zdarzeń,
+  // zwykła kropla dla ogólnego wskazania punktu (np. siedziba gminy).
+  icon?: 'alert' | 'event' | 'location';
 }
 
 function ClickHandler({ onPick }: { onPick: (lat: number, lng: number) => void }) {
@@ -41,7 +42,12 @@ function FlyToValue({ value }: { value: { lat: number; lng: number } | null }) {
 }
 
 export default function LocationPicker({ center, value, onPick, color, icon = 'alert' }: LocationPickerProps) {
-  const markerIcon = icon === 'event' ? createEventPinIcon(color, 40) : createPinIcon(color, 40);
+  const markerIcon =
+    icon === 'event'
+      ? createEventPinIcon(color, 40)
+      : icon === 'location'
+        ? createLocationPinIcon(color, 40)
+        : createPinIcon(color, 40);
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-gray-300" style={{ height: 260 }}>
