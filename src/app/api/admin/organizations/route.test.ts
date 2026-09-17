@@ -48,6 +48,15 @@ describe('GET /api/admin/organizations', () => {
     expect(res.status).toBe(200);
     expect(body.organizations).toHaveLength(1);
   });
+
+  it('returns 500 when the database read fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findMany.mockRejectedValue(new Error('connection lost'));
+
+    const res = await GET();
+
+    expect(res.status).toBe(500);
+  });
 });
 
 describe('POST /api/admin/organizations', () => {
@@ -112,5 +121,30 @@ describe('POST /api/admin/organizations', () => {
 
     expect(res.status).toBe(400);
     expect(prisma.organization.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed JSON with 400 before touching the database', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    const req = new NextRequest('http://localhost/api/admin/organizations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not valid json',
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(prisma.organization.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('passes through a createOrganization() error (e.g. gmina does not exist) as 400', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ name: 'Caritas', gminaId: 'missing' }));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Wybrana gmina nie istnieje.');
   });
 });

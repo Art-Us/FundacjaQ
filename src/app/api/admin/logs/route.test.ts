@@ -58,6 +58,15 @@ describe('GET /api/admin/logs', () => {
     expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
   });
 
+  it('returns 500 when the database read fails', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockRejectedValue(new Error('connection lost'));
+
+    const res = await callGet();
+
+    expect(res.status).toBe(500);
+  });
+
   it('returns the most recent logs with a canRevert flag by default', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.auditLog.findMany.mockResolvedValue([logRow()] as any);
@@ -202,5 +211,88 @@ describe('GET /api/admin/logs', () => {
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
     expect(body.logs).toHaveLength(1);
     expect(body.nextCursor).toBe('log-2');
+  });
+
+  it('applies the entityId filter to the query', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?entityId=some-id');
+
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ entityId: 'some-id' }),
+      })
+    );
+  });
+
+  it('applies only a lower bound (gte) when only `from` is given', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?from=2026-01-01');
+
+    const call = prisma.auditLog.findMany.mock.calls[0][0] as any;
+    expect(call.where.createdAt).toEqual({ gte: new Date('2026-01-01') });
+  });
+
+  it('applies only an upper bound (lte) when only `to` is given', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?to=2026-01-31');
+
+    const call = prisma.auditLog.findMany.mock.calls[0][0] as any;
+    expect(call.where.createdAt).toEqual({ lte: new Date('2026-01-31') });
+  });
+
+  it('applies both bounds when `from` and `to` are given together', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?from=2026-01-01&to=2026-01-31');
+
+    const call = prisma.auditLog.findMany.mock.calls[0][0] as any;
+    expect(call.where.createdAt).toEqual({ gte: new Date('2026-01-01'), lte: new Date('2026-01-31') });
+  });
+
+  it('forwards the cursor param as a Prisma cursor + skip:1', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    await callGet('?cursor=some-log-id');
+
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { id: 'some-log-id' },
+        skip: 1,
+      })
+    );
+  });
+
+  it('trims the lookahead row and sets nextCursor when more rows exist than requested (default take)', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    // DEFAULT_TAKE is 50, so the route asks for 51; return exactly that many
+    // to exercise the "there is another page" branch at the default take.
+    const rows = Array.from({ length: 51 }, (_, i) => logRow({ id: `log-${i}` }));
+    prisma.auditLog.findMany.mockResolvedValue(rows as any);
+
+    const res = await callGet();
+    const body = await res.json();
+
+    expect(body.logs).toHaveLength(50);
+    expect(body.nextCursor).toBe('log-49');
+  });
+
+  it('does not trim and returns a null nextCursor when there are no more rows than requested', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    const rows = [logRow({ id: 'log-1' }), logRow({ id: 'log-2' })];
+    prisma.auditLog.findMany.mockResolvedValue(rows as any);
+
+    const res = await callGet('?take=2');
+    const body = await res.json();
+
+    expect(body.logs).toHaveLength(2);
+    expect(body.nextCursor).toBeNull();
   });
 });

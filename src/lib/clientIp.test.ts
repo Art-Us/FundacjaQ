@@ -1,24 +1,39 @@
 import { describe, it, expect } from 'vitest';
 import { parseClientIp } from './clientIp';
 
+// parseClientIp trusts exactly one hop appended by Azure's front-end proxy —
+// see the doc comment in clientIp.ts. That hop is always the LAST entry in a
+// comma-separated X-Forwarded-For header, since everything before it is
+// client-supplied and spoofable.
 describe('parseClientIp', () => {
-  it('returns the single IP when there is only one hop', () => {
-    expect(parseClientIp('1.2.3.4')).toBe('1.2.3.4');
+  it('returns the IP from a normal single-IP header', () => {
+    expect(parseClientIp('203.0.113.5')).toBe('203.0.113.5');
   });
 
-  it('returns the last hop, not the client-supplied first one', () => {
-    // A spoofed leading entry (attacker-controlled) followed by Azure's own
-    // appended hop — the real client IP as Azure's edge observed it.
-    expect(parseClientIp('9.9.9.9, 1.2.3.4')).toBe('1.2.3.4');
+  it('picks the last hop from a multi-hop comma-separated header', () => {
+    expect(parseClientIp('203.0.113.5, 10.0.0.1, 10.0.0.2')).toBe('10.0.0.2');
   });
 
-  it('trims whitespace around hops', () => {
-    expect(parseClientIp(' 9.9.9.9 ,  1.2.3.4 ')).toBe('1.2.3.4');
-  });
-
-  it('falls back to "unknown" when the header is missing or empty', () => {
+  it('returns "unknown" for a null header', () => {
     expect(parseClientIp(null)).toBe('unknown');
+  });
+
+  it('returns "unknown" for an undefined header', () => {
     expect(parseClientIp(undefined)).toBe('unknown');
+  });
+
+  it('returns "unknown" for an empty string header', () => {
     expect(parseClientIp('')).toBe('unknown');
+  });
+
+  it('returns "unknown" when the header contains only commas', () => {
+    // Splits into ['', ''], each trimmed and filtered out as falsy, leaving
+    // an empty hops array — hops[hops.length - 1] is undefined, so the ??
+    // fallback must kick in.
+    expect(parseClientIp(',')).toBe('unknown');
+  });
+
+  it('returns "unknown" when the header contains only commas and whitespace', () => {
+    expect(parseClientIp(' , , ')).toBe('unknown');
   });
 });

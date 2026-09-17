@@ -5,9 +5,34 @@ import type { PrismaClient } from '@prisma/client';
 vi.mock('./prisma');
 
 import { prisma as prismaImport } from './prisma';
-import { normalizeOrganizationName, createOrganization } from './organization';
+import { scopedOrganizationWhere, normalizeOrganizationName, createOrganization } from './organization';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
+
+// Mirrors the scopedGminaWhere regression coverage in lib/gmina.test.ts: the
+// fail-closed contract (null, never {}, for a scoped actor with no
+// organization of their own) is exactly the same trap that bit the
+// gmina-scoping code in the 2026-09-10 audit.
+describe('scopedOrganizationWhere', () => {
+  it('returns an unfiltered {} for ADMIN regardless of organizationId', () => {
+    expect(scopedOrganizationWhere({ role: 'ADMIN', organizationId: null })).toEqual({});
+    expect(scopedOrganizationWhere({ role: 'ADMIN', organizationId: 'org-1' })).toEqual({});
+  });
+
+  it('scopes COORDINATOR/VOLUNTEER to their own organization when they have one', () => {
+    expect(scopedOrganizationWhere({ role: 'COORDINATOR', organizationId: 'org-1' })).toEqual({ organizationId: 'org-1' });
+    expect(scopedOrganizationWhere({ role: 'VOLUNTEER', organizationId: 'org-2' })).toEqual({ organizationId: 'org-2' });
+  });
+
+  it('fails closed (returns null, never {}) for an organization-scoped role with no organization', () => {
+    expect(scopedOrganizationWhere({ role: 'COORDINATOR', organizationId: null })).toBeNull();
+    expect(scopedOrganizationWhere({ role: 'VOLUNTEER', organizationId: null })).toBeNull();
+  });
+
+  it('fails closed when organizationId is missing entirely (not just null)', () => {
+    expect(scopedOrganizationWhere({ role: 'COORDINATOR' })).toBeNull();
+  });
+});
 
 describe('normalizeOrganizationName', () => {
   it('trims leading/trailing whitespace', () => {
@@ -123,6 +148,26 @@ describe('createOrganization', () => {
     });
   });
 
+  it('passes through apartmentNumber when creating', async () => {
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockResolvedValue({ id: 'o1', name: 'Caritas', gminaId: 'g1' } as any);
+
+    await createOrganization({
+      name: 'Caritas',
+      gminaId: 'g1',
+      apartmentNumber: '3A',
+    });
+
+    expect(prisma.organization.create).toHaveBeenCalledWith({
+      data: {
+        name: 'Caritas',
+        gmina: { connect: { id: 'g1' } },
+        apartmentNumber: '3A',
+      },
+    });
+  });
+
   it('returns a clean error instead of throwing when the duplicate-check read itself fails', async () => {
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
     prisma.organization.findFirst.mockRejectedValue(new Error('connection lost'));
@@ -149,5 +194,33 @@ describe('createOrganization', () => {
     const result = await createOrganization({ name: 'Caritas', gminaId: 'g1' });
 
     expect(result).toEqual({ organization: { id: 'race-1', name: 'Caritas', gminaId: 'g1' }, created: false });
+  });
+
+  it('returns a clean error instead of throwing when verifying the gmina itself fails', async () => {
+    prisma.gmina.findUnique.mockRejectedValue(new Error('connection lost'));
+
+    const result = await createOrganization({ name: 'Caritas', gminaId: 'g1' });
+
+    expect(result).toEqual({ error: 'Nie udało się zweryfikować gminy.' });
+    expect(prisma.organization.create).not.toHaveBeenCalled();
+  });
+
+  it('falls through to a generic error when a P2002 race is not actually a name collision (row not found on recheck)', async () => {
+    const { Prisma } = await import('@prisma/client');
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    // Both the initial check AND the post-race recheck find nothing — the
+    // P2002 must have been caused by something other than the (name, gminaId)
+    // collision this function is written to recover from.
+    prisma.organization.findFirst.mockResolvedValue(null);
+    prisma.organization.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.19.1',
+      })
+    );
+
+    const result = await createOrganization({ name: 'Caritas', gminaId: 'g1' });
+
+    expect(result).toEqual({ error: 'Nie udało się utworzyć organizacji.' });
   });
 });
