@@ -19,7 +19,7 @@ const LocationPicker = dynamic(() => import('./LocationPicker'), {
   ssr: false,
   loading: () => (
     <div
-      className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-sm text-slate-400"
+      className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"
       style={{ height: 200 }}
     >
       Ładowanie mapy…
@@ -89,20 +89,16 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
     onClose();
   }
 
-  // Rendered via a portal into document.body, same as the other admin modals —
-  // keeps it the last element in <body> so it always paints above the rest of
-  // the page regardless of where in the tree it's opened from.
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-      <div className="w-full max-w-xl max-h-[90vh] rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
-        <div className="modal-scrollbar-dark min-h-0 overflow-y-auto p-6 sm:p-8 space-y-5">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xl space-y-5 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-950/60 text-indigo-400">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
               <Pencil className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-100">
+              <h3 className="text-base font-bold text-slate-900">
                 {isEvent ? 'Edytuj Zdarzenie Codzienne' : 'Edytuj Komunikat Kryzysowy'}
               </h3>
               <p className="text-xs text-slate-500">
@@ -115,7 +111,7 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl p-2 text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition"
+            className="rounded-xl p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
           >
             <X className="h-5 w-5" />
           </button>
@@ -124,13 +120,13 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                 {isEvent ? 'Typ wydarzenia' : 'Kategoria'}
               </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2 px-3 text-slate-100 text-xs focus:border-indigo-500 focus:outline-none"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2 px-3 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
               >
                 {categoryOptions.map((c) => (
                   <option key={c} value={c}>
@@ -141,13 +137,13 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
             </div>
 
             <div className={isEvent ? 'hidden' : undefined}>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                 Krytyczność zdarzenia
               </label>
               <select
                 value={severity}
                 onChange={(e) => setSeverity(e.target.value as (typeof SEVERITIES)[number])}
-                className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2 px-3 text-slate-100 text-xs font-bold focus:border-red-500 focus:outline-none cursor-pointer"
+                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2 px-3 text-slate-900 text-xs font-bold focus:bg-white focus:border-red-500 focus:outline-none cursor-pointer"
               >
                 {SEVERITIES.map((s) => (
                   <option key={s} value={s}>
@@ -159,7 +155,7 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
               Tytuł / Nazwa zdarzenia
             </label>
             <input
@@ -168,12 +164,12 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
               maxLength={200}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-xl bg-slate-800 border border-slate-700 py-2 px-3 text-slate-100 text-xs font-bold focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2 px-3 text-slate-900 text-xs font-bold focus:bg-white focus:border-indigo-500 focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
               Treść komunikatu
             </label>
             <textarea
@@ -182,24 +178,24 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
               maxLength={2000}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-xl bg-slate-800 border border-slate-700 p-3 text-slate-100 text-xs focus:border-indigo-500 focus:outline-none resize-none"
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 p-3 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none resize-none"
             />
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">Lokalizacja (opcjonalnie)</label>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Lokalizacja (opcjonalnie)</label>
             <input
               type="text"
               maxLength={200}
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="np. ul. Sportowa 3"
-              className="w-full rounded-xl bg-slate-800 border border-slate-700 py-1.5 px-2.5 text-xs text-slate-100"
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-1.5 px-2.5 text-xs text-slate-900"
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1.5">
               <span>Zmień lokalizację punktu na mapie</span>
             </label>
             <LocationPicker
@@ -211,13 +207,13 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
             />
           </div>
 
-          {error && <p className="text-xs text-rose-400">{error}</p>}
+          {error && <p className="text-xs text-rose-600">{error}</p>}
 
-          <div className="pt-3 flex items-center justify-end gap-3 border-t border-slate-800">
+          <div className="pt-3 flex items-center justify-end gap-3 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"
             >
               Anuluj
             </button>

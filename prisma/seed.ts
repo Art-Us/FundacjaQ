@@ -1,4 +1,4 @@
-import { PrismaClient, Role, Severity, AlertStatus, ResourceStatus } from '@prisma/client';
+import { PrismaClient, Role, Severity, AlertStatus, ResourceStatus, ResourceHorizon } from '@prisma/client';
 import { hashPassword } from '../src/lib/password';
 
 const prisma = new PrismaClient();
@@ -54,16 +54,17 @@ async function seedGminy() {
 
 async function seedKategorie() {
   const kategorie = [
-    { name: 'Żywność', icon: '🍞' },
-    { name: 'Woda pitna', icon: '💧' },
-    { name: 'Koce i odzież', icon: '🧣' },
-    { name: 'Sprzęt medyczny', icon: '🩹' },
-    { name: 'Agregaty prądotwórcze', icon: '🔌' },
+    { name: 'Żywność', icon: '🍞', group: 'OTHER' as const },
+    { name: 'Woda pitna', icon: '💧', group: 'WATER' as const },
+    { name: 'Koce i odzież', icon: '🧣', group: 'OTHER' as const },
+    { name: 'Sprzęt medyczny', icon: '🩹', group: 'EQUIPMENT' as const },
+    { name: 'Agregaty prądotwórcze', icon: '🔌', group: 'EQUIPMENT' as const },
+    { name: 'Ludzie / Wolontariusze', icon: '🧑‍🤝‍🧑', group: 'PEOPLE' as const },
   ];
 
   const created = [];
   for (const k of kategorie) {
-    created.push(await prisma.resourceCategory.upsert({ where: { name: k.name }, update: {}, create: k }));
+    created.push(await prisma.resourceCategory.upsert({ where: { name: k.name }, update: k, create: k }));
   }
   return created;
 }
@@ -137,8 +138,14 @@ async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>, organ
   users.forEach((u) => console.log(`   - ${u.email} [${u.role}]${u.isActive ? '' : ' (nieaktywne)'}`));
 }
 
-async function seedZasoby(gminy: Awaited<ReturnType<typeof seedGminy>>, kategorie: Awaited<ReturnType<typeof seedKategorie>>) {
+async function seedZasoby(
+  gminy: Awaited<ReturnType<typeof seedGminy>>,
+  kategorie: Awaited<ReturnType<typeof seedKategorie>>,
+  organizacje: Awaited<ReturnType<typeof seedOrganizacje>>,
+) {
   const byName = (name: string) => kategorie.find((k) => k.name === name)!;
+  const osp = organizacje['Ochotnicza Straż Pożarna Nowa Dęba'].id;
+  const caritas = organizacje['Caritas Diecezji Sandomierskiej'].id;
 
   const zasoby: Array<{
     name: string;
@@ -149,26 +156,34 @@ async function seedZasoby(gminy: Awaited<ReturnType<typeof seedGminy>>, kategori
     location: string;
     categoryId: string;
     gminaId: string;
+    organizationId: string;
+    horizon: ResourceHorizon;
   }> = [
-    { name: 'Woda butelkowana 1.5L', description: 'Paletyzowana woda pitna', quantity: 4000, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn OSP Nowa Dęba', categoryId: byName('Woda pitna').id, gminaId: gminy[0].id },
-    { name: 'Konserwy mięsne', description: 'Zapas żywności długoterminowej', quantity: 120, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn gminny', categoryId: byName('Żywność').id, gminaId: gminy[0].id },
-    { name: 'Koce termiczne', description: 'Koce ratunkowe NRC', quantity: 15, unit: 'szt', status: 'RESERVED', location: 'Punkt ewakuacyjny nr 2', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id },
-    { name: 'Agregat prądotwórczy 5kW', description: 'Do zasilania punktu koordynacji', quantity: 2, unit: 'szt', status: 'IN_USE', location: 'Sztab kryzysowy', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id },
-    { name: 'Zestawy pierwszej pomocy', description: 'Apteczki R1', quantity: 0, unit: 'szt', status: 'DEPLETED', location: 'Magazyn OSP Nowa Dęba', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id },
-    { name: 'Woda pitna w cysternach', description: '', quantity: 3, unit: 'm3', status: 'AVAILABLE', location: 'Baza transportowa', categoryId: byName('Woda pitna').id, gminaId: gminy[0].id },
-    { name: 'Odzież zimowa', description: 'Kurtki i buty, różne rozmiary', quantity: 60, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn Caritas', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id },
-    { name: 'Żywność dla dzieci', description: 'Odżywki i słoiczki', quantity: 8, unit: 'kartony', status: 'RESERVED', location: 'Magazyn gminny', categoryId: byName('Żywność').id, gminaId: gminy[0].id },
-    { name: 'Agregat prądotwórczy 2kW', description: 'Przenośny', quantity: 5, unit: 'szt', status: 'AVAILABLE', location: 'Remiza OSP Nowa Dęba', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id },
-    { name: 'Nosze ratownicze', description: '', quantity: 4, unit: 'szt', status: 'IN_USE', location: 'Punkt medyczny', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id },
+    { name: 'Woda butelkowana 1.5L', description: 'Paletyzowana woda pitna', quantity: 4000, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn OSP Nowa Dęba', categoryId: byName('Woda pitna').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+    { name: 'Konserwy mięsne', description: 'Zapas żywności długoterminowej', quantity: 120, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn gminny', categoryId: byName('Żywność').id, gminaId: gminy[0].id, organizationId: caritas, horizon: 'H48' },
+    { name: 'Koce termiczne', description: 'Koce ratunkowe NRC', quantity: 15, unit: 'szt', status: 'RESERVED', location: 'Punkt ewakuacyjny nr 2', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+    { name: 'Agregat prądotwórczy 5kW', description: 'Do zasilania punktu koordynacji', quantity: 2, unit: 'szt', status: 'IN_USE', location: 'Sztab kryzysowy', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+    { name: 'Zestawy pierwszej pomocy', description: 'Apteczki R1', quantity: 0, unit: 'szt', status: 'DEPLETED', location: 'Magazyn OSP Nowa Dęba', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+    { name: 'Woda pitna w cysternach', description: '', quantity: 3, unit: 'm3', status: 'AVAILABLE', location: 'Baza transportowa', categoryId: byName('Woda pitna').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H48' },
+    { name: 'Odzież zimowa', description: 'Kurtki i buty, różne rozmiary', quantity: 60, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn Caritas', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id, organizationId: caritas, horizon: 'WEEK' },
+    { name: 'Żywność dla dzieci', description: 'Odżywki i słoiczki', quantity: 8, unit: 'kartony', status: 'RESERVED', location: 'Magazyn gminny', categoryId: byName('Żywność').id, gminaId: gminy[0].id, organizationId: caritas, horizon: 'H72' },
+    { name: 'Agregat prądotwórczy 2kW', description: 'Przenośny', quantity: 5, unit: 'szt', status: 'AVAILABLE', location: 'Remiza OSP Nowa Dęba', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+    { name: 'Nosze ratownicze', description: '', quantity: 4, unit: 'szt', status: 'IN_USE', location: 'Punkt medyczny', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
   ];
 
   await prisma.resource.deleteMany({ where: { gminaId: { in: gminy.map((g) => g.id) } } });
   await prisma.resource.createMany({ data: zasoby });
 }
 
-async function seedAlerty(gminy: Awaited<ReturnType<typeof seedGminy>>, adminId: string | null) {
+async function seedAlerty(
+  gminy: Awaited<ReturnType<typeof seedGminy>>,
+  adminId: string | null,
+  koordynatorId: string | null,
+  organizacje: Awaited<ReturnType<typeof seedOrganizacje>>,
+) {
   const teraz = Date.now();
   const godziny = (h: number) => new Date(teraz + h * 60 * 60 * 1000);
+  const ospId = organizacje['Ochotnicza Straż Pożarna Nowa Dęba'].id;
 
   const alerty: Array<{
     title: string;
@@ -180,17 +195,23 @@ async function seedAlerty(gminy: Awaited<ReturnType<typeof seedGminy>>, adminId:
     longitude: number;
     gminaId: string;
     authorId: string | null;
+    // Mirrors the real backfill rule (organizationId = author's organizationId):
+    // alerts "written by" the site-wide admin have no organization, and only
+    // the ones authored by an org-affiliated user (here: the OSP koordynator)
+    // get one — so ownership-based features have at least some seed data to
+    // exercise against.
+    organizationId: string | null;
     expiresAt: Date;
   }> = [
-    { title: 'Podtopienia posesji przy ul. Rzecznej', description: 'Potok Dębianka wystąpił z koryta po nawalnych opadach deszczu, woda wdarła się na teren kilku posesji prywatnych.', severity: 'CRITICAL', status: 'ACTIVE', location: 'ul. Rzeczna', latitude: 50.4190, longitude: 21.7530, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(48) },
-    { title: 'Awaria sieci wodociągowej – os. Poligon', description: 'Przerwa w dostawie wody pitnej, trwa naprawa magistrali wodociągowej.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'os. Poligon', latitude: 50.4130, longitude: 21.7450, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(20) },
-    { title: 'Zerwany dach hali sportowej', description: 'Silny wiatr uszkodził pokrycie dachowe, teren zabezpieczony przez straż pożarną.', severity: 'HIGH', status: 'ACTIVE', location: 'ul. Sportowa 3', latitude: 50.4205, longitude: 21.7465, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(24) },
-    { title: 'Pożar poszycia leśnego na obrzeżach Poligonu OSPWL', description: 'Pożar traw i poszycia leśnego, jednostki straży pożarnej prowadzą działania gaśnicze na miejscu.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Poligon OSPWL Nowa Dęba', latitude: 50.3980, longitude: 21.7180, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(12) },
-    { title: 'Uszkodzona linia energetyczna – Osiedle Zachodnie', description: 'Zerwana linia napowietrzna po silnym wietrze, wstrzymane dostawy prądu w części gminy.', severity: 'HIGH', status: 'IN_PROGRESS', location: 'Osiedle Zachodnie', latitude: 50.4225, longitude: 21.7395, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(16) },
-    { title: 'Zwalone drzewo na drodze powiatowej', description: 'Droga częściowo zablokowana, utrudniony przejazd w kierunku Rozalina.', severity: 'LOW', status: 'RESOLVED', location: 'Droga powiatowa Rozalin-Jadachy', latitude: 50.4260, longitude: 21.7610, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(-2) },
-    { title: 'Ostrzeżenie IMGW – silny wiatr', description: 'Ostrzeżenie 2. stopnia przed silnym wiatrem do jutra rana, możliwe dalsze uszkodzenia dachów i linii energetycznych.', severity: 'MEDIUM', status: 'ACTIVE', location: 'cała gmina', latitude: 50.4166, longitude: 21.7500, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(18) },
-    { title: 'Ćwiczenia ewakuacyjne szkoły podstawowej', description: 'Planowe ćwiczenia służb ratowniczych, brak realnego zagrożenia.', severity: 'LOW', status: 'CANCELLED', location: 'Szkoła Podstawowa nr 1', latitude: 50.4145, longitude: 21.7545, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(-24) },
-    { title: 'Osunięcie skarpy przy drodze wojewódzkiej', description: 'Częściowe osunięcie skarpy, droga zwężona do jednego pasa ruchu.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'Droga wojewódzka 985', latitude: 50.4090, longitude: 21.7620, gminaId: gminy[0].id, authorId: adminId, expiresAt: godziny(36) },
+    { title: 'Podtopienia posesji przy ul. Rzecznej', description: 'Potok Dębianka wystąpił z koryta po nawalnych opadach deszczu, woda wdarła się na teren kilku posesji prywatnych.', severity: 'CRITICAL', status: 'ACTIVE', location: 'ul. Rzeczna', latitude: 50.4190, longitude: 21.7530, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(48) },
+    { title: 'Awaria sieci wodociągowej – os. Poligon', description: 'Przerwa w dostawie wody pitnej, trwa naprawa magistrali wodociągowej.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'os. Poligon', latitude: 50.4130, longitude: 21.7450, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(20) },
+    { title: 'Zerwany dach hali sportowej', description: 'Silny wiatr uszkodził pokrycie dachowe, teren zabezpieczony przez straż pożarną.', severity: 'HIGH', status: 'ACTIVE', location: 'ul. Sportowa 3', latitude: 50.4205, longitude: 21.7465, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(24) },
+    { title: 'Pożar poszycia leśnego na obrzeżach Poligonu OSPWL', description: 'Pożar traw i poszycia leśnego, jednostki straży pożarnej prowadzą działania gaśnicze na miejscu.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Poligon OSPWL Nowa Dęba', latitude: 50.3980, longitude: 21.7180, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(12) },
+    { title: 'Uszkodzona linia energetyczna – Osiedle Zachodnie', description: 'Zerwana linia napowietrzna po silnym wietrze, wstrzymane dostawy prądu w części gminy.', severity: 'HIGH', status: 'IN_PROGRESS', location: 'Osiedle Zachodnie', latitude: 50.4225, longitude: 21.7395, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(16) },
+    { title: 'Zwalone drzewo na drodze powiatowej', description: 'Droga częściowo zablokowana, utrudniony przejazd w kierunku Rozalina.', severity: 'LOW', status: 'RESOLVED', location: 'Droga powiatowa Rozalin-Jadachy', latitude: 50.4260, longitude: 21.7610, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(-2) },
+    { title: 'Ostrzeżenie IMGW – silny wiatr', description: 'Ostrzeżenie 2. stopnia przed silnym wiatrem do jutra rana, możliwe dalsze uszkodzenia dachów i linii energetycznych.', severity: 'MEDIUM', status: 'ACTIVE', location: 'cała gmina', latitude: 50.4166, longitude: 21.7500, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(18) },
+    { title: 'Ćwiczenia ewakuacyjne szkoły podstawowej', description: 'Planowe ćwiczenia służb ratowniczych, brak realnego zagrożenia.', severity: 'LOW', status: 'CANCELLED', location: 'Szkoła Podstawowa nr 1', latitude: 50.4145, longitude: 21.7545, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(-24) },
+    { title: 'Osunięcie skarpy przy drodze wojewódzkiej', description: 'Częściowe osunięcie skarpy, droga zwężona do jednego pasa ruchu.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'Droga wojewódzka 985', latitude: 50.4090, longitude: 21.7620, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(36) },
   ];
 
   await prisma.alert.deleteMany({ where: { gminaId: { in: gminy.map((g) => g.id) } } });
@@ -232,8 +253,9 @@ async function main() {
   const kategorie = await seedKategorie();
   const organizacje = await seedOrganizacje(gminy);
   await seedTestUsers(gminy, organizacje);
-  await seedZasoby(gminy, kategorie);
-  await seedAlerty(gminy, admin?.id ?? null);
+  const koordynator = await prisma.user.findUnique({ where: { email: 'koordynator@example.com' } });
+  await seedZasoby(gminy, kategorie, organizacje);
+  await seedAlerty(gminy, admin?.id ?? null, koordynator?.id ?? null, organizacje);
   await cleanupObsoleteGminy(gminy.map((g) => g.id));
 
   console.log('🌱 Dane testowe (gminy, kategorie, zasoby, alerty) gotowe.');

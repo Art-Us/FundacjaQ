@@ -17,7 +17,7 @@ import type { AlertKindValue } from '@/lib/alertLabels';
 import { createPinIcon, createEventPinIcon } from './pinIcon';
 import { MapPin, Building, Calendar, Layers, Flame } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
-import './leaflet-dark.css';
+import './leaflet-theme.css';
 
 export type MapDisplayMode = 'category' | 'severity';
 
@@ -146,16 +146,16 @@ export default function AlertMap({
   );
 
   return (
-    <div className="relative w-full rounded-3xl overflow-hidden border border-slate-800 bg-slate-900">
+    <div className="relative w-full rounded-3xl overflow-hidden border border-slate-200 bg-white">
       {/* Przełącznik trybu wizualizacji (kategoria / krytyczność) — tylko dla
           komunikatów kryzysowych, bo zdarzenia codzienne nie mają krytyczności. */}
       {!isEventView && (
-        <div className="absolute top-3 right-3 z-[1000] rounded-2xl bg-slate-900/90 p-1.5 shadow-2xl backdrop-blur-md border border-slate-700/80 text-xs flex items-center gap-1">
+        <div className="absolute top-3 right-3 z-[1000] rounded-2xl bg-white/90 p-1.5 shadow-lg backdrop-blur-md border border-slate-200/80 text-xs flex items-center gap-1">
           <button
             type="button"
             onClick={() => onModeChange('category')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition text-xs ${
-              mode === 'category' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+              mode === 'category' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
             }`}
             title="Widok według kategorii zdarzenia"
           >
@@ -166,7 +166,7 @@ export default function AlertMap({
             type="button"
             onClick={() => onModeChange('severity')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition text-xs ${
-              mode === 'severity' ? 'bg-red-600 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+              mode === 'severity' ? 'bg-red-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
             }`}
             title="Widok według krytyczności zdarzenia"
           >
@@ -196,7 +196,7 @@ export default function AlertMap({
             >
               <Popup>
                 <div className="min-w-[220px] max-w-xs space-y-2.5">
-                  <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-700 pb-2">
+                  <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
                     {!isEventView && (
                       <span
                         className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border"
@@ -225,24 +225,24 @@ export default function AlertMap({
                   </div>
 
                   <div className="space-y-1">
-                    <h4 className="text-sm font-extrabold text-slate-100 leading-tight">{alert.title}</h4>
-                    <p className="text-xs text-slate-300 leading-snug">{alert.description}</p>
+                    <h4 className="text-sm font-extrabold text-slate-900 leading-tight">{alert.title}</h4>
+                    <p className="text-xs text-slate-600 leading-snug">{alert.description}</p>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-700 text-[11px] text-slate-400 space-y-1">
+                  <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-500 space-y-1">
                     <div className="flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3 text-red-400 shrink-0" />
+                      <MapPin className="h-3 w-3 text-red-500 shrink-0" />
                       <span className="truncate">
                         {alert.gmina.name}
                         {alert.location ? ` · ${alert.location}` : ''}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <Building className="h-3 w-3 text-slate-500 shrink-0" />
+                      <Building className="h-3 w-3 text-slate-400 shrink-0" />
                       <span className="truncate">{alert.author?.organization?.name || alert.author?.name || 'Służby'}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <Calendar className="h-3 w-3 text-slate-500 shrink-0" />
+                      <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
                       <time>{formatDate(alert.createdAt)}</time>
                     </div>
                   </div>
@@ -254,8 +254,8 @@ export default function AlertMap({
       </MapContainer>
 
       {/* Legenda mapy, zależna od aktywnego trybu wizualizacji */}
-      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-slate-900/90 p-3 shadow-2xl backdrop-blur-md border border-slate-700/80 text-[11px] text-slate-300 hidden sm:block max-w-xs">
-        <p className="font-bold text-white mb-1.5">
+      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-white/90 p-3 shadow-lg backdrop-blur-md border border-slate-200/80 text-[11px] text-slate-600 hidden sm:block max-w-xs">
+        <p className="font-bold text-slate-900 mb-1.5">
           {isEventView
             ? `Legenda: Typy wydarzeń (${withCoords.length})`
             : legendMode === 'category'

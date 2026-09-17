@@ -21,7 +21,7 @@ const LocationPicker = dynamic(() => import('./LocationPicker'), {
   ssr: false,
   loading: () => (
     <div
-      className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-sm text-slate-400"
+      className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"
       style={{ height: 260 }}
     >
       Ładowanie mapy…
@@ -38,8 +38,8 @@ type GeoState =
   | { status: 'notfound' };
 
 const INPUT_CLASS =
-  'rounded-xl border border-slate-700 bg-slate-800 text-slate-100 text-xs sm:text-sm px-3.5 py-2.5 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20';
-const LABEL_CLASS = 'text-xs font-semibold uppercase tracking-wide text-slate-400';
+  'rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs sm:text-sm px-3.5 py-2.5 outline-none transition-colors focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10';
+const LABEL_CLASS = 'text-xs font-semibold uppercase tracking-wide text-slate-500';
 
 interface AlertFormProps {
   gminy: GminaOption[];
@@ -238,18 +238,18 @@ export default function AlertForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-3xl border border-slate-800 bg-slate-900 p-6 sm:p-8 shadow-xs flex flex-col gap-5"
+      className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col gap-5"
     >
       <div className="flex items-center gap-3">
         <div
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
-            isEvent ? 'bg-fuchsia-950/60 text-fuchsia-400' : 'bg-indigo-950/60 text-indigo-400'
+            isEvent ? 'bg-fuchsia-50 text-fuchsia-600' : 'bg-indigo-50 text-indigo-600'
           }`}
         >
           {isEvent ? <CalendarDays className="h-5 w-5" /> : <BellRing className="h-5 w-5" />}
         </div>
         <div>
-          <h3 className="text-base font-bold text-slate-100">
+          <h3 className="text-base font-bold text-slate-900">
             {isEvent ? 'Dodaj nowe zdarzenie codzienne' : 'Opublikuj nowy komunikat kryzysowy'}
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -303,7 +303,7 @@ export default function AlertForm({
                   ? 'np. Dni Nowej Dęby, Koncert na rynku, Zebranie osiedlowe...'
                   : 'np. Fala wezbraniowa na rzece, Zamknięcie mostu drogowego...'
               }
-              className={`${INPUT_CLASS} font-bold placeholder:font-normal placeholder-slate-500`}
+              className={`${INPUT_CLASS} font-bold placeholder:font-normal placeholder-slate-400`}
             />
           </div>
 
@@ -320,7 +320,7 @@ export default function AlertForm({
                   ? 'Godziny, program, organizator, dla kogo jest wydarzenie...'
                   : 'Wprowadź szczegółowe informacje operacyjne (zalecenia dla mieszkańców, wyznaczone objazdy, punkty pomocy)...'
               }
-              className={`${INPUT_CLASS} resize-none placeholder-slate-500`}
+              className={`${INPUT_CLASS} resize-none placeholder-slate-400`}
             />
           </div>
 
@@ -332,7 +332,7 @@ export default function AlertForm({
                 value={location}
                 onChange={(e) => handleLocationChange(e.target.value)}
                 placeholder="np. ul. Sportowa 3"
-                className={`${INPUT_CLASS} placeholder-slate-500`}
+                className={`${INPUT_CLASS} placeholder-slate-400`}
               />
               <span className="text-[11px] text-slate-500">
                 Wpisz ulicę - punkt na mapie ustawi się automatycznie.
@@ -403,18 +403,18 @@ export default function AlertForm({
             <div
               className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
                 geo.status === 'found'
-                  ? 'border-emerald-900/70 bg-emerald-950/40'
+                  ? 'border-emerald-200 bg-emerald-50'
                   : geo.status === 'searching'
-                  ? 'border-slate-700 bg-slate-800/60'
-                  : 'border-amber-900/60 bg-amber-950/30'
+                  ? 'border-slate-200 bg-slate-50'
+                  : 'border-amber-200 bg-amber-50'
               }`}
             >
               {geo.status === 'searching' ? (
                 <LoaderCircle className="h-4 w-4 mt-px shrink-0 animate-spin text-slate-400" />
               ) : geo.status === 'found' ? (
-                <MapPin className="h-4 w-4 mt-px shrink-0 text-emerald-400" />
+                <MapPin className="h-4 w-4 mt-px shrink-0 text-emerald-600" />
               ) : (
-                <SearchX className="h-4 w-4 mt-px shrink-0 text-amber-400" />
+                <SearchX className="h-4 w-4 mt-px shrink-0 text-amber-600" />
               )}
 
               <div className="min-w-0 space-y-0.5">
@@ -426,10 +426,10 @@ export default function AlertForm({
                     : 'Nie rozpoznano adresu'}
                 </span>
                 {geo.status === 'found' && (
-                  <span className="block text-xs font-semibold text-emerald-200 break-words">{geo.label}</span>
+                  <span className="block text-xs font-semibold text-emerald-700 break-words">{geo.label}</span>
                 )}
                 {geo.status === 'notfound' && (
-                  <span className="block text-xs text-slate-400">
+                  <span className="block text-xs text-slate-500">
                     Uściślij adres lub wskaż punkt na mapie.
                   </span>
                 )}
@@ -439,9 +439,9 @@ export default function AlertForm({
         </div>
       </div>
 
-      {message && <p className="text-sm text-rose-400">{message}</p>}
+      {message && <p className="text-sm text-rose-600">{message}</p>}
 
-      <div className="flex justify-end pt-2 border-t border-slate-800">
+      <div className="flex justify-end pt-2 border-t border-slate-100">
         <button
           type="submit"
           disabled={loading}

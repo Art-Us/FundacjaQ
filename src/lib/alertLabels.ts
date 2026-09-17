@@ -16,10 +16,10 @@ export const SEVERITY_LABELS: Record<string, string> = {
 // zestaw klas od SEVERITY_STYLES powyżej (które kolorują całą kartę), żeby oba
 // warianty dało się nałożyć razem bez konfliktu specyficzności.
 export const SEVERITY_BADGE_INFO: Record<string, { badgeClass: string; dotClass: string }> = {
-  CRITICAL: { badgeClass: 'bg-red-950/70 text-red-300 border-red-800', dotClass: 'bg-red-500' },
-  HIGH: { badgeClass: 'bg-orange-950/70 text-orange-300 border-orange-800', dotClass: 'bg-orange-500' },
-  MEDIUM: { badgeClass: 'bg-amber-950/70 text-amber-300 border-amber-800', dotClass: 'bg-amber-500' },
-  LOW: { badgeClass: 'bg-emerald-950/70 text-emerald-300 border-emerald-800', dotClass: 'bg-emerald-500' },
+  CRITICAL: { badgeClass: 'bg-red-50 text-red-700 border-red-200', dotClass: 'bg-red-500' },
+  HIGH: { badgeClass: 'bg-orange-50 text-orange-700 border-orange-200', dotClass: 'bg-orange-500' },
+  MEDIUM: { badgeClass: 'bg-amber-50 text-amber-700 border-amber-200', dotClass: 'bg-amber-500' },
+  LOW: { badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200', dotClass: 'bg-emerald-500' },
 };
 
 export function getSeverityBadgeInfo(severity: string) {

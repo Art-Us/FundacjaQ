@@ -1,0 +1,38 @@
+/* Leaflet nie ma domyślnie jasnego motywu dopasowanego do reszty aplikacji —
+   nadpisujemy tu jego standardowe elementy UI (kontrolki zoomu, popupy,
+   atrybucję), żeby pasowały do jasnego motywu reszty aplikacji (bg-white,
+   border-slate-200 itp.). Używane przez wszystkie mapy w aplikacji (widok
+   przeglądowy i LocationPicker w formularzach). */
+
+.leaflet-container {
+  background: #e2e8f0; /* slate-200 */
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #ffffff;
+  color: #1e293b; /* slate-800 */
+}
+
+.leaflet-popup-content a {
+  color: #4f46e5; /* indigo-600 */
+}
+
+.leaflet-control-zoom a {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #cbd5e1 !important; /* slate-300 */
+}
+
+.leaflet-control-zoom a:hover {
+  background: #f1f5f9; /* slate-100 */
+}
+
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569; /* slate-600 */
+}
+
+.leaflet-control-attribution a {
+  color: #475569;
+}
