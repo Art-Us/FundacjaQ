@@ -62,6 +62,53 @@ enum ResourceStatus {
   DEPLETED
 }
 
+// Top-level grouping for ResourceCategory — the 4 buttons on the "Zgłoś nowy
+// zasób" modal (fot. 6) and the 4 stat tiles/filter chips on Matryca Zasobów
+// (fot. 1). Each ResourceCategory belongs to exactly one group.
+enum ResourceGroup {
+  PEOPLE
+  WATER
+  EQUIPMENT
+  OTHER
+}
+
+// How soon a resource is available. Cumulative: a resource with H24 also
+// shows up in the H48/H72/WEEK columns of the Matryca Zasobów table.
+enum ResourceHorizon {
+  H24
+  H48
+  H72
+  WEEK
+}
+
+enum NeedUrgency {
+  NORMAL
+  PILNE
+  KRYTYCZNY
+}
+
+enum NeedStatus {
+  OPEN
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CLOSED
+  CANCELLED
+}
+
+// No separate PROPOSED/accept step — a donor creates a ResourceAllocation
+// directly in DELIVERY_AGREED. DELIVERED can be set by either side (donor or
+// recipient, whoever confirms first); everything after that (RETURN_AGREED,
+// recording returns) is the recipient's action alone — see
+// docs/are-you-familiar-with-tidy-blum.md decision #3.
+enum AllocationStatus {
+  DELIVERY_AGREED
+  DELIVERED
+  RETURN_AGREED
+  PARTIALLY_RETURNED
+  RETURNED
+  CANCELLED
+}
+
 enum AuditAction {
   USER_CREATE
   USER_UPDATE
@@ -76,6 +123,15 @@ enum AuditAction {
   ORGANIZATION_DELETE
   INVITE_CREATE
   INVITE_REVOKE
+  RESOURCE_CREATE
+  RESOURCE_UPDATE
+  RESOURCE_DELETE
+  ALERT_NEED_CREATE
+  ALERT_NEED_UPDATE
+  ALERT_NEED_DELETE
+  RESOURCE_ALLOCATION_CREATE
+  RESOURCE_ALLOCATION_STATUS_CHANGE
+  RESOURCE_ALLOCATION_RETURN
 }
 
 enum AuditEntityType {
@@ -83,14 +139,17 @@ enum AuditEntityType {
   GMINA
   ORGANIZATION
   INVITE_TOKEN
+  RESOURCE
+  ALERT_NEED
+  RESOURCE_ALLOCATION
 }
 
 model User {
-  id                 String    @id @default(cuid())
+  id                 String        @id @default(cuid())
   name               String?
-  email              String    @unique
+  email              String        @unique
   passwordHash       String
-  role               Role      @default(VOLUNTEER)
+  role               Role          @default(VOLUNTEER)
   organizationId     String?
   // Optional relation, but deliberately RESTRICT (not Prisma's SET-NULL
   // default for an optional FK) — an org with users still assigned to it
@@ -102,22 +161,27 @@ model User {
   organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   phone              String?
   gminaId            String?
-  gmina              Gmina?    @relation(fields: [gminaId], references: [id])
+  gmina              Gmina?        @relation(fields: [gminaId], references: [id])
   emailVerified      DateTime?
-  isActive           Boolean   @default(true)
+  isActive           Boolean       @default(true)
   lastActivatedAt    DateTime?
   lastDeactivatedAt  DateTime?
   deactivationReason String?
-  failedAttempts     Int       @default(0)
+  failedAttempts     Int           @default(0)
   lockedUntil        DateTime?
-  passwordChangedAt  DateTime  @default(now())
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  passwordChangedAt  DateTime      @default(now())
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  alertsCreated       Alert[]
-  invitesCreated      InviteToken[]
-  passwordResetTokens PasswordResetToken[]
-  loginAttempts       LoginAttempt[]
+  alertsCreated                  Alert[]
+  alertNeedsCreated              AlertNeed[]
+  resourceAllocationsCreated     ResourceAllocation[]
+  allocationReturnEventsRecorded AllocationReturnEvent[]
+  allocationMessages             AllocationMessage[]
+  alertMessages                  AlertMessage[]
+  invitesCreated                 InviteToken[]
+  passwordResetTokens            PasswordResetToken[]
+  loginAttempts                  LoginAttempt[]
 }
 
 model InviteToken {
@@ -189,15 +253,15 @@ model Gmina {
 }
 
 model Organization {
-  id              String   @id @default(cuid())
-  name            String
-  street          String?
-  houseNumber     String?
-  apartmentNumber String?
-  city            String?
-  postalCode      String?
-  gminaId         String
-  gmina           Gmina    @relation(fields: [gminaId], references: [id])
+  id               String   @id @default(cuid())
+  name             String
+  street           String?
+  houseNumber      String?
+  apartmentNumber  String?
+  city             String?
+  postalCode       String?
+  gminaId          String
+  gmina            Gmina    @relation(fields: [gminaId], references: [id])
   // Contact person for this organization — deliberately separate from any
   // User account (an organization's day-to-day contact may not be, or ever
   // become, a user of this system).
@@ -205,10 +269,13 @@ model Organization {
   contactLastName  String?
   contactPhone     String?
   contactEmail     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  users User[]
+  users            User[]
+  alerts           Alert[]
+  resources        Resource[]
+  allocationsGiven ResourceAllocation[] @relation("Donor")
 
   // Scoped to (name, gmina) rather than a global unique name — the same
   // organization name plausibly recurs across different gminas (e.g. a local
@@ -219,30 +286,47 @@ model Organization {
 }
 
 model ResourceCategory {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String        @id @default(cuid())
+  name        String        @unique
   description String?
   icon        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  group       ResourceGroup @default(OTHER)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  resources Resource[]
+  resources           Resource[]
+  alertNeeds          AlertNeed[]
+  resourceAllocations ResourceAllocation[]
 }
 
 model Resource {
-  id          String           @id @default(cuid())
-  name        String
-  description String?
-  quantity    Int              @default(0)
-  unit        String           @default("szt")
-  status      ResourceStatus   @default(AVAILABLE)
-  location    String?
-  categoryId  String
-  category    ResourceCategory @relation(fields: [categoryId], references: [id])
-  gminaId     String
-  gmina       Gmina            @relation(fields: [gminaId], references: [id])
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  name             String
+  description      String?
+  quantity         Int              @default(0)
+  unit             String           @default("szt")
+  status           ResourceStatus   @default(AVAILABLE)
+  location         String?
+  categoryId       String
+  category         ResourceCategory @relation(fields: [categoryId], references: [id])
+  // gminaId is kept as a derived geo field (filled from organization.gminaId
+  // at creation, for fast geo-scoped filtering) — the UI no longer lets it be
+  // edited directly, since ownership now flows through organizationId.
+  gminaId          String
+  gmina            Gmina            @relation(fields: [gminaId], references: [id])
+  organizationId   String
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  horizon          ResourceHorizon  @default(H24)
+  // Sum of this resource's active (non-terminal) ResourceAllocation
+  // quantities — how much of `quantity` is currently spoken for.
+  reservedQuantity Int              @default(0)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  allocations ResourceAllocation[]
+
+  @@index([organizationId])
+  @@index([gminaId, categoryId, horizon])
 }
 
 // Append-only admin action trail: who did what, to which record, when, and
@@ -254,7 +338,7 @@ model Resource {
 // of a live relation. `before`/`after` are built from an explicit per-entity
 // allowlist (see lib/auditLog.ts) that never includes passwordHash or tokenHash.
 model AuditLog {
-  id  String @id @default(cuid())
+  id         String          @id @default(cuid())
   // A real DB-assigned monotonic sequence, used ONLY to order same-entity
   // rows for the cascading-revert chain (lib/auditLog.ts) — cuids are
   // roughly time-ordered but not guaranteed to be, so two rows created in
@@ -262,7 +346,7 @@ model AuditLog {
   // sort in the wrong causal order and make revertAuditLog undo them out of
   // sequence. Postgres serializes concurrent inserts' sequence assignment,
   // so this is reliable in a way `createdAt`/`id` alone are not.
-  seq Int @default(autoincrement())
+  seq        Int             @default(autoincrement())
   actorId    String
   actorEmail String
   actorName  String?
@@ -282,7 +366,7 @@ model AuditLog {
   revertedById String?
 
   // Set on the row created BY a revert, pointing back at what it reverted.
-  isRevert  Boolean    @default(false)
+  isRevert   Boolean    @default(false)
   revertOfId String?
   revertOf   AuditLog?  @relation("AuditRevertChain", fields: [revertOfId], references: [id])
   revertedBy AuditLog[] @relation("AuditRevertChain")
@@ -298,21 +382,166 @@ model AuditLog {
 }
 
 model Alert {
-  id          String        @id @default(cuid())
-  title       String
-  description String
-  kind        AlertKind     @default(ALERT)
-  severity    Severity      @default(MEDIUM)
-  status      AlertStatus   @default(ACTIVE)
-  category    AlertCategory @default(GENERAL)
-  location    String?
-  latitude    Float?
-  longitude   Float?
+  id             String        @id @default(cuid())
+  title          String
+  description    String
+  kind           AlertKind     @default(ALERT)
+  severity       Severity      @default(MEDIUM)
+  status         AlertStatus   @default(ACTIVE)
+  category       AlertCategory @default(GENERAL)
+  location       String?
+  latitude       Float?
+  longitude      Float?
+  authorId       String?
+  author         User?         @relation(fields: [authorId], references: [id])
+  // The org that created this alert — filled once from session.user.organizationId
+  // at creation (see POST /api/alerts) and never changed afterwards. Kept as
+  // its own field rather than derived from author.organizationId because
+  // authorId is optional, making that path unreliable for a value everything
+  // else (ownership/authz checks) depends on.
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  gminaId        String
+  gmina          Gmina         @relation(fields: [gminaId], references: [id])
+  expiresAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  needs       AlertNeed[]
+  allocations ResourceAllocation[]
+  messages    AlertMessage[]
+
+  @@index([organizationId])
+}
+
+// "Zapotrzebowanie na zasoby" — a concrete need declared under an alert (e.g.
+// "need 6 reinforced tarpaulins, critical"). Donors respond to this by
+// creating a ResourceAllocation (see model below, added in the next step).
+model AlertNeed {
+  id                String           @id @default(cuid())
+  alertId           String
+  alert             Alert            @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  categoryId        String
+  category          ResourceCategory @relation(fields: [categoryId], references: [id])
+  title             String
+  description       String?
+  quantityNeeded    Int
+  // Denormalized running total of quantities allocated toward this need —
+  // recalculated inside the same transaction as each ResourceAllocation
+  // create (see src/lib/allocations.ts, added in Крок 17).
+  quantityFulfilled Int              @default(0)
+  unit              String           @default("szt")
+  urgency           NeedUrgency      @default(NORMAL)
+  status            NeedStatus       @default(OPEN)
+  createdById       String?
+  createdBy         User?            @relation(fields: [createdById], references: [id])
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  allocations ResourceAllocation[]
+
+  @@index([alertId])
+}
+
+// The heart of the whole feature: one row = one concrete arrangement of
+// "donor org gives recipient org N units of resource X for alert Y". Created
+// directly in DELIVERY_AGREED (no separate PROPOSED/accept step) — the donor
+// declares delivery is agreed, and DELIVERED can then be set by either side
+// (whoever confirms first). Everything after DELIVERED (RETURN_AGREED,
+// recording returns) is the recipient's action alone — see decision #3 in
+// docs/are-you-familiar-with-tidy-blum.md.
+model ResourceAllocation {
+  id                    String           @id @default(cuid())
+  needId                String?
+  need                  AlertNeed?       @relation(fields: [needId], references: [id], onDelete: SetNull)
+  alertId               String
+  alert                 Alert            @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  resourceId            String?
+  resource              Resource?        @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  // categoryId/itemName are a snapshot of the source resource at the moment
+  // of allocation — they survive the source Resource being edited or deleted
+  // later, so history stays accurate even if the underlying catalog entry
+  // changes.
+  categoryId            String
+  category              ResourceCategory @relation(fields: [categoryId], references: [id])
+  itemName              String
+  quantity              Int
+  quantityReturned      Int              @default(0)
+  quantityNotReturnable Int              @default(0)
+  unit                  String           @default("szt")
+  donorOrgId            String
+  donorOrg              Organization     @relation("Donor", fields: [donorOrgId], references: [id])
+  // Snapshot of alert.organizationId at creation time — deliberately not a
+  // declared Prisma relation (no recipientOrg field), same as the spec.
+  recipientOrgId        String?
+  status                AllocationStatus @default(DELIVERY_AGREED)
+  deliveredAt           DateTime?
+  returnAgreedAt        DateTime?
+  createdById           String?
+  createdBy             User?            @relation(fields: [createdById], references: [id])
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  returnEvents AllocationReturnEvent[]
+  messages     AllocationMessage[]
+
+  @@index([alertId, status])
+  @@index([donorOrgId, status])
+}
+
+// Journal of (partial) returns (R5, R9) — one row per actual return action.
+// Summing quantityReturned/quantityNotReturnable across all rows for an
+// allocation drives its final status (see src/lib/allocations.ts, Крок 17)
+// and the Resource.quantity/reservedQuantity adjustments described there.
+model AllocationReturnEvent {
+  id                    String             @id @default(cuid())
+  allocationId          String
+  allocation            ResourceAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  quantityReturned      Int                @default(0)
+  quantityNotReturnable Int                @default(0)
+  notReturnableReason   String?
+  message               String? // R4 — surfaced on /zasoby's inbox, not just this allocation's history
+  // Filled manually in the same return form as the quantities (R5) — not
+  // `now()` — the person recording this may be logging a return that
+  // physically happened earlier.
+  returnedAt            DateTime
+  recordedById          String?
+  recordedBy            User?              @relation(fields: [recordedById], references: [id])
+  createdAt             DateTime           @default(now())
+
+  @@index([allocationId])
+}
+
+// Narrow donor↔recipient chat around one specific ResourceAllocation (e.g.
+// "when will you drop it off?" / "delivered, please wait on site") — not to
+// be confused with AlertMessage below, which is the broad per-alert forum.
+model AllocationMessage {
+  id           String             @id @default(cuid())
+  allocationId String
+  allocation   ResourceAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  authorId     String?
+  author       User?              @relation(fields: [authorId], references: [id])
+  body         String
+  createdAt    DateTime           @default(now())
+
+  @@index([allocationId, createdAt])
+}
+
+// R12 — the broad per-alert forum, not tied to one specific resource
+// allocation (unlike AllocationMessage above): everyone involved with the
+// alert (owner org + all donor orgs, plus ADMIN/COORDINATOR) can post here.
+// Visible from the map/[alertId] subpage.
+model AlertMessage {
+  id          String   @id @default(cuid())
+  alertId     String
+  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
   authorId    String?
-  author      User?         @relation(fields: [authorId], references: [id])
-  gminaId     String
-  gmina       Gmina         @relation(fields: [gminaId], references: [id])
-  expiresAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  author      User?    @relation(fields: [authorId], references: [id])
+  // Snapshot of the author's organization at post time — deliberately not a
+  // declared Prisma relation, same pattern as ResourceAllocation.recipientOrgId.
+  authorOrgId String?
+  body        String
+  createdAt   DateTime @default(now())
+
+  @@index([alertId, createdAt])
 }
