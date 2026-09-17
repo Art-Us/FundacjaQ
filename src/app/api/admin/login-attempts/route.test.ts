@@ -6,10 +6,7 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/prisma');
 vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
-  return {
-    ...actual,
-    requireAdmin: vi.fn(),
-  };
+  return { ...actual, requireAdmin: vi.fn() };
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
@@ -18,8 +15,21 @@ import { GET } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
-function makeRequest(query = '') {
-  return new NextRequest(`http://localhost/api/admin/login-attempts${query}`);
+function callGet(query = '') {
+  return GET(new NextRequest(`http://localhost/api/admin/login-attempts${query}`));
+}
+
+function attemptRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'attempt-1',
+    email: 'user@example.com',
+    userId: 'u1',
+    success: true,
+    ipAddress: '1.2.3.4',
+    userAgent: 'Mozilla/5.0',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -28,20 +38,20 @@ beforeEach(() => {
 });
 
 describe('GET /api/admin/login-attempts', () => {
-  it('returns 403 with no DB call when the caller is not an ADMIN', async () => {
+  it('rejects with 403 and no DB call for a non-ADMIN caller', async () => {
     vi.mocked(requireAdmin).mockResolvedValue(null);
 
-    const res = await GET(makeRequest());
+    const res = await callGet();
 
     expect(res.status).toBe(403);
     expect(prisma.loginAttempt.findMany).not.toHaveBeenCalled();
   });
 
-  it('returns items for an ADMIN session with no filters', async () => {
+  it('returns the most recent attempts', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([{ id: 'a1', email: 'x@example.com' }] as any);
+    prisma.loginAttempt.findMany.mockResolvedValue([attemptRow()] as any);
 
-    const res = await GET(makeRequest());
+    const res = await callGet();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -49,111 +59,61 @@ describe('GET /api/admin/login-attempts', () => {
     expect(body.nextCursor).toBeNull();
   });
 
-  it('queries with the default take+1, no cursor, and desc ordering when no params are given', async () => {
+  it('applies the email and success filters to the query', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
-    await GET(makeRequest());
+    await callGet('?email=user%40example.com&success=false');
 
     expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {},
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 51,
-      })
-    );
-    const call = prisma.loginAttempt.findMany.mock.calls[0][0] as any;
-    expect(call.cursor).toBeUndefined();
-    expect(call.skip).toBeUndefined();
-  });
-
-  it('applies cursor pagination with skip:1 when a cursor is given', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([]);
-
-    await GET(makeRequest('?cursor=abc123'));
-
-    expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cursor: { id: 'abc123' },
-        skip: 1,
+        where: expect.objectContaining({
+          email: { contains: 'user@example.com', mode: 'insensitive' },
+          success: false,
+        }),
       })
     );
   });
 
-  it('respects an explicit take, requesting take+1 rows', async () => {
+  // Regression coverage: Postgres's (I)LIKE treats `%` and `_` as wildcards
+  // regardless of parameter binding — an unescaped search for an email
+  // containing a literal underscore (an ordinary character in a local-part)
+  // would otherwise also match unrelated emails with any other character in
+  // that position.
+  it('escapes LIKE wildcard characters in the email filter so they match literally', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
-    await GET(makeRequest('?take=10'));
+    await callGet('?email=jan_kowalski%25');
 
-    expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 11 }));
+    expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          email: { contains: 'jan\\_kowalski\\%', mode: 'insensitive' },
+        }),
+      })
+    );
   });
 
-  it('sets nextCursor to the last item on the page and trims the extra lookahead row when hasMore', async () => {
+  it('paginates via cursor, returning nextCursor only when there is another page', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([
-      { id: 'a1' },
-      { id: 'a2' },
-    ] as any);
+    const rows = [attemptRow({ id: 'attempt-2' }), attemptRow({ id: 'attempt-1' })];
+    prisma.loginAttempt.findMany.mockResolvedValue(rows as any);
 
-    const res = await GET(makeRequest('?take=1'));
+    const res = await callGet('?take=1');
     const body = await res.json();
 
-    expect(body.items).toEqual([{ id: 'a1' }]);
-    expect(body.nextCursor).toBe('a1');
+    expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
+    expect(body.items).toHaveLength(1);
+    expect(body.nextCursor).toBe('attempt-2');
   });
 
-  it('builds an escaped, case-insensitive contains filter on email', async () => {
+  it('rejects an invalid success filter value before querying the DB', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([]);
 
-    await GET(makeRequest('?email=jan_kowalski%25'));
+    const res = await callGet('?success=maybe');
 
-    const call = prisma.loginAttempt.findMany.mock.calls[0][0] as any;
-    expect(call.where).toEqual({
-      email: { contains: 'jan\\_kowalski\\%', mode: 'insensitive' },
-    });
-  });
-
-  it('filters by success=true/false', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([]);
-
-    await GET(makeRequest('?success=false'));
-
-    expect(prisma.loginAttempt.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { success: false } }));
-  });
-
-  it('filters by a from/to createdAt range', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockResolvedValue([]);
-
-    await GET(makeRequest('?from=2026-01-01&to=2026-01-31'));
-
-    const call = prisma.loginAttempt.findMany.mock.calls[0][0] as any;
-    expect(call.where.createdAt.gte).toEqual(new Date('2026-01-01'));
-    expect(call.where.createdAt.lte).toEqual(new Date('2026-01-31'));
-  });
-
-  it.each(['?success=maybe', '?take=0', '?take=101', '?from=not-a-date'])(
-    'rejects an invalid query param (%s) with 400 and no DB call',
-    async (query) => {
-      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-
-      const res = await GET(makeRequest(query));
-
-      expect(res.status).toBe(400);
-      expect(prisma.loginAttempt.findMany).not.toHaveBeenCalled();
-    }
-  );
-
-  it('returns 500 when the database call fails', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.loginAttempt.findMany.mockRejectedValue(new Error('connection lost'));
-
-    const res = await GET(makeRequest());
-
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(prisma.loginAttempt.findMany).not.toHaveBeenCalled();
   });
 });

@@ -265,10 +265,10 @@ describe('jwt callback', () => {
   it('embeds role/gminaId on initial sign-in', async () => {
     const token = await jwt({
       token: {},
-      user: { id: 'u1', role: 'ADMIN', gminaId: 'g1', organizationId: 'o1' } as any,
+      user: { id: 'u1', role: 'ADMIN', gminaId: 'g1' } as any,
     } as any);
 
-    expect(token).toMatchObject({ role: 'ADMIN', gminaId: 'g1', organizationId: 'o1', invalid: false });
+    expect(token).toMatchObject({ role: 'ADMIN', gminaId: 'g1', invalid: false });
   });
 
   it('keeps the token valid on re-validation when nothing changed', async () => {
@@ -278,13 +278,11 @@ describe('jwt callback', () => {
       passwordChangedAt: new Date(0),
       role: 'VOLUNTEER',
       gminaId: null,
-      organizationId: 'org1',
     } as any);
 
     const token = await jwt({ token: { sub: 'u1', iat: Math.floor(Date.now() / 1000) } } as any);
 
     expect(token.invalid).toBe(false);
-    expect(token.organizationId).toBe('org1');
   });
 
   it('invalidates the token when the account has been deactivated, tagged as "deactivated"', async () => {
@@ -370,9 +368,9 @@ describe('session callback', () => {
   it('populates session.user from the token when valid', async () => {
     const result = await session({
       session: { user: {}, expires: 'later' } as any,
-      token: { invalid: false, sub: 'u1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'org1' } as any,
+      token: { invalid: false, sub: 'u1', role: 'COORDINATOR', gminaId: 'g1' } as any,
     } as any);
 
-    expect((result as any).user).toMatchObject({ id: 'u1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'org1' });
+    expect((result as any).user).toMatchObject({ id: 'u1', role: 'COORDINATOR', gminaId: 'g1' });
   });
 });

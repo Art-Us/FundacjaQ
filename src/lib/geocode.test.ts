@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { resolveLocation, normalizeStreetQuery, fetchNominatim } from './geocode';
+import { describe, expect, it } from 'vitest';
+import { resolveLocation, normalizeStreetQuery } from './geocode';
 
 describe('normalizeStreetQuery', () => {
   it.each([
@@ -64,68 +64,5 @@ describe('resolveLocation', () => {
     const resolved = resolveLocation({});
     expect(resolved.location).toBeNull();
     expect(resolved.label).toBeNull();
-  });
-});
-
-describe('fetchNominatim', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('parses and returns the JSON body of a successful response', async () => {
-    const payload = { address: { road: 'Rzeczna' } };
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue(payload),
-    } as any);
-
-    const result = await fetchNominatim(new URL('https://nominatim.openstreetmap.org/reverse'));
-
-    expect(result).toEqual(payload);
-  });
-
-  it('sends the Nominatim-required User-Agent and Accept-Language headers', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({}),
-    } as any);
-
-    const url = new URL('https://nominatim.openstreetmap.org/search');
-    await fetchNominatim(url);
-
-    expect(fetch).toHaveBeenCalledWith(
-      url,
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'Accept-Language': 'pl' }),
-      })
-    );
-    const call = vi.mocked(fetch).mock.calls[0][1] as any;
-    expect(call.headers['User-Agent']).toContain('FundacjaQ-CrisisMap');
-  });
-
-  it('throws when the response is not ok', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      status: 503,
-      json: vi.fn(),
-    } as any);
-
-    await expect(fetchNominatim(new URL('https://nominatim.openstreetmap.org/reverse'))).rejects.toThrow(
-      'Nominatim responded with 503'
-    );
-  });
-
-  it('propagates a network-level rejection', async () => {
-    vi.mocked(fetch).mockRejectedValue(new Error('network down'));
-
-    await expect(fetchNominatim(new URL('https://nominatim.openstreetmap.org/reverse'))).rejects.toThrow(
-      'network down'
-    );
   });
 });

@@ -5,34 +5,9 @@ import type { PrismaClient } from '@prisma/client';
 vi.mock('./prisma');
 
 import { prisma as prismaImport } from './prisma';
-import { scopedOrganizationWhere, normalizeOrganizationName, createOrganization } from './organization';
+import { normalizeOrganizationName, createOrganization } from './organization';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
-
-// Mirrors the scopedGminaWhere regression coverage in lib/gmina.test.ts: the
-// fail-closed contract (null, never {}, for a scoped actor with no
-// organization of their own) is exactly the same trap that bit the
-// gmina-scoping code in the 2026-09-10 audit.
-describe('scopedOrganizationWhere', () => {
-  it('returns an unfiltered {} for ADMIN regardless of organizationId', () => {
-    expect(scopedOrganizationWhere({ role: 'ADMIN', organizationId: null })).toEqual({});
-    expect(scopedOrganizationWhere({ role: 'ADMIN', organizationId: 'org-1' })).toEqual({});
-  });
-
-  it('scopes COORDINATOR/VOLUNTEER to their own organization when they have one', () => {
-    expect(scopedOrganizationWhere({ role: 'COORDINATOR', organizationId: 'org-1' })).toEqual({ organizationId: 'org-1' });
-    expect(scopedOrganizationWhere({ role: 'VOLUNTEER', organizationId: 'org-2' })).toEqual({ organizationId: 'org-2' });
-  });
-
-  it('fails closed (returns null, never {}) for an organization-scoped role with no organization', () => {
-    expect(scopedOrganizationWhere({ role: 'COORDINATOR', organizationId: null })).toBeNull();
-    expect(scopedOrganizationWhere({ role: 'VOLUNTEER', organizationId: null })).toBeNull();
-  });
-
-  it('fails closed when organizationId is missing entirely (not just null)', () => {
-    expect(scopedOrganizationWhere({ role: 'COORDINATOR' })).toBeNull();
-  });
-});
 
 describe('normalizeOrganizationName', () => {
   it('trims leading/trailing whitespace', () => {

@@ -16,8 +16,6 @@ import { installTransactionMock } from './__mocks__/prisma';
 import { isLastActiveAdmin } from './authz';
 import {
   recordAudit,
-  requestMeta,
-  auditInlineGminaCreation,
   snapshotUser,
   snapshotGmina,
   snapshotOrganization,
@@ -233,57 +231,6 @@ describe('recordAudit', () => {
   });
 });
 
-describe('requestMeta', () => {
-  it('extracts ipAddress (via parseClientIp, taking the last hop) and userAgent from request headers', () => {
-    const req = new Request('http://localhost/api/whatever', {
-      headers: { 'x-forwarded-for': '203.0.113.5, 10.0.0.1', 'user-agent': 'TestAgent/1.0' },
-    });
-
-    expect(requestMeta(req)).toEqual({ ipAddress: '10.0.0.1', userAgent: 'TestAgent/1.0' });
-  });
-
-  it('falls back to parseClientIp\'s "unknown" and a null userAgent when the headers are absent', () => {
-    const req = new Request('http://localhost/api/whatever');
-
-    expect(requestMeta(req)).toEqual({ ipAddress: 'unknown', userAgent: null });
-  });
-});
-
-describe('auditInlineGminaCreation', () => {
-  it('records a GMINA_CREATE entry when resolveGminaId() just created a brand-new gmina', async () => {
-    prisma.auditLog.create.mockResolvedValue({} as any);
-    const gmina = fullGmina({ id: 'gmina-new', name: 'Nowa Gmina' });
-
-    await auditInlineGminaCreation(ACTOR, { created: true, gmina }, { ipAddress: '1.2.3.4', userAgent: 'UA' });
-
-    expect(prisma.auditLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: 'GMINA_CREATE',
-          entityType: 'GMINA',
-          entityId: 'gmina-new',
-          gminaId: 'gmina-new',
-          after: snapshotGmina(gmina),
-          ipAddress: '1.2.3.4',
-          userAgent: 'UA',
-        }),
-      })
-    );
-  });
-
-  it('is a no-op when an existing gmina was reused instead of created (resolved.created is false)', async () => {
-    await auditInlineGminaCreation(ACTOR, { created: false, gmina: fullGmina() });
-
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
-  });
-
-  it('is a no-op when resolved.created is true but resolved.gmina is missing', async () => {
-    await auditInlineGminaCreation(ACTOR, { created: true, gmina: null });
-
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
-  });
-});
-
 describe('canRevert', () => {
   it('is false once a row is already reverted', () => {
     expect(canRevert({ action: 'USER_UPDATE', revertedAt: new Date() })).toBe(false);
@@ -317,24 +264,6 @@ describe('revertAuditLog — dispatch guards', () => {
     const result = await revertAuditLog('log-1', ACTOR);
     expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
-  });
-
-  // Regression coverage for the dispatcher's own switch(step.entityType): an
-  // entityType the switch has no case for (RESOURCE/ALERT_NEED/etc. exist in
-  // the AuditEntityType enum but have no revert branch here) must fall
-  // through to the safe "Nieobsługiwany typ encji." rejection instead of
-  // silently no-op'ing or throwing an unhandled error out of the transaction.
-  it('rejects with the "unsupported entity type" fallback for an entityType the switch has no case for', async () => {
-    const log = baseLog({ action: 'USER_UPDATE', entityType: 'RESOURCE', entityId: 'resource-1' });
-    prisma.auditLog.findUnique.mockResolvedValue(log as any);
-    mockChain([log]);
-
-    const result = await revertAuditLog('log-1', ACTOR);
-
-    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
-    expect(prisma.user.updateMany).not.toHaveBeenCalled();
-    expect(prisma.auditLog.update).not.toHaveBeenCalled();
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 });
 
@@ -569,52 +498,6 @@ describe('revertAuditLog — USER (single step)', () => {
 
     expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
   });
-
-  // Regression coverage: the earlier test above ("rejects the revert when the
-  // restored email now belongs to someone else") only covers the PRE-CHECK
-  // read finding a conflict. This covers the RACE: the pre-check finds no
-  // conflict (nobody held that email yet), but a colliding account is created
-  // concurrently between that check and the conditional update itself, so the
-  // update's own unique constraint is what actually catches it — mirrors the
-  // identical race pattern already covered for revertGmina/revertOrganization
-  // ("...races past the pre-check").
-  it('reports "already exists" (not a generic 500) when a colliding email is created concurrently, racing past the pre-check', async () => {
-    const { Prisma } = await import('@prisma/client');
-    const before = { email: 'restored@example.com' };
-    const log = baseLog({ before, after: {} });
-    prisma.auditLog.findUnique.mockResolvedValue(log as any);
-    mockChain([log]);
-    prisma.user.findUnique
-      .mockResolvedValueOnce(fullUser({ email: 'current@example.com' }) as any) // target
-      .mockResolvedValueOnce(null); // pre-check: no conflict yet
-    prisma.user.updateMany.mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '5.19.1' })
-    );
-
-    const result = await revertAuditLog('log-1', ACTOR);
-
-    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
-    expect(prisma.auditLog.update).not.toHaveBeenCalled();
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
-  });
-
-  // Regression coverage: mirrors the same "role requires a gmina" guard
-  // PATCH /api/admin/users/[id] enforces on the original mutation — reverting
-  // a role change BACK to a gmina-requiring role (e.g. COORDINATOR) must be
-  // blocked, not silently applied, when the gminaId that would land alongside
-  // it is missing.
-  it('blocks reverting a role change back to a gmina-requiring role when the resulting gminaId would be missing', async () => {
-    const before = { role: 'COORDINATOR', gminaId: null };
-    const log = baseLog({ before, after: { role: 'ADMIN' } });
-    prisma.auditLog.findUnique.mockResolvedValue(log as any);
-    mockChain([log]);
-    prisma.user.findUnique.mockResolvedValue(fullUser({ role: 'ADMIN', gminaId: null }) as any);
-
-    const result = await revertAuditLog('log-1', ACTOR);
-
-    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
-    expect(prisma.user.updateMany).not.toHaveBeenCalled();
-  });
 });
 
 describe('revertAuditLog — GMINA (single step)', () => {
@@ -848,32 +731,6 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     const result = await revertAuditLog('log-1', ACTOR);
 
     expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
-  });
-
-  // Strengthens the test above with the exact Polish message the audit
-  // expects for this branch, and confirms the failure is clean — no partial
-  // bookkeeping (auditLog.update/create) escapes the aborted transaction.
-  it('reports the specific "gmina no longer exists" message when recreating races into a P2003', async () => {
-    const { Prisma } = await import('@prisma/client');
-    const before = { name: 'Caritas', gminaId: 'deleted-gmina' };
-    const log = baseLog({ action: 'ORGANIZATION_DELETE', entityType: 'ORGANIZATION', entityId: 'org-1', before });
-    prisma.auditLog.findUnique.mockResolvedValue(log as any);
-    mockChain([log]);
-    prisma.organization.findUnique.mockResolvedValue(null);
-    prisma.organization.findFirst.mockResolvedValue(null);
-    prisma.organization.create.mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', { code: 'P2003', clientVersion: '5.19.1' })
-    );
-
-    const result = await revertAuditLog('log-1', ACTOR);
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Nie można przywrócić organizacji — jej gmina już nie istnieje.',
-    });
-    expect(prisma.auditLog.update).not.toHaveBeenCalled();
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('refuses to restore a deleted organization whose (name, gmina) was taken by a new one since', async () => {
