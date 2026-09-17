@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { Home, UserPlus, Users, MapPin, Building2, History, LogOut, ChevronRight } from 'lucide-react';
+import { Home, UserPlus, Users, MapPin, Building2, History, LogOut, ChevronRight, Package } from 'lucide-react';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
@@ -17,6 +17,8 @@ interface SidebarProps {
   name: string;
   role: string;
   canManageInvites: boolean;
+  canManageResources: boolean;
+  resourceInboxCount: number;
 }
 
 function getInitials(value: string) {
@@ -25,7 +27,15 @@ function getInitials(value: string) {
   return initials || 'U';
 }
 
-export function Sidebar({ isOpen, onCloseMobile, name, role, canManageInvites }: SidebarProps) {
+export function Sidebar({
+  isOpen,
+  onCloseMobile,
+  name,
+  role,
+  canManageInvites,
+  canManageResources,
+  resourceInboxCount,
+}: SidebarProps) {
   const pathname = usePathname();
 
   const linkClasses = (active: boolean) =>
@@ -81,6 +91,28 @@ export function Sidebar({ isOpen, onCloseMobile, name, role, canManageInvites }:
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
               </Link>
+              {/* ADMIN/COORDINATOR only (розділ 4, docs/are-you-familiar-with-tidy-blum.md)
+                  — hiding this for VOLUNTEER is a UI convenience, not the real
+                  access control; that's the server-side redirect in
+                  zasoby/page.tsx (Крок 31). */}
+              {canManageResources && (
+                <Link href="/zasoby" onClick={onCloseMobile} className={linkClasses(pathname === '/zasoby')}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition">
+                      <Package className="h-4 w-4" />
+                    </div>
+                    <span>Zasoby</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {resourceInboxCount > 0 && (
+                      <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold text-center leading-none">
+                        {resourceInboxCount}
+                      </span>
+                    )}
+                    <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </Link>
+              )}
             </div>
 
             {canManageInvites && (

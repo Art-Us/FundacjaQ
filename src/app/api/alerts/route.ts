@@ -60,8 +60,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Gmina nie istnieje.' }, { status: 400 });
   }
 
+  // Крок 30 — fixed at creation from the author's own organization and never
+  // changed afterwards (see the Alert.organizationId comment in
+  // schema.prisma); a user with no organization (e.g. a site-wide ADMIN)
+  // simply produces an ownerless alert, same as this field's backfill
+  // migration leaves pre-existing alerts whose author had no organization.
   const alert = await prisma.alert.create({
-    data: { ...data, gminaId, authorId: user.id },
+    data: { ...data, gminaId, authorId: user.id, organizationId: user.organizationId ?? null },
   });
 
   return NextResponse.json({ message: 'Alert utworzony.', alert });
