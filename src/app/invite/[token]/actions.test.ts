@@ -92,6 +92,23 @@ describe('acceptInvite', () => {
     );
   });
 
+  // Regression coverage: a COORDINATOR's invite now carries their organization
+  // (see POST /api/admin/invites) — the accepted user must inherit it too,
+  // otherwise they'd land invisible to scopedOrganizationWhere/canManageUser
+  // despite having been invited into a specific organization.
+  it("carries the invite's organizationId onto the created user", async () => {
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite({ gminaId: 'g1', organizationId: 'org-1' }) as any);
+    prisma.inviteToken.updateMany.mockResolvedValue({ count: 1 } as any);
+    prisma.user.create.mockResolvedValue({} as any);
+
+    const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, STRONG_PASSWORD);
+
+    expect(result.ok).toBe(true);
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
+    );
+  });
+
   it('rejects a password/confirmation mismatch before touching the database', async () => {
     const result = await acceptInvite(RAW_TOKEN, STRONG_PASSWORD, 'SomethingElse2026!');
 
