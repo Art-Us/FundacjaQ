@@ -4,7 +4,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { canManageUser } from '@/lib/authz';
-import { scopedGminaWhere } from '@/lib/gmina';
+import { scopedOrganizationWhere } from '@/lib/organization';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
 import { RefreshOnMount } from '@/components/RefreshOnMount';
 import { CreateInviteForm } from './CreateInviteForm';
@@ -26,25 +26,31 @@ export default async function AdminInvitesPage() {
   const currentUser = session.user;
   const isAdmin = currentUser.role === 'ADMIN';
   const userId = currentUser.id;
-  // null means "gmina-scoped actor with no gmina of their own" — fail closed
-  // (see scopedGminaWhere's doc comment), never fall back to an unfiltered {}.
-  const gminaFilter = scopedGminaWhere(currentUser);
+  // null means "organization-scoped actor with no organization of their
+  // own" — fail closed (see scopedOrganizationWhere's doc comment), never
+  // fall back to an unfiltered {}.
+  const organizationFilter = scopedOrganizationWhere(currentUser);
 
   const [invites, users, gminas] = await Promise.all([
-    prisma.inviteToken.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    }),
-    gminaFilter === null
+    // Invites created before organizationId existed on this model won't
+    // match a coordinator's scoped filter — see POST /api/admin/invites.
+    organizationFilter === null
+      ? Promise.resolve([])
+      : prisma.inviteToken.findMany({
+          where: organizationFilter,
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+    organizationFilter === null
       ? Promise.resolve([])
       : prisma.user.findMany({
-          where: gminaFilter,
+          where: organizationFilter,
           orderBy: { createdAt: 'desc' },
           take: 100,
           include: { gmina: true },
         }),
     // Only ADMIN picks/creates a gmina when inviting; a coordinator's invite
-    // always goes to their own gmina, so they never need the full list.
+    // always goes to their own organization, so they never need the full list.
     isAdmin
       ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
       : Promise.resolve([]),
@@ -56,7 +62,7 @@ export default async function AdminInvitesPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-6">Zaproszenia</h1>
         <div className="grid gap-6 md:grid-cols-2 items-start">
-          <CreateInviteForm gminas={gminas} isAdmin={isAdmin} currentUserGminaId={currentUser.gminaId} />
+          <CreateInviteForm gminas={gminas} isAdmin={isAdmin} currentUserOrganizationId={currentUser.organizationId} />
           <div className="min-w-0 bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
