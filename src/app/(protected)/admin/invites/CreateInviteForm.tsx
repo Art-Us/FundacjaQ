@@ -11,10 +11,10 @@ const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 interface CreateInviteFormProps {
   gminas: GminaOption[];
   isAdmin: boolean;
-  currentUserGminaId: string | null;
+  currentUserOrganizationId: string | null;
 }
 
-export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: CreateInviteFormProps) {
+export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }: CreateInviteFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<typeof ROLES[number]>('VOLUNTEER');
@@ -26,13 +26,13 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: Create
   const [loading, setLoading] = useState(false);
 
   const gminaRequired = isAdmin && role !== 'ADMIN';
-  // A coordinator's invite always goes to their own gmina — if they don't
-  // have one assigned, they can't invite anyone at all.
-  const blockedNoGmina = !isAdmin && !currentUserGminaId;
+  // A coordinator's invite always goes to their own organization — if they
+  // don't have one assigned, they can't invite anyone at all.
+  const blockedNoOrganization = !isAdmin && !currentUserOrganizationId;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (blockedNoGmina) return;
+    if (blockedNoOrganization) return;
     setLoading(true);
     setMessage(null);
     setInviteUrl(null);
@@ -130,14 +130,14 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserGminaId }: Create
             />
           </div>
         )}
-        {blockedNoGmina && (
+        {blockedNoOrganization && (
           <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>Nie masz przypisanej gminy — nie możesz zapraszać użytkowników. Skontaktuj się z administratorem.</span>
+            <span>Nie masz przypisanej organizacji — nie możesz zapraszać użytkowników. Skontaktuj się z administratorem.</span>
           </div>
         )}
         {message && <p className="text-xs text-slate-500">{message}</p>}
-        <Button type="submit" disabled={loading || blockedNoGmina} className="w-full">
+        <Button type="submit" disabled={loading || blockedNoOrganization} className="w-full">
           {loading ? 'Wysyłanie…' : 'Wyślij zaproszenie'}
         </Button>
         {inviteUrl && (

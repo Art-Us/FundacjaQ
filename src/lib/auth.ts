@@ -136,6 +136,7 @@ export const authOptions: NextAuthOptions = {
           name: user.name,
           role: user.role,
           gminaId: user.gminaId,
+          organizationId: user.organizationId,
         };
       },
     }),
@@ -145,6 +146,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.role = user.role;
         token.gminaId = user.gminaId;
+        token.organizationId = user.organizationId;
         token.invalid = false;
         return token;
       }
@@ -154,7 +156,14 @@ export const authOptions: NextAuthOptions = {
       // needing a separate refresh-token/revocation-list system.
       const dbUser = await prisma.user.findUnique({
         where: { id: token.sub },
-        select: { isActive: true, lockedUntil: true, passwordChangedAt: true, role: true, gminaId: true },
+        select: {
+          isActive: true,
+          lockedUntil: true,
+          passwordChangedAt: true,
+          role: true,
+          gminaId: true,
+          organizationId: true,
+        },
       });
 
       const issuedAtMs = typeof token.iat === 'number' ? token.iat * 1000 : 0;
@@ -178,6 +187,7 @@ export const authOptions: NextAuthOptions = {
 
       token.role = dbUser.role;
       token.gminaId = dbUser.gminaId;
+      token.organizationId = dbUser.organizationId;
       token.invalid = false;
       return token;
     },
@@ -189,6 +199,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.sub as string;
         session.user.role = token.role as string;
         session.user.gminaId = token.gminaId as string | null;
+        session.user.organizationId = token.organizationId as string | null;
       }
       return session;
     },

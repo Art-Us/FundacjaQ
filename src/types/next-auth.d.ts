@@ -5,6 +5,7 @@ declare module 'next-auth' {
   interface User extends DefaultUser {
     role: string;
     gminaId: string | null;
+    organizationId: string | null;
   }
 
   interface Session extends DefaultSession {
@@ -12,6 +13,7 @@ declare module 'next-auth' {
       id: string;
       role: string;
       gminaId: string | null;
+      organizationId: string | null;
     } & DefaultSession['user'];
     // Set (with user undefined) when a live session was invalidated specifically
     // because the account was deactivated, as opposed to a stale password or a
@@ -25,6 +27,7 @@ declare module 'next-auth/jwt' {
   interface JWT extends DefaultJWT {
     role?: string;
     gminaId?: string | null;
+    organizationId?: string | null;
     invalid?: boolean;
     invalidReason?: 'deactivated' | 'stale';
   }

@@ -167,6 +167,7 @@ export function snapshotInvite(invite: InviteToken): Record<string, unknown> {
     email: invite.email,
     role: invite.role,
     gminaId: invite.gminaId,
+    organizationId: invite.organizationId,
     createdById: invite.createdById,
     expiresAt: invite.expiresAt,
     usedAt: invite.usedAt,

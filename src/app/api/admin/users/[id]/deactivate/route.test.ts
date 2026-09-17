@@ -22,6 +22,7 @@ function baseUser(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'target-1',
     role: 'VOLUNTEER',
     gminaId: 'gmina-1',
+    organizationId: 'org-1',
     isActive: true,
     ...overrides,
   };
@@ -125,8 +126,13 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('lets COORDINATOR deactivate a VOLUNTEER in their own gmina', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
+  it('lets COORDINATOR deactivate a VOLUNTEER in their own organization', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: 'org-1',
+    });
     prisma.user.findUnique.mockResolvedValue(baseUser() as any);
     prisma.user.update.mockResolvedValue({} as any);
 
@@ -136,9 +142,14 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     expect(prisma.user.update).toHaveBeenCalled();
   });
 
-  it("blocks COORDINATOR from deactivating a VOLUNTEER in another gmina", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
-    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-2' }) as any);
+  it('blocks COORDINATOR from deactivating a VOLUNTEER in another organization', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: 'org-1',
+    });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ organizationId: 'org-2' }) as any);
 
     const res = await callRoute();
 
@@ -146,8 +157,28 @@ describe('POST /api/admin/users/[id]/deactivate', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('blocks COORDINATOR from deactivating another COORDINATOR in their own gmina', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
+  it('blocks COORDINATOR with no organization of their own from deactivating anyone', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: null,
+    });
+    prisma.user.findUnique.mockResolvedValue(baseUser() as any);
+
+    const res = await callRoute();
+
+    expect(res.status).toBe(403);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks COORDINATOR from deactivating another COORDINATOR in their own organization', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: 'org-1',
+    });
     prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'coord-2', role: 'COORDINATOR' }) as any);
 
     const res = await callRoute('coord-2');
