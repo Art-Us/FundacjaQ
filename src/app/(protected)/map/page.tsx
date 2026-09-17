@@ -20,18 +20,41 @@ export default async function MapPage() {
   const gminaFilter = scopedGminaWhere({ role, gminaId });
   const canManageAlerts = role === 'ADMIN' || role === 'COORDINATOR';
 
-  const [alerts, gminy] = await Promise.all([
+  const [alerts, gminy, myResources] = await Promise.all([
     gminaFilter === null
       ? Promise.resolve([])
       : prisma.alert.findMany({
           where: gminaFilter,
-          include: { gmina: true, author: { include: { organization: true } } },
+          include: {
+            gmina: true,
+            author: { include: { organization: true } },
+            needs: {
+              include: {
+                allocations: {
+                  include: {
+                    donorOrg: { select: { id: true, name: true } },
+                    createdBy: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+          },
           orderBy: { createdAt: 'desc' },
         }),
     // ADMIN musi móc wybrać gminę przy tworzeniu alertu; COORDINATOR i tak jest
     // ograniczony do własnej gminy po stronie API, ale lista ułatwia mu wybór z
     // dokładną nazwą zamiast wpisywania id ręcznie.
     prisma.gmina.findMany({ orderBy: { name: 'asc' } }),
+    // Own organization's resources — feeds the "Masz zasoby (N)" badge (R11,
+    // Крок 43): which of an alert's still-open needs fall in a category this
+    // org currently has something free to give in (lib/resourceMatching.ts).
+    // An ADMIN with no organization of their own simply never matches anything.
+    session.user.organizationId
+      ? prisma.resource.findMany({
+          where: { organizationId: session.user.organizationId },
+          select: { categoryId: true, quantity: true, reservedQuantity: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   return (
@@ -41,6 +64,9 @@ export default async function MapPage() {
       canManageAlerts={canManageAlerts}
       currentUserGminaId={gminaId}
       currentUserRole={role}
+      currentUserId={session.user.id}
+      currentUserOrganizationId={session.user.organizationId}
+      myResources={myResources}
     />
   );
 }

@@ -2,8 +2,8 @@
 
 import { AlertTriangle, Undo2 } from 'lucide-react';
 import { ALERT_STATUS_LABELS } from '@/lib/alertLabels';
-import { getAllocationStatusInfo } from '@/lib/resourceLabels';
 import type { AllocationInboxRow } from '@/lib/allocationInbox';
+import AllocationStatusBadge from '@/components/resources/AllocationStatusBadge';
 
 interface AllocationInboxPanelProps {
   recipient: AllocationInboxRow[];
@@ -71,7 +71,6 @@ export default function AllocationInboxPanel({ recipient, donor, onReturnClick }
           <h3 className="text-sm font-bold text-slate-800">Twoje zasoby w trakcie</h3>
           <ul className="divide-y divide-slate-100">
             {donor.map((allocation) => {
-              const statusInfo = getAllocationStatusInfo(allocation.status);
               const alertPhrase =
                 allocation.alert.status === 'CANCELLED'
                   ? 'Alert odwołany — oczekuje na zwrot.'
@@ -84,11 +83,7 @@ export default function AllocationInboxPanel({ recipient, donor, onReturnClick }
                       {allocation.alert.title} · {alertPhrase}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 text-[10px] font-bold uppercase px-2 py-1 rounded-full border ${statusInfo.badgeClass}`}
-                  >
-                    {statusInfo.label}
-                  </span>
+                  <AllocationStatusBadge status={allocation.status} className="shrink-0" />
                 </li>
               );
             })}
