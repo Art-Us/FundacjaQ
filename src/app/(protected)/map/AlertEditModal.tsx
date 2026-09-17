@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { X, Pencil, Save } from 'lucide-react';
@@ -236,9 +235,7 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
             </button>
           </div>
         </form>
-        </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }

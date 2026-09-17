@@ -20,10 +20,6 @@ export interface AuthorizedUser {
   // attributing audit log entries (see lib/auditLog.ts) to a human-readable actor.
   email?: string | null;
   name?: string | null;
-  // Also present on the real session (Крок 14) but optional here for the same
-  // reason as email/name above — the resource-module authz helpers below are
-  // the first callers that need it.
-  organizationId?: string | null;
 }
 
 /** Returns the current session user if they're ADMIN or COORDINATOR, otherwise null. */
