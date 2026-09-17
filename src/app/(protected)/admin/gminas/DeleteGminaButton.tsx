@@ -1,12 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export function DeleteGminaButton({ gminaId, gminaName }: { gminaId: string; gminaName: string }) {
-  const router = useRouter();
+export function DeleteGminaButton({
+  gminaId,
+  gminaName,
+  onDeleted,
+}: {
+  gminaId: string;
+  gminaName: string;
+  onDeleted: () => void;
+}) {
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +30,7 @@ export function DeleteGminaButton({ gminaId, gminaName }: { gminaId: string; gmi
         return;
       }
 
-      router.refresh();
+      onDeleted();
     } catch (err) {
       console.error('[DeleteGminaButton] request failed:', err);
       setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');

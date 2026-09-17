@@ -7,7 +7,7 @@ import { GminaFormModal } from '@/components/gmina/GminaFormModal';
 import { DeleteGminaButton } from './DeleteGminaButton';
 import type { GminaListItem } from './types';
 
-export function GminaCard({ gmina }: { gmina: GminaListItem }) {
+export function GminaCard({ gmina, onChanged }: { gmina: GminaListItem; onChanged: () => void }) {
   const [showEdit, setShowEdit] = useState(false);
   const hasDependents =
     gmina.usersCount > 0 ||
@@ -49,11 +49,13 @@ export function GminaCard({ gmina }: { gmina: GminaListItem }) {
             Nie można usunąć — istnieją powiązane rekordy.
           </p>
         ) : (
-          <DeleteGminaButton gminaId={gmina.id} gminaName={gmina.name} />
+          <DeleteGminaButton gminaId={gmina.id} gminaName={gmina.name} onDeleted={onChanged} />
         )}
       </div>
 
-      {showEdit && <GminaFormModal mode="edit" gmina={gmina} onClose={() => setShowEdit(false)} />}
+      {showEdit && (
+        <GminaFormModal mode="edit" gmina={gmina} onClose={() => setShowEdit(false)} onSuccess={onChanged} />
+      )}
     </article>
   );
 }

@@ -69,6 +69,47 @@ export function normalizeGminaName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ');
 }
 
+export interface GminaLocationOption {
+  voivodeship: string;
+  powiats: string[];
+}
+
+/**
+ * Voivodeship/powiat options for the gmina list's cascading filters, derived
+ * from whatever gminas actually exist rather than a bundled reference dataset
+ * (the codebase has no static Polish administrative-division list) — so the
+ * dropdowns only ever offer values a filter could actually match, and a powiat
+ * is grouped under every voivodeship it happens to appear under.
+ *
+ * Deliberately its own endpoint (GET /api/admin/gminas/locations) rather than
+ * a field on the paginated list response: these options only change when a
+ * gmina is created/edited/deleted, not on every search keystroke, sort, or
+ * page turn — bundling them into the hot, frequently-refetched list endpoint
+ * would re-run this full-table scan on every one of those instead of once on
+ * mount plus after an actual mutation.
+ */
+export async function getGminaLocationOptions(): Promise<GminaLocationOption[]> {
+  const rows = await prisma.gmina.findMany({
+    where: { voivodeship: { not: null } },
+    select: { voivodeship: true, powiat: true },
+    distinct: ['voivodeship', 'powiat'],
+  });
+
+  const byVoivodeship = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.voivodeship) continue;
+    if (!byVoivodeship.has(row.voivodeship)) byVoivodeship.set(row.voivodeship, new Set());
+    if (row.powiat) byVoivodeship.get(row.voivodeship)!.add(row.powiat);
+  }
+
+  return Array.from(byVoivodeship.entries())
+    .map(([voivodeship, powiats]) => ({
+      voivodeship,
+      powiats: Array.from(powiats).sort((a, b) => a.localeCompare(b, 'pl')),
+    }))
+    .sort((a, b) => a.voivodeship.localeCompare(b.voivodeship, 'pl'));
+}
+
 export interface CreateGminaInput {
   name: string;
   powiat?: string | null;

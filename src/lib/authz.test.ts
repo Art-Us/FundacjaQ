@@ -3,20 +3,80 @@ import { mockReset, type DeepMockProxy } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 
 vi.mock('./prisma');
+vi.mock('next-auth', () => ({
+  getServerSession: vi.fn(),
+}));
 
 import { prisma as prismaImport } from './prisma';
+import { getServerSession } from 'next-auth';
 import {
   isLastActiveAdmin,
   isAlertOwnerOrg,
   isAllocationDonor,
   isAllocationRecipient,
   canManageAlert,
+  requireAdmin,
+  requireAdminOrCoordinator,
 } from './authz';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
+function mockSession(role: string | null) {
+  vi.mocked(getServerSession).mockResolvedValue(
+    role ? ({ user: { id: 'session-user', role, gminaId: null } } as any) : null
+  );
+}
+
 beforeEach(() => {
   mockReset(prisma);
+  vi.mocked(getServerSession).mockReset();
+});
+
+describe('requireAdmin', () => {
+  it('returns the user for an ADMIN session', async () => {
+    mockSession('ADMIN');
+    const result = await requireAdmin();
+    expect(result).toMatchObject({ role: 'ADMIN' });
+  });
+
+  it('returns null for a COORDINATOR session', async () => {
+    mockSession('COORDINATOR');
+    expect(await requireAdmin()).toBeNull();
+  });
+
+  it('returns null for a VOLUNTEER session', async () => {
+    mockSession('VOLUNTEER');
+    expect(await requireAdmin()).toBeNull();
+  });
+
+  it('returns null when there is no session at all', async () => {
+    mockSession(null);
+    expect(await requireAdmin()).toBeNull();
+  });
+});
+
+describe('requireAdminOrCoordinator', () => {
+  it('returns the user for an ADMIN session', async () => {
+    mockSession('ADMIN');
+    const result = await requireAdminOrCoordinator();
+    expect(result).toMatchObject({ role: 'ADMIN' });
+  });
+
+  it('returns the user for a COORDINATOR session', async () => {
+    mockSession('COORDINATOR');
+    const result = await requireAdminOrCoordinator();
+    expect(result).toMatchObject({ role: 'COORDINATOR' });
+  });
+
+  it('returns null for a VOLUNTEER session', async () => {
+    mockSession('VOLUNTEER');
+    expect(await requireAdminOrCoordinator()).toBeNull();
+  });
+
+  it('returns null when there is no session at all', async () => {
+    mockSession(null);
+    expect(await requireAdminOrCoordinator()).toBeNull();
+  });
 });
 
 describe('isLastActiveAdmin', () => {

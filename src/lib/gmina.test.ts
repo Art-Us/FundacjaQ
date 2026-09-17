@@ -5,7 +5,14 @@ import type { PrismaClient } from '@prisma/client';
 vi.mock('./prisma');
 
 import { prisma as prismaImport } from './prisma';
-import { requiresGmina, scopedGminaWhere, normalizeGminaName, createGmina, resolveGminaId } from './gmina';
+import {
+  requiresGmina,
+  scopedGminaWhere,
+  normalizeGminaName,
+  createGmina,
+  resolveGminaId,
+  getGminaLocationOptions,
+} from './gmina';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
@@ -82,6 +89,39 @@ describe('resolveGminaId', () => {
     const result = await resolveGminaId({ gminaId: 'g1' });
 
     expect(result).toEqual({ error: 'Nie udało się zweryfikować gminy.' });
+  });
+
+  it('creates (or reuses) a gmina from newGminaName when no gminaId is given', async () => {
+    prisma.gmina.findFirst.mockResolvedValue(null);
+    prisma.gmina.create.mockResolvedValue({ id: 'new-1', name: 'Nowa Gmina' } as any);
+
+    const result = await resolveGminaId({ newGminaName: 'Nowa Gmina' });
+
+    expect(result).toEqual({ id: 'new-1', created: true, gmina: { id: 'new-1', name: 'Nowa Gmina' } });
+  });
+
+  it('prefers gminaId over newGminaName when both are given', async () => {
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+
+    const result = await resolveGminaId({ gminaId: 'g1', newGminaName: 'Ignored' });
+
+    expect(result).toEqual({ id: 'g1', created: false, gmina: null });
+    expect(prisma.gmina.findFirst).not.toHaveBeenCalled();
+    expect(prisma.gmina.create).not.toHaveBeenCalled();
+  });
+
+  it('propagates a createGmina error when newGminaName is blank', async () => {
+    const result = await resolveGminaId({ newGminaName: '   ' });
+
+    expect(result).toEqual({ error: 'Nazwa gminy jest wymagana.' });
+  });
+
+  it('errors when neither gminaId nor newGminaName is given', async () => {
+    const result = await resolveGminaId({});
+
+    expect(result).toEqual({ error: 'Gmina jest wymagana.' });
+    expect(prisma.gmina.findUnique).not.toHaveBeenCalled();
+    expect(prisma.gmina.findFirst).not.toHaveBeenCalled();
   });
 });
 
@@ -162,5 +202,47 @@ describe('createGmina', () => {
     const result = await createGmina({ name: 'Warszawa' });
 
     expect(result).toEqual({ gmina: { id: 'race-1', name: 'Warszawa' }, created: false });
+  });
+});
+
+describe('getGminaLocationOptions', () => {
+  beforeEach(() => {
+    mockReset(prisma);
+  });
+
+  it('only queries gminas that have a voivodeship set, distinct by voivodeship+powiat', async () => {
+    prisma.gmina.findMany.mockResolvedValue([]);
+
+    await getGminaLocationOptions();
+
+    expect(prisma.gmina.findMany).toHaveBeenCalledWith({
+      where: { voivodeship: { not: null } },
+      select: { voivodeship: true, powiat: true },
+      distinct: ['voivodeship', 'powiat'],
+    });
+  });
+
+  it('returns an empty array when nothing matches', async () => {
+    prisma.gmina.findMany.mockResolvedValue([]);
+
+    expect(await getGminaLocationOptions()).toEqual([]);
+  });
+
+  it('groups powiats under every voivodeship they appear in, sorted and deduplicated, tolerating a null powiat', async () => {
+    prisma.gmina.findMany.mockResolvedValue([
+      { voivodeship: 'mazowieckie', powiat: 'zamojski' },
+      { voivodeship: 'mazowieckie', powiat: 'warszawski' },
+      { voivodeship: 'lubelskie', powiat: 'zamojski' },
+      { voivodeship: 'lubelskie', powiat: 'zamojski' },
+      { voivodeship: 'podlaskie', powiat: null },
+    ] as any);
+
+    const result = await getGminaLocationOptions();
+
+    expect(result).toEqual([
+      { voivodeship: 'lubelskie', powiats: ['zamojski'] },
+      { voivodeship: 'mazowieckie', powiats: ['warszawski', 'zamojski'] },
+      { voivodeship: 'podlaskie', powiats: [] },
+    ]);
   });
 });
