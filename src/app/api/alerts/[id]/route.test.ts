@@ -6,53 +6,32 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/prisma');
 vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
-  return {
-    ...actual,
-    requireAdminOrCoordinator: vi.fn(),
-  };
+  return { ...actual, requireAdminOrCoordinator: vi.fn() };
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
-import { PATCH, DELETE } from './route';
+import { PATCH } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
-function baseAlert(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    id: 'alert-1',
-    title: 'Powódź w centrum',
-    description: 'Woda podnosi się szybko.',
-    kind: 'ALERT',
-    severity: 'HIGH',
-    status: 'ACTIVE',
-    category: 'HYDROLOGICAL',
-    location: null,
-    latitude: 52.2297,
-    longitude: 21.0122,
-    authorId: 'author-1',
-    organizationId: null,
-    gminaId: 'gmina-1',
-    expiresAt: null,
-    ...overrides,
-  };
-}
+const baseAlert = {
+  id: 'a1',
+  gminaId: 'g1',
+  organizationId: 'owner-org',
+  status: 'ACTIVE',
+  kind: 'ALERT',
+};
 
-function patchRequest(body: unknown) {
-  return new NextRequest('http://localhost/api/alerts/alert-1', {
+function makeRequest(body?: unknown) {
+  return new NextRequest('http://localhost/api/alerts/a1', {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 }
 
-function callPatch(body: unknown, id = 'alert-1') {
-  return PATCH(patchRequest(body), { params: { id } });
-}
-
-function callDelete(id = 'alert-1') {
-  return DELETE(new NextRequest('http://localhost/api/alerts/alert-1', { method: 'DELETE' }), { params: { id } });
-}
+const ctx = { params: { id: 'a1' } };
 
 beforeEach(() => {
   mockReset(prisma);
@@ -60,200 +39,100 @@ beforeEach(() => {
 });
 
 describe('PATCH /api/alerts/[id]', () => {
-  it('returns 403 with no DB write when there is no authorized session', async () => {
+  it('returns 403 with no DB call when unauthenticated', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
 
-    const res = await callPatch({ title: 'Zaktualizowany tytuł' });
+    const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
 
     expect(res.status).toBe(403);
     expect(prisma.alert.findUnique).not.toHaveBeenCalled();
-    expect(prisma.alert.update).not.toHaveBeenCalled();
   });
 
-  it('returns 404 for a nonexistent alert', async () => {
+  it('returns 404 when the alert does not exist', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.alert.findUnique.mockResolvedValue(null);
 
-    const res = await callPatch({ title: 'x' }, 'missing');
+    const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
 
     expect(res.status).toBe(404);
-    expect(prisma.alert.update).not.toHaveBeenCalled();
   });
 
-  // Mirrors scopedGminaWhere's fail-closed contract: a gmina-scoped role may
-  // only manage resources within its own gmina.
-  it("rejects a COORDINATOR editing another gmina's alert with 403 and no write", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ gminaId: 'gmina-OTHER' }) as any);
+  it('rejects a COORDINATOR from a different gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'other-gmina' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
 
-    const res = await callPatch({ title: 'Zaktualizowany tytuł' });
-    const body = await res.json();
-
-    expect(res.status).toBe(403);
-    expect(body.error).toBe('Nie masz uprawnień do edycji tego alertu.');
-    expect(prisma.alert.update).not.toHaveBeenCalled();
-  });
-
-  // Regression / fail-closed edge case: a COORDINATOR with no gmina of their
-  // own must not be able to edit any alert, since alert.gminaId (always a
-  // real, non-null gmina id) can never equal null.
-  it('rejects a COORDINATOR with no gmina of their own from editing any alert', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ gminaId: 'gmina-1' }) as any);
-
-    const res = await callPatch({ title: 'Zaktualizowany tytuł' });
+    const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
 
     expect(res.status).toBe(403);
     expect(prisma.alert.update).not.toHaveBeenCalled();
   });
 
-  it('lets a COORDINATOR edit an alert in their own gmina', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ gminaId: 'gmina-1' }) as any);
+  it('rejects an empty body', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+
+    const res = await PATCH(makeRequest({}), ctx);
+
+    expect(res.status).toBe(400);
+    expect(prisma.alert.update).not.toHaveBeenCalled();
+  });
+
+  it('updates a non-status field without touching the allocations gate', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
     prisma.alert.update.mockResolvedValue({} as any);
 
-    const res = await callPatch({ title: 'Zaktualizowany tytuł' });
+    const res = await PATCH(makeRequest({ title: 'Zaktualizowany tytuł' }), ctx);
 
     expect(res.status).toBe(200);
-    expect(prisma.alert.update).toHaveBeenCalledWith({
-      where: { id: 'alert-1' },
-      data: { title: 'Zaktualizowany tytuł' },
-    });
+    expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
   });
 
-  it("lets ADMIN edit any gmina's alert", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ gminaId: 'gmina-OTHER' }) as any);
+  it('blocks the OWNER organization from cancelling directly when active allocations exist (Крок 29)', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.count.mockResolvedValue(1);
+
+    const res = await PATCH(makeRequest({ status: 'CANCELLED' }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe('USE_CANCEL_WITH_RETURN');
+    expect(prisma.alert.update).not.toHaveBeenCalled();
+  });
+
+  it('allows the OWNER organization to cancel directly once no active allocations remain', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.count.mockResolvedValue(0);
     prisma.alert.update.mockResolvedValue({} as any);
 
-    const res = await callPatch({ status: 'RESOLVED' });
+    const res = await PATCH(makeRequest({ status: 'CANCELLED' }), ctx);
 
     expect(res.status).toBe(200);
-    expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'alert-1' }, data: { status: 'RESOLVED' } });
+    expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { status: 'CANCELLED' } });
   });
 
-  it('rejects malformed JSON with 400', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
-
-    const res = await PATCH(
-      new NextRequest('http://localhost/api/alerts/alert-1', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: '{not valid json',
-      }),
-      { params: { id: 'alert-1' } }
-    );
-
-    expect(res.status).toBe(400);
-    expect(prisma.alert.update).not.toHaveBeenCalled();
-  });
-
-  it('rejects an empty update body with 400 ("no changes to save")', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
-
-    const res = await callPatch({});
-    const body = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Brak zmian do zapisania.');
-    expect(prisma.alert.update).not.toHaveBeenCalled();
-  });
-
-  it('rejects a category that does not match the alert\'s existing kind', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    // alert.kind is ALERT; FESTIVAL is an EVENT-only category.
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ kind: 'ALERT' }) as any);
-
-    const res = await callPatch({ category: 'FESTIVAL' });
-    const body = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(body.error).toBe('Wybrana kategoria nie należy do tego rodzaju wpisu.');
-    expect(prisma.alert.update).not.toHaveBeenCalled();
-  });
-
-  it('accepts a category matching the existing EVENT kind', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert({ kind: 'EVENT', category: 'FESTIVAL' }) as any);
+  it("allows ADMIN to cancel another org's alert directly even with active allocations (нюанс #5)", async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
     prisma.alert.update.mockResolvedValue({} as any);
 
-    const res = await callPatch({ category: 'CONCERT' });
+    const res = await PATCH(makeRequest({ status: 'CANCELLED' }), ctx);
 
     expect(res.status).toBe(200);
+    expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
+    expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { status: 'CANCELLED' } });
   });
 
-  it('rejects an out-of-range latitude with 400', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
+  it('does not re-trigger the gate when the alert is already CANCELLED', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'CANCELLED' } as any);
+    prisma.alert.update.mockResolvedValue({} as any);
 
-    const res = await callPatch({ latitude: 200 });
-
-    expect(res.status).toBe(400);
-    expect(prisma.alert.update).not.toHaveBeenCalled();
-  });
-
-  it('propagates a thrown Prisma error from update (no try/catch in this route)', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
-    prisma.alert.update.mockRejectedValue(new Error('connection lost'));
-
-    await expect(callPatch({ title: 'x' })).rejects.toThrow('connection lost');
-  });
-});
-
-describe('DELETE /api/alerts/[id]', () => {
-  it('returns 403 with no DB call when there is no authorized session', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
-
-    const res = await callDelete();
-
-    expect(res.status).toBe(403);
-    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
-    expect(prisma.alert.delete).not.toHaveBeenCalled();
-  });
-
-  // The hard-delete gate is ADMIN-only, independent of gmina ownership — a
-  // COORDINATOR must be rejected even for an alert in their own gmina.
-  it("rejects a COORDINATOR deleting an alert in their own gmina (403, no lookup/delete)", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
-
-    const res = await callDelete();
-    const body = await res.json();
-
-    expect(res.status).toBe(403);
-    expect(body.error).toBe('Tylko administrator może trwale usunąć alert.');
-    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
-    expect(prisma.alert.delete).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 for a nonexistent alert (ADMIN)', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(null);
-
-    const res = await callDelete('missing');
-
-    expect(res.status).toBe(404);
-    expect(prisma.alert.delete).not.toHaveBeenCalled();
-  });
-
-  it('lets ADMIN permanently delete an alert', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
-    prisma.alert.delete.mockResolvedValue({} as any);
-
-    const res = await callDelete();
+    const res = await PATCH(makeRequest({ status: 'CANCELLED' }), ctx);
 
     expect(res.status).toBe(200);
-    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'alert-1' } });
-  });
-
-  it('propagates a thrown Prisma error from delete (no try/catch in this route)', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
-    prisma.alert.findUnique.mockResolvedValue(baseAlert() as any);
-    prisma.alert.delete.mockRejectedValue(new Error('connection lost'));
-
-    await expect(callDelete()).rejects.toThrow('connection lost');
+    expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
 
@@ -58,6 +58,28 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       { error: 'Wybrana kategoria nie należy do tego rodzaju wpisu.' },
       { status: 400 }
     );
+  }
+
+  // Крок 29 — the OWNER organization can't cancel straight through here once
+  // it has resources in flight; it must go through cancel-with-return
+  // (Крок 28) so every received resource gets a return decision first. This
+  // deliberately does NOT apply to an ADMIN cancelling another org's alert
+  // (нюанс #5, docs/are-you-familiar-with-tidy-blum.md §7) — that stays this
+  // simple path, with the recipient settling remaining allocations
+  // afterwards via the /zasoby inbox (Крок 27) instead.
+  if (parsed.data.status === 'CANCELLED' && alert.status !== 'CANCELLED' && isAlertOwnerOrg(alert, user)) {
+    const activeAllocationsCount = await prisma.resourceAllocation.count({
+      where: { alertId: alert.id, status: { notIn: ['RETURNED', 'CANCELLED'] } },
+    });
+    if (activeAllocationsCount > 0) {
+      return NextResponse.json(
+        {
+          error: 'Masz aktywne przydziały zasobów — anuluj ten alert przez formularz zwrotu zasobów.',
+          code: 'USE_CANCEL_WITH_RETURN',
+        },
+        { status: 409 }
+      );
+    }
   }
 
   await prisma.alert.update({ where: { id: alert.id }, data: parsed.data });
