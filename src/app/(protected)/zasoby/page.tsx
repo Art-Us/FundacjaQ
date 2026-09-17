@@ -37,12 +37,6 @@ export default async function ZasobyPage() {
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
       <RefreshOnMount />
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Matryca Zasobów Ratunkowych</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Przegląd zasobów organizacji w podziale na kategorie i horyzonty czasowe dostępności.
-        </p>
-      </div>
 
       <AllocationInboxPanel recipient={inbox.recipient} donor={inbox.donor} />
 

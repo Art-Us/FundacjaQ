@@ -60,6 +60,26 @@ async function seedKategorie() {
     { name: 'Sprzęt medyczny', icon: '🩹', group: 'EQUIPMENT' as const },
     { name: 'Agregaty prądotwórcze', icon: '🔌', group: 'EQUIPMENT' as const },
     { name: 'Ludzie / Wolontariusze', icon: '🧑‍🤝‍🧑', group: 'PEOPLE' as const },
+
+    // Dodatkowe, bardziej szczegółowe podkategorie — plus jedna kategoria
+    // "catch-all" na grupę (Inny sprzęt / Inne materiały), która działa jako
+    // domyślna dla opcji "➕ Własna nazwa zasobu…" w ResourceFormModal.tsx
+    // (patrz GROUP_FALLBACK_CATEGORY_NAME tam). PEOPLE i WATER mają już
+    // swoją "catch-all" kategorię (Ludzie / Wolontariusze, Woda pitna).
+    { name: 'Psycholodzy i wsparcie kryzysowe', icon: '🧠', group: 'PEOPLE' as const },
+    { name: 'Ratownicy medyczni i lekarze', icon: '⚕️', group: 'PEOPLE' as const },
+    { name: 'Wolontariusze do segregacji i dystrybucji', icon: '📦', group: 'PEOPLE' as const },
+
+    { name: 'Systemy uzdatniania wody', icon: '🧪', group: 'WATER' as const },
+    { name: 'Zbiorniki i cysterny na wodę', icon: '🛢️', group: 'WATER' as const },
+
+    { name: 'Inny sprzęt', icon: '🧰', group: 'EQUIPMENT' as const },
+    { name: 'Sprzęt ratownictwa technicznego', icon: '🛠️', group: 'EQUIPMENT' as const },
+    { name: 'Łodzie i sprzęt pływający', icon: '🚤', group: 'EQUIPMENT' as const },
+
+    { name: 'Inne materiały', icon: '📋', group: 'OTHER' as const },
+    { name: 'Środki czystości i higieny', icon: '🧴', group: 'OTHER' as const },
+    { name: 'Materiały budowlane i naprawcze', icon: '🧱', group: 'OTHER' as const },
   ];
 
   const created = [];
@@ -73,6 +93,13 @@ async function seedOrganizacje(gminy: Awaited<ReturnType<typeof seedGminy>>) {
   const organizacje = [
     { name: 'Ochotnicza Straż Pożarna Nowa Dęba', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 111 222', contactEmail: 'osp@nowadeba.pl' },
     { name: 'Caritas Diecezji Sandomierskiej', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 333 444', contactEmail: 'caritas@nowadeba.pl' },
+    { name: 'Polski Czerwony Krzyż Oddział Nowa Dęba', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 111', contactEmail: 'pck@nowadeba.pl' },
+    { name: 'Wodne Ochotnicze Pogotowie Ratunkowe Nowa Dęba', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 222', contactEmail: 'wopr@nowadeba.pl' },
+    { name: 'Koło Gospodyń Wiejskich "Dębianki"', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 333', contactEmail: 'kgw.debianki@nowadeba.pl' },
+    { name: 'Stowarzyszenie "Razem dla Nowej Dęby"', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 444', contactEmail: 'razem@nowadeba.pl' },
+    { name: 'Nadleśnictwo Nowa Dęba', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 555', contactEmail: 'nadlesnictwo@nowadeba.pl' },
+    { name: 'Miejski Ośrodek Pomocy Społecznej w Nowej Dębie', city: 'Nowa Dęba', gminaId: gminy[0].id, contactPhone: '+48 601 555 666', contactEmail: 'mops@nowadeba.pl' },
+    { name: 'Ochotnicza Straż Pożarna Cygany', city: 'Cygany', gminaId: gminy[0].id, contactPhone: '+48 601 555 777', contactEmail: 'osp.cygany@nowadeba.pl' },
   ];
 
   const created: Record<string, Awaited<ReturnType<typeof prisma.organization.upsert>>> = {};
@@ -102,6 +129,16 @@ async function seedTestUsers(gminy: Awaited<ReturnType<typeof seedGminy>>, organ
     { email: 'koordynator@example.com', name: 'Katarzyna Nowak', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Ochotnicza Straż Pożarna Nowa Dęba', phone: '+48 602 100 200', isActive: true, lastActivatedAt: daysAgo(90), lastDeactivatedAt: null, deactivationReason: null },
     { email: 'wolontariusz@example.com', name: 'Anna Wiśniewska', role: 'VOLUNTEER', gminaId: gminy[0].id, organization: 'Caritas Diecezji Sandomierskiej', phone: '+48 602 300 400', isActive: true, lastActivatedAt: daysAgo(60), lastDeactivatedAt: null, deactivationReason: null },
     { email: 'wolontariusz2@example.com', name: 'Marek Zieliński', role: 'VOLUNTEER', gminaId: gminy[0].id, organization: 'Caritas Diecezji Sandomierskiej', phone: '+48 602 500 600', isActive: false, lastActivatedAt: daysAgo(60), lastDeactivatedAt: daysAgo(5), deactivationReason: 'Zakończenie współpracy' },
+    // Jeden koordynator na każdą z 7 dodatkowych organizacji (seedZasoby poniżej
+    // przypisuje im też własne zasoby) — żeby dropdown "Posiadacz" i macierz
+    // zasobów na /zasoby miały realną różnorodność do przeglądania.
+    { email: 'koordynator2@example.com', name: 'Beata Kowalczyk', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Polski Czerwony Krzyż Oddział Nowa Dęba', phone: '+48 602 700 100', isActive: true, lastActivatedAt: daysAgo(80), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator3@example.com', name: 'Piotr Wójcik', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Wodne Ochotnicze Pogotowie Ratunkowe Nowa Dęba', phone: '+48 602 700 200', isActive: true, lastActivatedAt: daysAgo(75), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator4@example.com', name: 'Grażyna Mazur', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Koło Gospodyń Wiejskich "Dębianki"', phone: '+48 602 700 300', isActive: true, lastActivatedAt: daysAgo(70), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator5@example.com', name: 'Tomasz Krawczyk', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Stowarzyszenie "Razem dla Nowej Dęby"', phone: '+48 602 700 400', isActive: true, lastActivatedAt: daysAgo(65), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator6@example.com', name: 'Adam Sikora', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Nadleśnictwo Nowa Dęba', phone: '+48 602 700 500', isActive: true, lastActivatedAt: daysAgo(60), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator7@example.com', name: 'Ewa Duda', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Miejski Ośrodek Pomocy Społecznej w Nowej Dębie', phone: '+48 602 700 600', isActive: true, lastActivatedAt: daysAgo(55), lastDeactivatedAt: null, deactivationReason: null },
+    { email: 'koordynator8@example.com', name: 'Rafał Ostrowski', role: 'COORDINATOR', gminaId: gminy[0].id, organization: 'Ochotnicza Straż Pożarna Cygany', phone: '+48 602 700 700', isActive: true, lastActivatedAt: daysAgo(50), lastDeactivatedAt: null, deactivationReason: null },
   ];
 
   const passwordHash = await hashPassword(TEST_PASSWORD);
@@ -146,6 +183,13 @@ async function seedZasoby(
   const byName = (name: string) => kategorie.find((k) => k.name === name)!;
   const osp = organizacje['Ochotnicza Straż Pożarna Nowa Dęba'].id;
   const caritas = organizacje['Caritas Diecezji Sandomierskiej'].id;
+  const pck = organizacje['Polski Czerwony Krzyż Oddział Nowa Dęba'].id;
+  const wopr = organizacje['Wodne Ochotnicze Pogotowie Ratunkowe Nowa Dęba'].id;
+  const kgw = organizacje['Koło Gospodyń Wiejskich "Dębianki"'].id;
+  const razem = organizacje['Stowarzyszenie "Razem dla Nowej Dęby"'].id;
+  const nadlesnictwo = organizacje['Nadleśnictwo Nowa Dęba'].id;
+  const mops = organizacje['Miejski Ośrodek Pomocy Społecznej w Nowej Dębie'].id;
+  const ospCygany = organizacje['Ochotnicza Straż Pożarna Cygany'].id;
 
   const zasoby: Array<{
     name: string;
@@ -169,6 +213,32 @@ async function seedZasoby(
     { name: 'Żywność dla dzieci', description: 'Odżywki i słoiczki', quantity: 8, unit: 'kartony', status: 'RESERVED', location: 'Magazyn gminny', categoryId: byName('Żywność').id, gminaId: gminy[0].id, organizationId: caritas, horizon: 'H72' },
     { name: 'Agregat prądotwórczy 2kW', description: 'Przenośny', quantity: 5, unit: 'szt', status: 'AVAILABLE', location: 'Remiza OSP Nowa Dęba', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
     { name: 'Nosze ratownicze', description: '', quantity: 4, unit: 'szt', status: 'IN_USE', location: 'Punkt medyczny', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: osp, horizon: 'H24' },
+
+    // 7 dodatkowych organizacji (patrz seedOrganizacje) — różne kategorie i
+    // horyzonty, żeby macierz na /zasoby miała realną różnorodność zamiast
+    // dwóch organizacji i pustej kolumny "Ludzie".
+    { name: 'Zestawy pierwszej pomocy PCK', description: 'Apteczki R1 do dystrybucji', quantity: 25, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn PCK Nowa Dęba', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: pck, horizon: 'H48' },
+    { name: 'Koce ratunkowe PCK', description: 'Koce NRC do wydania poszkodowanym', quantity: 40, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn PCK Nowa Dęba', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id, organizationId: pck, horizon: 'H24' },
+    { name: 'Wolontariusze przeszkoleni medycznie', description: 'Gotowi do wsparcia punktów medycznych', quantity: 12, unit: 'osób', status: 'AVAILABLE', location: 'Baza PCK Nowa Dęba', categoryId: byName('Ludzie / Wolontariusze').id, gminaId: gminy[0].id, organizationId: pck, horizon: 'H24' },
+
+    { name: 'Ratownicy wodni WOPR', description: 'Gotowi do akcji na zbiornikach wodnych', quantity: 8, unit: 'osób', status: 'AVAILABLE', location: 'Baza WOPR Nowa Dęba', categoryId: byName('Ludzie / Wolontariusze').id, gminaId: gminy[0].id, organizationId: wopr, horizon: 'H24' },
+    { name: 'Sprzęt do reanimacji (AED)', description: 'Defibrylatory przenośne', quantity: 3, unit: 'szt', status: 'AVAILABLE', location: 'Baza WOPR Nowa Dęba', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: wopr, horizon: 'H72' },
+
+    { name: 'Przetwory i konserwy domowe', description: 'Zapasy przygotowane przez KGW', quantity: 200, unit: 'słoiki', status: 'AVAILABLE', location: 'Świetlica wiejska', categoryId: byName('Żywność').id, gminaId: gminy[0].id, organizationId: kgw, horizon: 'WEEK' },
+    { name: 'Wolontariuszki do przygotowywania posiłków', description: 'Gotowe do pracy w punkcie żywieniowym', quantity: 15, unit: 'osób', status: 'AVAILABLE', location: 'Świetlica wiejska', categoryId: byName('Ludzie / Wolontariusze').id, gminaId: gminy[0].id, organizationId: kgw, horizon: 'H48' },
+
+    { name: 'Odzież używana', description: 'Zbiórka od mieszkańców, posortowana', quantity: 90, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn stowarzyszenia', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id, organizationId: razem, horizon: 'WEEK' },
+    { name: 'Agregat prądotwórczy 3kW', description: 'Do wypożyczenia w razie potrzeby', quantity: 1, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn stowarzyszenia', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id, organizationId: razem, horizon: 'H72' },
+
+    { name: 'Strażnicy leśni gotowi do pomocy', description: 'Wsparcie przy pożarach lasu i poszycia', quantity: 6, unit: 'osób', status: 'AVAILABLE', location: 'Nadleśnictwo Nowa Dęba', categoryId: byName('Ludzie / Wolontariusze').id, gminaId: gminy[0].id, organizationId: nadlesnictwo, horizon: 'H24' },
+    { name: 'Piły mechaniczne i agregaty leśne', description: 'Do usuwania powalonych drzew', quantity: 4, unit: 'szt', status: 'AVAILABLE', location: 'Nadleśnictwo Nowa Dęba', categoryId: byName('Agregaty prądotwórcze').id, gminaId: gminy[0].id, organizationId: nadlesnictwo, horizon: 'H24' },
+
+    { name: 'Paczki żywnościowe', description: 'Dla rodzin poszkodowanych', quantity: 150, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn MOPS', categoryId: byName('Żywność').id, gminaId: gminy[0].id, organizationId: mops, horizon: 'H48' },
+    { name: 'Odzież dla poszkodowanych', description: 'Nowa i używana, różne rozmiary', quantity: 70, unit: 'szt', status: 'AVAILABLE', location: 'Magazyn MOPS', categoryId: byName('Koce i odzież').id, gminaId: gminy[0].id, organizationId: mops, horizon: 'H72' },
+
+    { name: 'Woda butelkowana 0.5L', description: 'Zapas na wypadek awarii wodociągu', quantity: 1200, unit: 'szt', status: 'AVAILABLE', location: 'Remiza OSP Cygany', categoryId: byName('Woda pitna').id, gminaId: gminy[0].id, organizationId: ospCygany, horizon: 'H24' },
+    { name: 'Nosze i apteczki OSP Cygany', description: '', quantity: 6, unit: 'szt', status: 'AVAILABLE', location: 'Remiza OSP Cygany', categoryId: byName('Sprzęt medyczny').id, gminaId: gminy[0].id, organizationId: ospCygany, horizon: 'H24' },
+    { name: 'Strażacy ochotnicy OSP Cygany', description: 'Gotowi do wyjazdu', quantity: 10, unit: 'osób', status: 'AVAILABLE', location: 'Remiza OSP Cygany', categoryId: byName('Ludzie / Wolontariusze').id, gminaId: gminy[0].id, organizationId: ospCygany, horizon: 'H24' },
   ];
 
   await prisma.resource.deleteMany({ where: { gminaId: { in: gminy.map((g) => g.id) } } });

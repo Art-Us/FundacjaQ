@@ -2,9 +2,12 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    // Scans the whole src tree (not just pages/components/app) — utility
+    // classes built as string literals in src/lib (e.g. resourceLabels.ts's
+    // per-group/per-status badge colors) were being silently dropped from
+    // the compiled CSS whenever that exact class string didn't happen to
+    // also appear verbatim in an already-scanned .tsx file.
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
