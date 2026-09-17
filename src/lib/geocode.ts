@@ -88,6 +88,21 @@ function formatCounty(county: string | null): string | null {
   return /^powiat\s+/i.test(trimmed) ? trimmed : `powiat ${trimmed}`;
 }
 
+// Odwrotność formatState/formatCounty: Gmina.powiat/voivodeship (i pola
+// formularza gminy) trzymają same nazwy, bez prefiksów "powiat"/"województwo"
+// — w przeciwieństwie do `label`, który je celowo dokłada do wyświetlenia.
+export function bareState(state: string | null): string | null {
+  if (!state) return null;
+  const bare = state.replace(/^województwo\s+/i, '').trim();
+  return bare || null;
+}
+
+export function bareCounty(county: string | null): string | null {
+  if (!county) return null;
+  const bare = county.replace(/^powiat\s+/i, '').trim();
+  return bare || null;
+}
+
 export function resolveLocation(address: NominatimAddress): ResolvedLocation {
   const road = address.road ?? address.pedestrian ?? address.footway ?? null;
   const town = address.city ?? address.town ?? address.village ?? address.municipality ?? null;

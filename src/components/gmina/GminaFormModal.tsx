@@ -1,10 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { X } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { X, LoaderCircle, MapPin, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
+import { bareCounty, bareState } from '@/lib/geocode';
+
+const LocationPicker = dynamic(() => import('@/app/(protected)/map/LocationPicker'), {
+  ssr: false,
+  loading: () => (
+    <div
+      className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"
+      style={{ height: 220 }}
+    >
+      Ładowanie mapy…
+    </div>
+  ),
+});
 
 const inputClasses =
   'w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-sm text-slate-900 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition';
@@ -15,7 +30,11 @@ export interface GminaFormValue {
   name: string;
   powiat: string | null;
   voivodeship: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }
+
+type GeoState = { status: 'idle' | 'searching' | 'found' | 'notfound'; label?: string };
 
 interface GminaFormModalProps {
   mode: 'create' | 'edit';
@@ -30,8 +49,51 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
   const [name, setName] = useState(gmina?.name ?? '');
   const [powiat, setPowiat] = useState(gmina?.powiat ?? '');
   const [voivodeship, setVoivodeship] = useState(gmina?.voivodeship ?? '');
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    gmina?.latitude != null && gmina?.longitude != null ? { lat: gmina.latitude, lng: gmina.longitude } : null
+  );
+  const [geo, setGeo] = useState<GeoState>({ status: 'idle' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Jak w AlertForm: jeden licznik unieważnia odpowiedzi z poprzednich kliknięć,
+  // gdyby użytkownik kliknął w mapę kilka razy zanim pierwsza odpowiedź wróci.
+  const geocodeSeq = useRef(0);
+
+  // Klik na mapie to alternatywny, szybszy sposób wypełnienia pól — celowo
+  // nadpisuje nazwę/powiat/województwo, bo użytkownik właśnie wskazał punkt i
+  // oczekuje podpowiedzi, a nie zachowania tego, co ewentualnie wpisał wcześniej.
+  function handlePick(lat: number, lng: number) {
+    setCoords({ lat, lng });
+    setGeo({ status: 'searching' });
+    const seq = ++geocodeSeq.current;
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/geocode/reverse?lat=${lat}&lon=${lng}`);
+        if (seq !== geocodeSeq.current) return;
+        if (!res.ok) {
+          setGeo({ status: 'notfound' });
+          return;
+        }
+        const data = await res.json();
+        if (seq !== geocodeSeq.current) return;
+
+        if (data.town) setName(data.town);
+        // Miasta na prawach powiatu (Tarnobrzeg, Rzeszów...) nie mają w
+        // hierarchii Nominatim osobnego "county" — samo miasto JEST powiatem,
+        // więc brak county nie znaczy "nie rozpoznano", tylko "to powiat grodzki".
+        const powiatValue = bareCounty(data.county) ?? data.town ?? null;
+        if (powiatValue) setPowiat(powiatValue);
+        const voivodeshipValue = bareState(data.state);
+        if (voivodeshipValue) setVoivodeship(voivodeshipValue);
+
+        setGeo(data.label ? { status: 'found', label: data.label } : { status: 'notfound' });
+      } catch {
+        if (seq === geocodeSeq.current) setGeo({ status: 'notfound' });
+      }
+    })();
+  }
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -63,6 +125,8 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
       name,
       powiat: powiat || null,
       voivodeship: voivodeship || null,
+      latitude: coords?.lat ?? null,
+      longitude: coords?.lng ?? null,
     };
 
     try {
@@ -158,6 +222,46 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
                 className={inputClasses}
               />
             </div>
+          </div>
+
+          <div>
+            <label className={labelClasses}>
+              <MapPin className="inline h-3.5 w-3.5 -mt-0.5 mr-1 text-indigo-400" />
+              Wskaż gminę na mapie (opcjonalnie)
+            </label>
+            <LocationPicker
+              center={coords ? [coords.lat, coords.lng] : NOWA_DEBA_CENTER}
+              value={coords}
+              onPick={handlePick}
+              color="#6366f1"
+              icon="location"
+            />
+            {geo.status !== 'idle' && (
+              <div
+                className={`mt-2 flex items-start gap-2 rounded-xl border px-3 py-2 transition-colors ${
+                  geo.status === 'found'
+                    ? 'border-emerald-200 bg-emerald-50'
+                    : geo.status === 'searching'
+                      ? 'border-slate-200 bg-slate-50'
+                      : 'border-amber-200 bg-amber-50'
+                }`}
+              >
+                {geo.status === 'searching' ? (
+                  <LoaderCircle className="h-4 w-4 mt-px shrink-0 animate-spin text-slate-400" />
+                ) : geo.status === 'found' ? (
+                  <MapPin className="h-4 w-4 mt-px shrink-0 text-emerald-600" />
+                ) : (
+                  <SearchX className="h-4 w-4 mt-px shrink-0 text-amber-600" />
+                )}
+                <span className="min-w-0 text-xs font-semibold break-words text-slate-700">
+                  {geo.status === 'searching'
+                    ? 'Rozpoznawanie lokalizacji…'
+                    : geo.status === 'found'
+                      ? geo.label
+                      : 'Nie rozpoznano adresu — uzupełnij pola ręcznie.'}
+                </span>
+              </div>
+            )}
           </div>
 
           {error && <p className="text-xs text-rose-500">{error}</p>}
