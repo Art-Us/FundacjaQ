@@ -186,6 +186,32 @@ describe('POST /api/alerts', () => {
     );
   });
 
+  // Крок 30 — Alert.organizationId is fixed at creation from the author's
+  // own organization and never touched again afterwards.
+  it("sets organizationId from the author's own organization", async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: 'org-1' });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.alert.create.mockResolvedValue({ id: 'alert-1' } as any);
+
+    await POST(makeRequest(baseBody({ gminaId: 'gmina-1' })));
+
+    expect(prisma.alert.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: 'org-1' }) })
+    );
+  });
+
+  it('creates an ownerless alert (organizationId: null) when the author has no organization', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.alert.create.mockResolvedValue({ id: 'alert-1' } as any);
+
+    await POST(makeRequest(baseBody({ gminaId: 'gmina-1' })));
+
+    expect(prisma.alert.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: null }) })
+    );
+  });
+
   it('rejects with 400 when the gmina does not exist, after the ownership check has passed', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(null);

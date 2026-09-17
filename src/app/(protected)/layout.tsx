@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
+import { countActionableAllocations } from '@/lib/allocationInbox';
 import { ProtectedShell } from '@/components/layout/ProtectedShell';
 
 // The authoritative session check for every non-public page. Unlike middleware.ts
@@ -22,14 +23,21 @@ export default async function ProtectedLayout({ children }: { children: React.Re
     redirect(session?.blocked ? '/account-blocked' : '/login');
   }
 
-  const { role } = session.user;
+  const { role, organizationId } = session.user;
   const canManageInvites = role === 'ADMIN' || role === 'COORDINATOR';
+  // Same ADMIN/COORDINATOR gate as the /zasoby page itself (Крок 31) — kept
+  // as its own flag rather than reusing canManageInvites, since the two
+  // happen to share a condition today but gate unrelated features.
+  const canManageResources = role === 'ADMIN' || role === 'COORDINATOR';
+  const resourceInboxCount = canManageResources ? await countActionableAllocations(organizationId) : 0;
 
   return (
     <ProtectedShell
       name={session.user.name ?? session.user.email ?? 'Użytkownik'}
       role={role}
       canManageInvites={canManageInvites}
+      canManageResources={canManageResources}
+      resourceInboxCount={resourceInboxCount}
     >
       {children}
     </ProtectedShell>

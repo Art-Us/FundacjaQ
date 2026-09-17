@@ -9,9 +9,18 @@ interface ProtectedShellProps {
   name: string;
   role: string;
   canManageInvites: boolean;
+  canManageResources: boolean;
+  resourceInboxCount: number;
 }
 
-export function ProtectedShell({ children, name, role, canManageInvites }: ProtectedShellProps) {
+export function ProtectedShell({
+  children,
+  name,
+  role,
+  canManageInvites,
+  canManageResources,
+  resourceInboxCount,
+}: ProtectedShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
@@ -31,6 +40,8 @@ export function ProtectedShell({ children, name, role, canManageInvites }: Prote
         name={name}
         role={role}
         canManageInvites={canManageInvites}
+        canManageResources={canManageResources}
+        resourceInboxCount={resourceInboxCount}
       />
 
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64 transition-all duration-300">{children}</div>
