@@ -1,5 +1,27 @@
-import { Prisma, type Organization } from '@prisma/client';
+import { Prisma, type Organization, type Role } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+
+/**
+ * Scopes a Prisma `where` filter to `actor`'s own organization for every
+ * organization-scoped role (anyone but ADMIN — mirrors scopedGminaWhere in
+ * lib/gmina.ts, now the primary scoping mechanism for COORDINATOR access to
+ * user management: activating/deactivating, inviting, and listing users).
+ * Returns `null` when the actor IS organization-scoped but has no
+ * organization of their own.
+ *
+ * Callers MUST treat `null` as "return nothing" (fail closed) and never
+ * substitute an empty `{}` filter for it — `{}` means "no filter", which
+ * would hand an organization-scoped actor with no organization the same
+ * unrestricted view as an ADMIN. Same fail-open trap scopedGminaWhere's own
+ * doc comment warns about (see the 2026-09-10 audit it references).
+ */
+export function scopedOrganizationWhere(
+  actor: { role: Role | string; organizationId?: string | null }
+): { organizationId: string } | Record<string, never> | null {
+  if (actor.role === 'ADMIN') return {};
+  if (!actor.organizationId) return null;
+  return { organizationId: actor.organizationId };
+}
 
 /** Trims and collapses internal whitespace, so "Caritas" / " Caritas  " / "Caritas" compare equal. */
 export function normalizeOrganizationName(raw: string): string {

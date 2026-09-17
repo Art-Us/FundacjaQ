@@ -5,7 +5,8 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { adminUserSelect, ROLE_LABELS } from '@/lib/users';
-import { requiresGmina, resolveGminaId, scopedGminaWhere } from '@/lib/gmina';
+import { requiresGmina, resolveGminaId } from '@/lib/gmina';
+import { scopedOrganizationWhere } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
 
@@ -106,28 +107,30 @@ export async function GET(req: NextRequest) {
   }
   const { page, pageSize, q, role, status, onlyPending, gminaId, organizationId, sortBy, sortDir } = parsed.data;
 
-  // Mirrors every other gmina-scoped list in this codebase: ADMIN sees
-  // everything ({}), a coordinator sees only their own gmina, and a
-  // coordinator with NO gmina of their own sees nothing — never silently
-  // falls back to "no restriction" (see the 2026-09-10 audit finding this
-  // exact fail-open pattern already caused an IDOR elsewhere).
-  const gminaFilter = scopedGminaWhere(actor);
-  if (gminaFilter === null) {
+  // COORDINATOR visibility is now scoped by organization, not gmina: ADMIN
+  // sees everything ({}), a coordinator sees only their own organization's
+  // users, and a coordinator with NO organization of their own sees nothing
+  // — never silently falls back to "no restriction" (same fail-closed
+  // contract scopedGminaWhere used to provide here; see the 2026-09-10 audit
+  // finding this exact fail-open pattern already caused an IDOR elsewhere).
+  const scopeFilter = scopedOrganizationWhere(actor);
+  if (scopeFilter === null) {
     return NextResponse.json({ users: [], total: 0, page, pageSize, totalPages: 0 });
   }
 
   const where: Prisma.UserWhereInput = {
-    ...gminaFilter,
+    ...scopeFilter,
     ...(role ? { role } : {}),
     ...(status === 'ACTIVE' ? { isActive: true } : {}),
     ...(status === 'INACTIVE' ? { isActive: false } : {}),
     ...(onlyPending === 'true' ? { lastActivatedAt: null } : {}),
-    ...(organizationId ? { organizationId } : {}),
-    // Only ADMIN's explicit gminaId is honored here, spread AFTER
-    // ...gminaFilter so it can only ever narrow an ADMIN's unrestricted `{}`
-    // — never applied for a COORDINATOR, since the same key would otherwise
-    // silently overwrite (and widen) their own fail-closed gmina scope above.
+    // Only ADMIN's explicit gminaId/organizationId query params are honored
+    // here, spread AFTER ...scopeFilter so they can only ever narrow an
+    // ADMIN's unrestricted `{}` — never applied for a COORDINATOR, since
+    // either key would otherwise silently overwrite (and widen) their own
+    // fail-closed organization scope above.
     ...(actor.role === 'ADMIN' && gminaId ? { gminaId } : {}),
+    ...(actor.role === 'ADMIN' && organizationId ? { organizationId } : {}),
     ...(q ? { OR: buildSearchOr(q) } : {}),
   };
 

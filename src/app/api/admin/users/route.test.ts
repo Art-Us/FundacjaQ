@@ -104,11 +104,18 @@ describe('GET /api/admin/users', () => {
     expect(body.users[1]).toMatchObject({ id: 'u2', isSelf: false, canManage: true });
   });
 
-  // Regression coverage for the 2026-09-10 audit finding: a coordinator with
-  // no gmina of their own must see NOTHING, never silently fall back to
-  // "no restriction" (which would leak every gmina's users to them).
-  it('returns an empty page with no DB call for a coordinator with no gmina of their own', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: null });
+  // Regression coverage: a coordinator with no organization of their own must
+  // see NOTHING, never silently fall back to "no restriction" (which would
+  // leak every organization's users to them) — same fail-closed contract the
+  // 2026-09-10 audit required of gmina scoping, now enforced by organization
+  // instead (see scopedOrganizationWhere in lib/organization.ts).
+  it('returns an empty page with no DB call for a coordinator with no organization of their own', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: null,
+    });
 
     const res = await callGet();
     const body = await res.json();
@@ -119,15 +126,20 @@ describe('GET /api/admin/users', () => {
     expect(prisma.user.count).not.toHaveBeenCalled();
   });
 
-  it("scopes a coordinator's results to their own gmina", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
+  it("scopes a coordinator's results to their own organization", async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: 'org-1',
+    });
     prisma.user.count.mockResolvedValue(0);
     prisma.user.findMany.mockResolvedValue([]);
 
     await callGet();
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      expect.objectContaining({ where: expect.objectContaining({ organizationId: 'org-1' }) })
     );
   });
 
@@ -214,36 +226,44 @@ describe('GET /api/admin/users', () => {
     );
   });
 
-  it('applies an organizationId filter for any actor', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
+  it('applies an ADMIN-supplied organizationId filter', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.count.mockResolvedValue(0);
     prisma.user.findMany.mockResolvedValue([]);
 
     await callGet('?organizationId=org-1');
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ gminaId: 'gmina-1', organizationId: 'org-1' }),
-      })
+      expect.objectContaining({ where: expect.objectContaining({ organizationId: 'org-1' }) })
     );
   });
 
-  // Regression coverage: `gminaId` is the exact same key scopedGminaWhere()
-  // uses for a coordinator's own fail-closed scope — spreading a
-  // client-supplied gminaId AFTER that scope (or in any order that lets it
-  // win) would let a coordinator override their own restriction and read
-  // another gmina's users entirely. It must be silently ignored for anyone
-  // but ADMIN, not merely validated.
-  it("ignores a client-supplied gminaId for a COORDINATOR instead of letting it override their own gmina scope", async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'coord-1', role: 'COORDINATOR', gminaId: 'gmina-1' });
+  // Regression coverage: `organizationId` is the exact same key
+  // scopedOrganizationWhere() uses for a coordinator's own fail-closed scope
+  // — spreading a client-supplied organizationId AFTER that scope (or in any
+  // order that lets it win) would let a coordinator override their own
+  // restriction and read another organization's users entirely. It must be
+  // silently ignored for anyone but ADMIN, not merely validated. gminaId is
+  // no longer a coordinator scoping key at all, so it's ignored for them too.
+  it('ignores client-supplied gminaId/organizationId for a COORDINATOR instead of letting them override their own organization scope', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({
+      id: 'coord-1',
+      role: 'COORDINATOR',
+      gminaId: 'gmina-1',
+      organizationId: 'org-1',
+    });
     prisma.user.count.mockResolvedValue(0);
     prisma.user.findMany.mockResolvedValue([]);
 
-    await callGet('?gminaId=someone-elses-gmina');
+    await callGet('?gminaId=someone-elses-gmina&organizationId=someone-elses-org');
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: 'org-1' }),
+      })
     );
+    const call = prisma.user.findMany.mock.calls[0][0] as any;
+    expect(call.where.gminaId).toBeUndefined();
   });
 
   // Regression coverage: search used to be a client-side filter over an

@@ -8,6 +8,13 @@ export interface AuthorizedUser {
   role: string;
   gminaId: string | null;
   // Present on the real NextAuth session (see types/next-auth.d.ts,
+  // DefaultSession['user']) but optional here, like email/name below, so the
+  // many existing call sites/tests that only care about id/role/gminaId
+  // don't need to supply it. Every function that reads it (canManageUser,
+  // scopedOrganizationWhere) treats a missing value the same as `null` —
+  // fails closed, never "unrestricted".
+  organizationId?: string | null;
+  // Present on the real NextAuth session (see types/next-auth.d.ts,
   // DefaultSession['user']) but optional here so existing call sites/tests
   // that only care about id/role/gminaId don't need to supply them. Used for
   // attributing audit log entries (see lib/auditLog.ts) to a human-readable actor.
@@ -41,19 +48,24 @@ export async function requireAdmin(): Promise<AuthorizedUser | null> {
 
 /**
  * Whether `actor` may activate/deactivate `target`. ADMIN can manage anyone;
- * COORDINATOR only their own gmina's VOLUNTEERs (mirrors the invite-role
- * restriction in POST /api/admin/invites). Nobody can act on their own
- * account, since isActive is re-checked live on every session refresh
- * (src/lib/auth.ts jwt callback) — self-deactivation would kill the actor's
- * own session mid-request with no way to undo it.
+ * COORDINATOR only their own organization's VOLUNTEERs (mirrors the
+ * invite-role restriction in POST /api/admin/invites) — scoped by
+ * organization, not gmina, so a coordinator with no organization of their
+ * own can manage nobody at all, same as scopedOrganizationWhere's fail-closed
+ * contract for list visibility. Nobody can act on their own account, since
+ * isActive is re-checked live on every session refresh (src/lib/auth.ts jwt
+ * callback) — self-deactivation would kill the actor's own session
+ * mid-request with no way to undo it.
  */
 export function canManageUser(
   actor: AuthorizedUser,
-  target: { id: string; role: string; gminaId: string | null }
+  target: { id: string; role: string; organizationId: string | null }
 ): boolean {
   if (actor.id === target.id) return false;
   if (actor.role === 'ADMIN') return true;
-  return target.role === 'VOLUNTEER' && target.gminaId !== null && target.gminaId === actor.gminaId;
+  return (
+    target.role === 'VOLUNTEER' && target.organizationId !== null && target.organizationId === (actor.organizationId ?? null)
+  );
 }
 
 /**

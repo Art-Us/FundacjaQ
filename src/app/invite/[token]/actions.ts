@@ -102,6 +102,7 @@ export async function acceptInvite(
           email: invite.email,
           role: invite.role,
           gminaId: invite.gminaId,
+          organizationId: invite.organizationId,
           passwordHash,
           emailVerified: new Date(),
           isActive: false,

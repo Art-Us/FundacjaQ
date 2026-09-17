@@ -32,8 +32,13 @@ function makeRequest(body: unknown) {
   });
 }
 
-function mockSession(role: string | null, id = 'session-user', gminaId: string | null = null) {
-  vi.mocked(getServerSession).mockResolvedValue(role ? ({ user: { id, role, gminaId } } as any) : null);
+function mockSession(
+  role: string | null,
+  id = 'session-user',
+  gminaId: string | null = null,
+  organizationId: string | null = null
+) {
+  vi.mocked(getServerSession).mockResolvedValue(role ? ({ user: { id, role, gminaId, organizationId } } as any) : null);
 }
 
 beforeEach(() => {
@@ -64,6 +69,27 @@ describe('GET /api/admin/invites', () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.invites).toHaveLength(1);
+  });
+
+  // Regression coverage: same fail-closed organization scoping as GET
+  // /api/admin/users — a coordinator with no organization of their own must
+  // see no invites, never every organization's.
+  it('returns an empty list with no DB call for a coordinator with no organization of their own', async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1', null);
+    const res = await GET();
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ invites: [] });
+    expect(prisma.inviteToken.findMany).not.toHaveBeenCalled();
+  });
+
+  it("scopes a coordinator's invite list to their own organization", async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1', 'org-1');
+    prisma.inviteToken.findMany.mockResolvedValue([]);
+    await GET();
+    expect(prisma.inviteToken.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: 'org-1' } })
+    );
   });
 });
 
@@ -103,8 +129,9 @@ describe('POST /api/admin/invites', () => {
     expect(prisma.inviteToken.create).not.toHaveBeenCalled();
   });
 
-  it('lets COORDINATOR create a VOLUNTEER invite in their own gmina', async () => {
-    mockSession('COORDINATOR', 'coord-1', 'gmina-1');
+  it('lets COORDINATOR create a VOLUNTEER invite in their own organization, using the organization\'s own gmina', async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1', 'org-1');
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
@@ -112,12 +139,24 @@ describe('POST /api/admin/invites', () => {
 
     expect(res.status).toBe(200);
     expect(prisma.inviteToken.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      expect.objectContaining({
+        data: expect.objectContaining({ gminaId: 'gmina-1', organizationId: 'org-1' }),
+      })
     );
   });
 
-  it('blocks a COORDINATOR with no gmina of their own from inviting anyone', async () => {
-    mockSession('COORDINATOR', 'coord-1', null);
+  it('blocks a COORDINATOR with no organization of their own from inviting anyone', async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1', null);
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER' }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks a COORDINATOR whose organization no longer exists', async () => {
+    mockSession('COORDINATOR', 'coord-1', 'gmina-1', 'org-deleted');
+    prisma.organization.findUnique.mockResolvedValue(null);
 
     const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER' }));
 

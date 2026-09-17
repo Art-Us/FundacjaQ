@@ -185,18 +185,24 @@ model User {
 }
 
 model InviteToken {
-  id          String    @id @default(cuid())
-  email       String
-  role        Role
-  gminaId     String?
-  gmina       Gmina?    @relation(fields: [gminaId], references: [id])
-  tokenHash   String    @unique
-  createdById String
-  createdBy   User      @relation(fields: [createdById], references: [id])
-  expiresAt   DateTime
-  usedAt      DateTime?
-  revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  id             String        @id @default(cuid())
+  email          String
+  role           Role
+  gminaId        String?
+  gmina          Gmina?        @relation(fields: [gminaId], references: [id])
+  // A COORDINATOR's invite is now scoped to their own organization (not just
+  // their gmina) — see POST /api/admin/invites. ADMIN-issued invites can
+  // leave this unset (organization is assigned later, same as it already is
+  // for admin-created users via POST /api/admin/users).
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  tokenHash      String        @unique
+  createdById    String
+  createdBy      User          @relation(fields: [createdById], references: [id])
+  expiresAt      DateTime
+  usedAt         DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime      @default(now())
 
   @@index([email])
 }
