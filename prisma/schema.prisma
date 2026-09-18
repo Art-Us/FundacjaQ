@@ -281,6 +281,7 @@ model Organization {
   users            User[]
   alerts           Alert[]
   resources        Resource[]
+  invites          InviteToken[]
   allocationsGiven ResourceAllocation[] @relation("Donor")
 
   // Scoped to (name, gmina) rather than a global unique name — the same
