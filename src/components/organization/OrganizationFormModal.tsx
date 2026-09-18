@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useBackdropDismiss } from '@/components/ui/useBackdropDismiss';
 import { GminaSelect, type GminaOption, type GminaSelectValue } from '@/components/gmina/GminaSelect';
 
 const inputClasses =
@@ -62,6 +63,7 @@ export function OrganizationFormModal({
   const [contactEmail, setContactEmail] = useState(organization?.contactEmail ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const backdropHandlers = useBackdropDismiss(onClose);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -146,9 +148,7 @@ export function OrganizationFormModal({
       aria-modal="true"
       aria-labelledby="organization-form-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      {...backdropHandlers}
     >
       <div className="w-full max-w-lg max-h-[90vh] rounded-3xl bg-white shadow-xl overflow-hidden flex flex-col">
         <div className="modal-scrollbar min-h-0 overflow-y-auto p-6 space-y-5">

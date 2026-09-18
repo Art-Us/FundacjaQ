@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { X, LoaderCircle, MapPin, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useBackdropDismiss } from '@/components/ui/useBackdropDismiss';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import { bareCounty, bareState } from '@/lib/geocode';
 
@@ -55,6 +56,7 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
   const [geo, setGeo] = useState<GeoState>({ status: 'idle' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const backdropHandlers = useBackdropDismiss(onClose);
 
   // Jak w AlertForm: jeden licznik unieważnia odpowiedzi z poprzednich kliknięć,
   // gdyby użytkownik kliknął w mapę kilka razy zanim pierwsza odpowiedź wróci.
@@ -163,9 +165,7 @@ export function GminaFormModal({ mode, gmina, onClose, onSuccess }: GminaFormMod
       aria-modal="true"
       aria-labelledby="gmina-form-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      {...backdropHandlers}
     >
       <div className="w-full max-w-lg max-h-[90vh] rounded-3xl bg-white shadow-xl overflow-hidden flex flex-col">
         <div className="modal-scrollbar min-h-0 overflow-y-auto p-6 space-y-5">

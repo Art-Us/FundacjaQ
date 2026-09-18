@@ -297,6 +297,13 @@ describe('canRevert', () => {
   it('is true for an un-reverted revertible action', () => {
     expect(canRevert({ action: 'USER_UPDATE', revertedAt: null })).toBe(true);
   });
+
+  // Regression coverage: a reactivate mints a brand-new raw token that, like
+  // a password, is never stored — only its hash — so there is nothing a
+  // revert could restore. Same reasoning as USER_CREATE/USER_DELETE above.
+  it('is false for INVITE_REACTIVATE (a fresh, unrecoverable raw token, like a password)', () => {
+    expect(canRevert({ action: 'INVITE_REACTIVATE', revertedAt: null })).toBe(false);
+  });
 });
 
 describe('revertAuditLog — dispatch guards', () => {
@@ -1506,6 +1513,49 @@ describe('revertAuditLog — INVITE_TOKEN (single step)', () => {
     const result = await revertAuditLog('log-1', ACTOR);
 
     expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+    expect(prisma.inviteToken.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage: reverting INVITE_REACTIVATE directly must be
+  // refused up front by the same dispatch guard USER_CREATE hits — it never
+  // reaches revertInvite (or any DB write) at all.
+  it('refuses to revert an INVITE_REACTIVATE entry (no raw token to restore)', async () => {
+    const log = baseLog({ action: 'INVITE_REACTIVATE', entityType: 'INVITE_TOKEN', entityId: 'invite-1' });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
+    expect(prisma.inviteToken.findUnique).not.toHaveBeenCalled();
+    expect(prisma.inviteToken.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage for the cascade "blocker" path (previously untested
+  // for ANY entity, not just invites): an INVITE_REACTIVATE sitting on top of
+  // an older, otherwise-revertible INVITE_CREATE must block reverting that
+  // older entry too — the cascade can't skip over a step it can't undo.
+  it('blocks reverting an older INVITE_CREATE when a newer INVITE_REACTIVATE sits on top of it', async () => {
+    const createLog = baseLog({
+      id: 'log-1',
+      seq: 1,
+      action: 'INVITE_CREATE',
+      entityType: 'INVITE_TOKEN',
+      entityId: 'invite-1',
+    });
+    const reactivateLog = baseLog({
+      id: 'log-2',
+      seq: 2,
+      action: 'INVITE_REACTIVATE',
+      entityType: 'INVITE_TOKEN',
+      entityId: 'invite-1',
+    });
+    prisma.auditLog.findUnique.mockResolvedValue(createLog as any);
+    mockChain([createLog, reactivateLog]);
+
+    const result = await revertAuditLog('log-1', ACTOR);
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
+    expect(prisma.inviteToken.findUnique).not.toHaveBeenCalled();
     expect(prisma.inviteToken.updateMany).not.toHaveBeenCalled();
   });
 });
