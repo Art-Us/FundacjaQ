@@ -1,16 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import { AlertTriangle, Undo2 } from 'lucide-react';
 import { ALERT_STATUS_LABELS } from '@/lib/alertLabels';
-import { getAllocationStatusInfo } from '@/lib/resourceLabels';
 import type { AllocationInboxRow } from '@/lib/allocationInbox';
+import AllocationStatusBadge from '@/components/resources/AllocationStatusBadge';
+import ReturnResourcesModal from '@/components/resources/ReturnResourcesModal';
 
 interface AllocationInboxPanelProps {
   recipient: AllocationInboxRow[];
   donor: AllocationInboxRow[];
-  // Крок 47 (Фаза 7) wires this to actually open ReturnResourcesModal — until
-  // then the button is visually present but inert, the same "button now,
-  // behavior later" staging AlertNeedsBlock uses (Крок 40 → 46).
+  // Optional extra hook for a parent that wants to react to a return click
+  // itself — the panel opens ReturnResourcesModal (Крок 47) regardless.
   onReturnClick?: (allocation: AllocationInboxRow) => void;
 }
 
@@ -24,6 +25,8 @@ function joinReturnMessages(allocation: AllocationInboxRow): string | null {
 // purely as information, no action. Both sections come straight from
 // fetchAllocationInbox (lib/allocationInbox.ts, Крок 27/31).
 export default function AllocationInboxPanel({ recipient, donor, onReturnClick }: AllocationInboxPanelProps) {
+  const [returning, setReturning] = useState<AllocationInboxRow | null>(null);
+
   if (recipient.length === 0 && donor.length === 0) {
     return null;
   }
@@ -53,7 +56,10 @@ export default function AllocationInboxPanel({ recipient, donor, onReturnClick }
                   </div>
                   <button
                     type="button"
-                    onClick={() => onReturnClick?.(allocation)}
+                    onClick={() => {
+                      onReturnClick?.(allocation);
+                      setReturning(allocation);
+                    }}
                     className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition"
                   >
                     <Undo2 className="h-3.5 w-3.5" />
@@ -71,7 +77,6 @@ export default function AllocationInboxPanel({ recipient, donor, onReturnClick }
           <h3 className="text-sm font-bold text-slate-800">Twoje zasoby w trakcie</h3>
           <ul className="divide-y divide-slate-100">
             {donor.map((allocation) => {
-              const statusInfo = getAllocationStatusInfo(allocation.status);
               const alertPhrase =
                 allocation.alert.status === 'CANCELLED'
                   ? 'Alert odwołany — oczekuje na zwrot.'
@@ -84,16 +89,27 @@ export default function AllocationInboxPanel({ recipient, donor, onReturnClick }
                       {allocation.alert.title} · {alertPhrase}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 text-[10px] font-bold uppercase px-2 py-1 rounded-full border ${statusInfo.badgeClass}`}
-                  >
-                    {statusInfo.label}
-                  </span>
+                  <AllocationStatusBadge status={allocation.status} className="shrink-0" />
                 </li>
               );
             })}
           </ul>
         </div>
+      )}
+
+      {returning && (
+        <ReturnResourcesModal
+          allocationId={returning.id}
+          itemName={returning.itemName}
+          unit={returning.unit}
+          quantity={returning.quantity}
+          quantityReturned={returning.quantityReturned}
+          quantityNotReturnable={returning.quantityNotReturnable}
+          status={returning.status}
+          alertTitle={returning.alert.title}
+          onClose={() => setReturning(null)}
+          onReturned={() => setReturning(null)}
+        />
       )}
     </div>
   );

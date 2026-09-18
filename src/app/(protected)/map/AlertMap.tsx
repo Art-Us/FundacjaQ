@@ -15,7 +15,7 @@ import {
 } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { createPinIcon, createEventPinIcon } from './pinIcon';
-import { MapPin, Building, Calendar, Layers, Flame } from 'lucide-react';
+import { MapPin, Building, Calendar, Layers, Flame, ArrowRight } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import './leaflet-theme.css';
 
@@ -37,6 +37,16 @@ export interface MapAlert {
   createdAt: Date | string;
   gmina: { name: string };
   author: { name: string | null; organization: { name: string } | null } | null;
+  // "Zapotrzebowanie na zasoby" (R11) shown right in the marker popup — same
+  // data AlertNeedsBlock renders on the full card, just condensed.
+  needs: Array<{
+    id: string;
+    title: string;
+    quantityNeeded: number;
+    quantityFulfilled: number;
+    unit: string;
+    urgency: string;
+  }>;
 }
 
 interface AlertMapProps {
@@ -48,6 +58,9 @@ interface AlertMapProps {
   mode: MapDisplayMode;
   onModeChange: (mode: MapDisplayMode) => void;
   kind: AlertKindValue;
+  // Opens the matching card in the list below the map (AlertsMapView) —
+  // the reverse direction of "Pokaż na mapie" on that card.
+  onGoToCard?: (alertId: string) => void;
 }
 
 function markerColor(alert: MapAlert, mode: MapDisplayMode, kind: AlertKindValue) {
@@ -127,6 +140,7 @@ export default function AlertMap({
   mode,
   onModeChange,
   kind,
+  onGoToCard,
 }: AlertMapProps) {
   const isEventView = kind === 'EVENT';
   // W widoku zdarzeń legenda zawsze pokazuje typy wydarzeń; w widoku alertów
@@ -246,6 +260,45 @@ export default function AlertMap({
                       <time>{formatDate(alert.createdAt)}</time>
                     </div>
                   </div>
+
+                  {alert.needs.length > 0 && (
+                    <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
+                          Zapotrzebowanie na zasoby
+                        </p>
+                        {alert.needs.some((n) => n.urgency === 'PILNE' || n.urgency === 'KRYTYCZNY') && (
+                          <span className="shrink-0 text-[10px] font-extrabold uppercase text-red-600">
+                            Pilne żądania
+                          </span>
+                        )}
+                      </div>
+                      <ul className="space-y-1">
+                        {alert.needs.map((need) => (
+                          <li key={need.id} className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="flex items-center gap-1.5 min-w-0 text-slate-700">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                              <span className="truncate">{need.title}</span>
+                            </span>
+                            <span className="shrink-0 font-bold text-slate-900">
+                              {need.quantityFulfilled} / {need.quantityNeeded} {need.unit}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {onGoToCard && (
+                    <button
+                      type="button"
+                      onClick={() => onGoToCard(alert.id)}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold py-1.5 transition"
+                    >
+                      Przejdź do kartki zdarzenia
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </Popup>
             </Marker>

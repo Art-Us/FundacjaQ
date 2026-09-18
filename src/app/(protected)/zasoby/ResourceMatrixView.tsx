@@ -298,6 +298,7 @@ export default function ResourceMatrixView({ initialTiles, initialCategories, or
         <ResourceMatrixCellDrawer
           category={selectedCell.category}
           horizon={selectedCell.horizon}
+          organizationId={selectedOrganizationId}
           onClose={() => setSelectedCell(null)}
         />
       )}

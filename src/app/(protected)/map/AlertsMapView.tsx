@@ -18,10 +18,13 @@ import {
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import type { Role } from '@/types';
+import { canManageAlert as canManageAlertPolicy, isAlertOwnerOrg } from '@/lib/resourceAuthz';
+import { availableCategoryIds, countMatchingNeeds } from '@/lib/resourceMatching';
 import type { MapDisplayMode } from './AlertMap';
 import AlertForm from './AlertForm';
 import AlertActions from './AlertActions';
 import AlertEditModal from './AlertEditModal';
+import AlertNeedsBlock from './AlertNeedsBlock';
 import {
   Radio,
   Building,
@@ -39,6 +42,7 @@ import {
   Pencil,
   Siren,
   SlidersHorizontal,
+  PackageCheck,
 } from 'lucide-react';
 
 const AlertMap = dynamic(() => import('./AlertMap'), {
@@ -51,7 +55,20 @@ const AlertMap = dynamic(() => import('./AlertMap'), {
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
-const alertInclude = { gmina: true, author: { include: { organization: true } } } satisfies Prisma.AlertInclude;
+const alertInclude = {
+  gmina: true,
+  author: { include: { organization: true } },
+  needs: {
+    include: {
+      allocations: {
+        include: {
+          donorOrg: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.AlertInclude;
 type AlertWithGmina = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
 
 type Timeframe = '24h' | '48h' | '72h' | 'tydzien' | 'miesiac' | 'rok' | 'wszystkie' | 'custom';
@@ -170,6 +187,12 @@ interface AlertsMapViewProps {
   canManageAlerts: boolean;
   currentUserGminaId: string | null;
   currentUserRole: Role;
+  currentUserId: string;
+  currentUserOrganizationId: string | null;
+  // Own organization's resources — feeds the "Masz zasoby (N)" badge (R11,
+  // Крок 43/46) via lib/resourceMatching.ts. Not consumed yet: the badge
+  // itself is wired into the card markup in Крок 46, alongside <AlertNeedsBlock>.
+  myResources: { categoryId: string; quantity: number; reservedQuantity: number }[];
 }
 
 export default function AlertsMapView({
@@ -178,6 +201,9 @@ export default function AlertsMapView({
   canManageAlerts,
   currentUserGminaId,
   currentUserRole,
+  currentUserId,
+  currentUserOrganizationId,
+  myResources,
 }: AlertsMapViewProps) {
   // "Alerty" jest widokiem domyślnym i ma pierwszeństwo przy wejściu na stronę —
   // zdarzenia codzienne są dodatkiem, nie mogą przesłonić komunikatów kryzysowych.
@@ -335,11 +361,52 @@ export default function AlertsMapView({
     setTimeout(() => mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
   }
 
+  // Odwrotny kierunek do handleFocusOnMap powyżej — z popupu na pinezce
+  // ("Przejdź do kartki zdarzenia") do odpowiadającej karty na liście
+  // Aktywne/Archiwum. Alert może być poza aktualnymi filtrami tej listy (np.
+  // szukanie/kategoria/organizacja), więc resetujemy te, które mogłyby go
+  // ukryć, zanim spróbujemy przewinąć do jego karty.
+  function handleGoToCard(alertId: string) {
+    const alert = kindAlerts.find((a) => a.id === alertId);
+    if (!alert) return;
+
+    const isArchived = alert.status === 'RESOLVED' || alert.status === 'CANCELLED';
+    if (isArchived) {
+      setArchiveSearch('');
+      setArchiveTimeframe('wszystkie');
+      setArchiveCategoryFilter('all');
+      setArchiveOrgFilter('all');
+    } else {
+      setActiveSearch('');
+      setActiveTimeframe('wszystkie');
+      setActiveCategoryFilter('all');
+      setActiveOrgFilter('all');
+    }
+
+    setTimeout(
+      () => document.getElementById(`alert-card-${alertId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      80
+    );
+  }
+
   function canManageAlert(alert: AlertWithGmina): boolean {
     if (!canManageAlerts) return false;
-    if (currentUserRole === 'ADMIN') return true;
-    return alert.gminaId === currentUserGminaId;
+    return canManageAlertPolicy(alert, {
+      role: currentUserRole,
+      organizationId: currentUserOrganizationId,
+    });
   }
+
+  // Owner org (or ADMIN) only — gates "Edytuj zapotrzebowanie" (Крок 42), the
+  // same rule PATCH/DELETE /api/needs/[id] (Крок 22) enforces server-side.
+  function canManageNeedsForAlert(alert: AlertWithGmina): boolean {
+    if (!canManageAlerts) return false;
+    if (currentUserRole === 'ADMIN') return true;
+    return isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
+  }
+
+  const ownedCategoryIds = useMemo(() => availableCategoryIds(myResources), [myResources]);
+  const canAllocateResources = canManageAlerts && !!currentUserOrganizationId;
 
   const canDelete = currentUserRole === 'ADMIN';
   const alertCount = useMemo(
@@ -580,6 +647,7 @@ export default function AlertsMapView({
             mode={mapMode}
             onModeChange={setMapMode}
             kind={view}
+            onGoToCard={handleGoToCard}
           />
         </section>
       )}
@@ -781,11 +849,17 @@ export default function AlertsMapView({
               const liveDurationMs = Date.now() - alert.createdAt.getTime();
 
               const eventColor = CATEGORY_MARKER_COLORS[alert.category] ?? CATEGORY_MARKER_COLORS.OTHER_EVENT;
+              const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
+              const isOwnerOrg = isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
+              const openAllocationCount = alert.needs
+                .flatMap((need) => need.allocations)
+                .filter((a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED').length;
 
               return (
                 <div
                   key={alert.id}
-                  className={`rounded-3xl bg-white p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 ${
+                  id={`alert-card-${alert.id}`}
+                  className={`rounded-3xl bg-white p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 scroll-mt-6 ${
                     isEventView
                       ? 'border-slate-200 hover:border-fuchsia-300'
                       : 'border-red-200 hover:border-red-300'
@@ -829,6 +903,13 @@ export default function AlertsMapView({
                             {ALERT_STATUS_LABELS.IN_PROGRESS}
                           </span>
                         )}
+
+                        {matchingNeedsCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+                            <PackageCheck className="h-3 w-3" />
+                            Masz zasoby ({matchingNeedsCount})
+                          </span>
+                        )}
                       </div>
 
                       <button
@@ -864,6 +945,31 @@ export default function AlertsMapView({
                         </span>
                       </div>
                     </div>
+
+                    <AlertNeedsBlock
+                      alertId={alert.id}
+                      alertLocationLabel={alert.location || alert.gmina.name}
+                      alertDescription={alert.description}
+                      needs={alert.needs.map((need) => ({
+                        ...need,
+                        allocations: need.allocations.map((allocation) => ({
+                          id: allocation.id,
+                          quantity: allocation.quantity,
+                          unit: allocation.unit,
+                          status: allocation.status,
+                          donorOrgId: allocation.donorOrgId,
+                          donorOrgName: allocation.donorOrg.name,
+                          createdByName: allocation.createdBy?.name ?? null,
+                          createdAt: allocation.createdAt,
+                        })),
+                      }))}
+                      canManageNeeds={canManageNeedsForAlert(alert)}
+                      canAllocate={canAllocateResources}
+                      currentUserRole={currentUserRole}
+                      currentUserOrganizationId={currentUserOrganizationId}
+                      alertOrganizationId={alert.organizationId}
+                      ownedCategoryIds={ownedCategoryIds}
+                    />
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -890,10 +996,13 @@ export default function AlertsMapView({
 
                     <AlertActions
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
                       canDelete={canDelete}
+                      isOwnerOrg={isOwnerOrg}
+                      openAllocationCount={openAllocationCount}
                     />
                   </div>
                 </div>
@@ -1042,11 +1151,17 @@ export default function AlertsMapView({
               const severityInfo = getSeverityBadgeInfo(alert.severity);
               const durationMs = alert.updatedAt.getTime() - alert.createdAt.getTime();
               const isResolved = alert.status === 'RESOLVED';
+              const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
+              const isOwnerOrg = isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
+              const openAllocationCount = alert.needs
+                .flatMap((need) => need.allocations)
+                .filter((a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED').length;
 
               return (
                 <div
                   key={alert.id}
-                  className="rounded-3xl bg-white p-6 border border-slate-200 hover:border-slate-300 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between"
+                  id={`alert-card-${alert.id}`}
+                  className="rounded-3xl bg-white p-6 border border-slate-200 hover:border-slate-300 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between scroll-mt-6"
                 >
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1063,6 +1178,13 @@ export default function AlertsMapView({
                         <span className="rounded-xl bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 font-bold uppercase tracking-wider">
                           {ALERT_CATEGORY_LABELS[alert.category] ?? alert.category}
                         </span>
+
+                        {matchingNeedsCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+                            <PackageCheck className="h-3 w-3" />
+                            Masz zasoby ({matchingNeedsCount})
+                          </span>
+                        )}
                       </div>
 
                       <span
@@ -1106,6 +1228,31 @@ export default function AlertsMapView({
                         </span>
                       </div>
                     </div>
+
+                    <AlertNeedsBlock
+                      alertId={alert.id}
+                      alertLocationLabel={alert.location || alert.gmina.name}
+                      alertDescription={alert.description}
+                      needs={alert.needs.map((need) => ({
+                        ...need,
+                        allocations: need.allocations.map((allocation) => ({
+                          id: allocation.id,
+                          quantity: allocation.quantity,
+                          unit: allocation.unit,
+                          status: allocation.status,
+                          donorOrgId: allocation.donorOrgId,
+                          donorOrgName: allocation.donorOrg.name,
+                          createdByName: allocation.createdBy?.name ?? null,
+                          createdAt: allocation.createdAt,
+                        })),
+                      }))}
+                      canManageNeeds={canManageNeedsForAlert(alert)}
+                      canAllocate={canAllocateResources}
+                      currentUserRole={currentUserRole}
+                      currentUserOrganizationId={currentUserOrganizationId}
+                      alertOrganizationId={alert.organizationId}
+                      ownedCategoryIds={ownedCategoryIds}
+                    />
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
@@ -1132,10 +1279,13 @@ export default function AlertsMapView({
 
                     <AlertActions
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
                       canDelete={canDelete}
+                      isOwnerOrg={isOwnerOrg}
+                      openAllocationCount={openAllocationCount}
                     />
                   </div>
                 </div>

@@ -164,33 +164,21 @@ describe('isAllocationRecipient', () => {
 });
 
 describe('canManageAlert', () => {
-  const alert = { organizationId: 'org-owner', gminaId: 'gmina-1' };
+  const alert = { organizationId: 'org-owner' };
 
-  it('is always true for ADMIN, regardless of organization or gmina', () => {
-    expect(canManageAlert(alert, { role: 'ADMIN', gminaId: null, organizationId: null })).toBe(true);
+  it('is always true for ADMIN, regardless of organization', () => {
+    expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null })).toBe(true);
   });
 
-  it('is true for a COORDINATOR whose organization owns the alert, even in a different gmina', () => {
-    expect(
-      canManageAlert(alert, { role: 'COORDINATOR', gminaId: 'gmina-2', organizationId: 'org-owner' })
-    ).toBe(true);
+  it('is true for a COORDINATOR whose organization owns the alert', () => {
+    expect(canManageAlert(alert, { role: 'COORDINATOR', organizationId: 'org-owner' })).toBe(true);
   });
 
-  it('is true for a COORDINATOR in the same gmina, even from a different organization', () => {
-    expect(
-      canManageAlert(alert, { role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: 'org-other' })
-    ).toBe(true);
-  });
-
-  it('is false for a COORDINATOR from neither the owning organization nor the same gmina', () => {
-    expect(
-      canManageAlert(alert, { role: 'COORDINATOR', gminaId: 'gmina-2', organizationId: 'org-other' })
-    ).toBe(false);
+  it('is false for a COORDINATOR from a different organization, even in the same gmina', () => {
+    expect(canManageAlert(alert, { role: 'COORDINATOR', organizationId: 'org-other' })).toBe(false);
   });
 
   it('is never true for VOLUNTEER, even when their organization owns the alert', () => {
-    expect(
-      canManageAlert(alert, { role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-owner' })
-    ).toBe(false);
+    expect(canManageAlert(alert, { role: 'VOLUNTEER', organizationId: 'org-owner' })).toBe(false);
   });
 });

@@ -9,6 +9,12 @@ import { MATRIX_HORIZONS, type MatrixCategoryRow, type MatrixHorizon } from '@/l
 interface ResourceMatrixCellDrawerProps {
   category: MatrixCategoryRow;
   horizon: MatrixHorizon;
+  // The "Posiadacz" filter currently applied to the table (empty = wszystkie
+  // organizacje) — cell.available/cell.quantity above already reflect it
+  // (ResourceMatrixView refetches the whole matrix on change), so the
+  // per-organization breakdown below must query the same scope, or its list
+  // would silently include organizations the header total excludes.
+  organizationId: string;
   onClose: () => void;
 }
 
@@ -27,6 +33,7 @@ interface Declaration {
   organizationName: string;
   description: string | null;
   quantity: number;
+  available: number;
   unit: string;
   horizon: MatrixHorizon;
 }
@@ -43,7 +50,7 @@ interface Declaration {
 // description stay attributable — an organization with two separate
 // declarations at different horizons would otherwise be impossible to
 // summarize into one honest "Gotowość" figure.
-export default function ResourceMatrixCellDrawer({ category, horizon, onClose }: ResourceMatrixCellDrawerProps) {
+export default function ResourceMatrixCellDrawer({ category, horizon, organizationId, onClose }: ResourceMatrixCellDrawerProps) {
   const [rows, setRows] = useState<ResourceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +59,10 @@ export default function ResourceMatrixCellDrawer({ category, horizon, onClose }:
     setRows(null);
     setError(null);
 
-    fetch(`/api/resources?categoryId=${encodeURIComponent(category.categoryId)}`)
+    const params = new URLSearchParams({ categoryId: category.categoryId });
+    if (organizationId) params.set('organizationId', organizationId);
+
+    fetch(`/api/resources?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('request failed'))))
       .then((data) => {
         if (!cancelled) setRows(data.resources ?? []);
@@ -64,7 +74,7 @@ export default function ResourceMatrixCellDrawer({ category, horizon, onClose }:
     return () => {
       cancelled = true;
     };
-  }, [category.categoryId]);
+  }, [category.categoryId, organizationId]);
 
   const uptoIndex = MATRIX_HORIZONS.indexOf(horizon);
   const declarations: Declaration[] = (rows ?? [])
@@ -77,6 +87,11 @@ export default function ResourceMatrixCellDrawer({ category, horizon, onClose }:
       organizationName: row.organization.name,
       description: row.description,
       quantity: row.quantity,
+      // Same "available = quantity - reservedQuantity" the matrix table and
+      // its header total above use — showing raw `quantity` here would make
+      // this list sum to more than "Łączna dostępna ilość" the moment any
+      // declaration has an active allocation reserved against it.
+      available: row.quantity - row.reservedQuantity,
       unit: row.unit,
       horizon: row.horizon,
     }))
@@ -154,7 +169,8 @@ export default function ResourceMatrixCellDrawer({ category, horizon, onClose }:
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-bold text-slate-900">
-                    {row.quantity} {row.unit}
+                    {row.available}
+                    <span className="font-normal text-slate-400"> / {row.quantity}</span> {row.unit}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Gotowość: {getHorizonShortLabel(row.horizon)}</p>
                 </div>

@@ -284,6 +284,7 @@ model Organization {
   resources        Resource[]
   invites          InviteToken[]
   allocationsGiven ResourceAllocation[] @relation("Donor")
+  invites          InviteToken[]
 
   // Scoped to (name, gmina) rather than a global unique name — the same
   // organization name plausibly recurs across different gminas (e.g. a local

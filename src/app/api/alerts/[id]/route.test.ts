@@ -57,8 +57,8 @@ describe('PATCH /api/alerts/[id]', () => {
     expect(res.status).toBe(404);
   });
 
-  it('rejects a COORDINATOR from a different gmina', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'other-gmina' });
+  it('rejects a COORDINATOR from a different organization, even in the same gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'other-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
 
     const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
@@ -68,7 +68,7 @@ describe('PATCH /api/alerts/[id]', () => {
   });
 
   it('rejects an empty body', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1' });
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
 
     const res = await PATCH(makeRequest({}), ctx);

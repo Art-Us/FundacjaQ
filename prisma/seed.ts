@@ -245,16 +245,86 @@ async function seedZasoby(
   await prisma.resource.createMany({ data: zasoby });
 }
 
+// Kategorie ResourceCategory używane przy losowaniu 1-3 potrzeb (AlertNeed) na
+// każdy alert — z ludzkimi tytułami/jednostkami dopasowanymi do kategorii,
+// żeby "Zapotrzebowanie na zasoby" (R11) wyglądało realistycznie, a nie jak
+// gołe nazwy kategorii.
+const NEED_CATEGORY_NAMES = [
+  'Woda pitna',
+  'Żywność',
+  'Koce i odzież',
+  'Sprzęt medyczny',
+  'Agregaty prądotwórcze',
+  'Ludzie / Wolontariusze',
+  'Środki czystości i higieny',
+  'Materiały budowlane i naprawcze',
+  'Sprzęt ratownictwa technicznego',
+  'Zbiorniki i cysterny na wodę',
+] as const;
+
+const NEED_TITLE_BY_CATEGORY: Record<(typeof NEED_CATEGORY_NAMES)[number], string> = {
+  'Woda pitna': 'Woda pitna dla poszkodowanych',
+  Żywność: 'Paczki żywnościowe dla rodzin',
+  'Koce i odzież': 'Koce i odzież na zimę',
+  'Sprzęt medyczny': 'Zestawy pierwszej pomocy',
+  'Agregaty prądotwórcze': 'Agregat prądotwórczy do zasilania',
+  'Ludzie / Wolontariusze': 'Wolontariusze do pomocy na miejscu',
+  'Środki czystości i higieny': 'Środki czystości i higieny osobistej',
+  'Materiały budowlane i naprawcze': 'Materiały do zabezpieczenia budynków',
+  'Sprzęt ratownictwa technicznego': 'Sprzęt do usuwania skutków zdarzenia',
+  'Zbiorniki i cysterny na wodę': 'Cysterna z wodą pitną',
+};
+
+const NEED_UNIT_BY_CATEGORY: Record<(typeof NEED_CATEGORY_NAMES)[number], string> = {
+  'Woda pitna': 'l',
+  Żywność: 'porcje',
+  'Koce i odzież': 'szt',
+  'Sprzęt medyczny': 'szt',
+  'Agregaty prądotwórcze': 'szt',
+  'Ludzie / Wolontariusze': 'osób',
+  'Środki czystości i higieny': 'zestawy',
+  'Materiały budowlane i naprawcze': 'szt',
+  'Sprzęt ratownictwa technicznego': 'szt',
+  'Zbiorniki i cysterny na wodę': 'szt',
+};
+
+const NEED_URGENCIES = ['NORMAL', 'PILNE', 'KRYTYCZNY'] as const;
+
+function needQuantity(categoryName: (typeof NEED_CATEGORY_NAMES)[number], i: number, k: number): number {
+  const base = 1 + ((i * 3 + k * 11) % 20); // 1..20
+  switch (categoryName) {
+    case 'Woda pitna':
+      return base * 25; // litry
+    case 'Żywność':
+      return base * 5; // porcje
+    case 'Zbiorniki i cysterny na wodę':
+      return 1 + (i % 3); // szt
+    case 'Agregaty prądotwórcze':
+      return 1 + (i % 4); // szt
+    case 'Ludzie / Wolontariusze':
+      return 2 + (base % 10); // osób
+    default:
+      return base; // szt
+  }
+}
+
+// Deterministyczne, ale zróżnicowane wybieranie 1-3 kategorii na alert (bez
+// powtórzeń w obrębie jednego alertu — długość NEED_CATEGORY_NAMES to 10, a
+// offsety 0/7/4 są parami różne modulo 10 dla każdego i).
+const NEED_CATEGORY_OFFSETS = [0, 7, 4];
+
 async function seedAlerty(
   gminy: Awaited<ReturnType<typeof seedGminy>>,
-  adminId: string | null,
-  koordynatorId: string | null,
-  organizacje: Awaited<ReturnType<typeof seedOrganizacje>>,
+  kategorie: Awaited<ReturnType<typeof seedKategorie>>,
+  koordynatorzy: Array<{ id: string; organizationId: string | null }>,
 ) {
   const teraz = Date.now();
   const godziny = (h: number) => new Date(teraz + h * 60 * 60 * 1000);
-  const ospId = organizacje['Ochotnicza Straż Pożarna Nowa Dęba'].id;
+  const byName = (name: string) => kategorie.find((k) => k.name === name)!;
 
+  // Do 30 alertów wokół Nowej Dęby i okolicznych sołectw — wszystkie zgłoszone
+  // przez koordynatorów organizacji (nigdy przez admina), więc każdy ma
+  // realną organizationId do wykorzystania przez authz/R1/R6/R11.
   const alerty: Array<{
     title: string;
     description: string;
@@ -263,29 +333,82 @@ async function seedAlerty(
     location: string;
     latitude: number;
     longitude: number;
-    gminaId: string;
-    authorId: string | null;
-    // Mirrors the real backfill rule (organizationId = author's organizationId):
-    // alerts "written by" the site-wide admin have no organization, and only
-    // the ones authored by an org-affiliated user (here: the OSP koordynator)
-    // get one — so ownership-based features have at least some seed data to
-    // exercise against.
-    organizationId: string | null;
     expiresAt: Date;
   }> = [
-    { title: 'Podtopienia posesji przy ul. Rzecznej', description: 'Potok Dębianka wystąpił z koryta po nawalnych opadach deszczu, woda wdarła się na teren kilku posesji prywatnych.', severity: 'CRITICAL', status: 'ACTIVE', location: 'ul. Rzeczna', latitude: 50.4190, longitude: 21.7530, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(48) },
-    { title: 'Awaria sieci wodociągowej – os. Poligon', description: 'Przerwa w dostawie wody pitnej, trwa naprawa magistrali wodociągowej.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'os. Poligon', latitude: 50.4130, longitude: 21.7450, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(20) },
-    { title: 'Zerwany dach hali sportowej', description: 'Silny wiatr uszkodził pokrycie dachowe, teren zabezpieczony przez straż pożarną.', severity: 'HIGH', status: 'ACTIVE', location: 'ul. Sportowa 3', latitude: 50.4205, longitude: 21.7465, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(24) },
-    { title: 'Pożar poszycia leśnego na obrzeżach Poligonu OSPWL', description: 'Pożar traw i poszycia leśnego, jednostki straży pożarnej prowadzą działania gaśnicze na miejscu.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Poligon OSPWL Nowa Dęba', latitude: 50.3980, longitude: 21.7180, gminaId: gminy[0].id, authorId: koordynatorId, organizationId: koordynatorId ? ospId : null, expiresAt: godziny(12) },
-    { title: 'Uszkodzona linia energetyczna – Osiedle Zachodnie', description: 'Zerwana linia napowietrzna po silnym wietrze, wstrzymane dostawy prądu w części gminy.', severity: 'HIGH', status: 'IN_PROGRESS', location: 'Osiedle Zachodnie', latitude: 50.4225, longitude: 21.7395, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(16) },
-    { title: 'Zwalone drzewo na drodze powiatowej', description: 'Droga częściowo zablokowana, utrudniony przejazd w kierunku Rozalina.', severity: 'LOW', status: 'RESOLVED', location: 'Droga powiatowa Rozalin-Jadachy', latitude: 50.4260, longitude: 21.7610, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(-2) },
-    { title: 'Ostrzeżenie IMGW – silny wiatr', description: 'Ostrzeżenie 2. stopnia przed silnym wiatrem do jutra rana, możliwe dalsze uszkodzenia dachów i linii energetycznych.', severity: 'MEDIUM', status: 'ACTIVE', location: 'cała gmina', latitude: 50.4166, longitude: 21.7500, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(18) },
-    { title: 'Ćwiczenia ewakuacyjne szkoły podstawowej', description: 'Planowe ćwiczenia służb ratowniczych, brak realnego zagrożenia.', severity: 'LOW', status: 'CANCELLED', location: 'Szkoła Podstawowa nr 1', latitude: 50.4145, longitude: 21.7545, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(-24) },
-    { title: 'Osunięcie skarpy przy drodze wojewódzkiej', description: 'Częściowe osunięcie skarpy, droga zwężona do jednego pasa ruchu.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'Droga wojewódzka 985', latitude: 50.4090, longitude: 21.7620, gminaId: gminy[0].id, authorId: adminId, organizationId: null, expiresAt: godziny(36) },
+    { title: 'Podtopienia posesji przy ul. Rzecznej', description: 'Potok Dębianka wystąpił z koryta po nawalnych opadach deszczu, woda wdarła się na teren kilku posesji prywatnych.', severity: 'CRITICAL', status: 'ACTIVE', location: 'ul. Rzeczna', latitude: 50.4190, longitude: 21.7530, expiresAt: godziny(48) },
+    { title: 'Awaria sieci wodociągowej – os. Poligon', description: 'Przerwa w dostawie wody pitnej, trwa naprawa magistrali wodociągowej.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'os. Poligon', latitude: 50.4130, longitude: 21.7450, expiresAt: godziny(20) },
+    { title: 'Zerwany dach hali sportowej', description: 'Silny wiatr uszkodził pokrycie dachowe, teren zabezpieczony przez straż pożarną.', severity: 'HIGH', status: 'ACTIVE', location: 'ul. Sportowa 3', latitude: 50.4205, longitude: 21.7465, expiresAt: godziny(24) },
+    { title: 'Pożar poszycia leśnego na obrzeżach Poligonu OSPWL', description: 'Pożar traw i poszycia leśnego, jednostki straży pożarnej prowadzą działania gaśnicze na miejscu.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Poligon OSPWL Nowa Dęba', latitude: 50.3980, longitude: 21.7180, expiresAt: godziny(12) },
+    { title: 'Uszkodzona linia energetyczna – Osiedle Zachodnie', description: 'Zerwana linia napowietrzna po silnym wietrze, wstrzymane dostawy prądu w części gminy.', severity: 'HIGH', status: 'IN_PROGRESS', location: 'Osiedle Zachodnie', latitude: 50.4225, longitude: 21.7395, expiresAt: godziny(16) },
+    { title: 'Zwalone drzewo na drodze powiatowej', description: 'Droga częściowo zablokowana, utrudniony przejazd w kierunku Rozalina.', severity: 'LOW', status: 'RESOLVED', location: 'Droga powiatowa Rozalin-Jadachy', latitude: 50.4260, longitude: 21.7610, expiresAt: godziny(-2) },
+    { title: 'Ostrzeżenie IMGW – silny wiatr', description: 'Ostrzeżenie 2. stopnia przed silnym wiatrem do jutra rana, możliwe dalsze uszkodzenia dachów i linii energetycznych.', severity: 'MEDIUM', status: 'ACTIVE', location: 'cała gmina', latitude: 50.4166, longitude: 21.7500, expiresAt: godziny(18) },
+    { title: 'Ćwiczenia ewakuacyjne szkoły podstawowej', description: 'Planowe ćwiczenia służb ratowniczych, brak realnego zagrożenia.', severity: 'LOW', status: 'CANCELLED', location: 'Szkoła Podstawowa nr 1', latitude: 50.4145, longitude: 21.7545, expiresAt: godziny(-24) },
+    { title: 'Osunięcie skarpy przy drodze wojewódzkiej', description: 'Częściowe osunięcie skarpy, droga zwężona do jednego pasa ruchu.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'Droga wojewódzka 985', latitude: 50.4090, longitude: 21.7620, expiresAt: godziny(36) },
+    { title: 'Podtopienie gospodarstw rolnych – Cygany', description: 'Woda z okolicznych rowów melioracyjnych zalała pola i zabudowania gospodarcze w sołectwie Cygany.', severity: 'HIGH', status: 'ACTIVE', location: 'Sołectwo Cygany', latitude: 50.3860, longitude: 21.7460, expiresAt: godziny(30) },
+    { title: 'Wylew rzeki Wisły – Chmielów', description: 'Wysoki stan wody spowodował zalanie terenów nadrzecznych w Chmielowie, ewakuowano kilka gospodarstw.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Chmielów, ul. Nadwiślańska', latitude: 50.4510, longitude: 21.6890, expiresAt: godziny(60) },
+    { title: 'Pożar stodoły – Alfredówka', description: 'Pożar zabudowań gospodarczych, ogień zagraża sąsiednim budynkom.', severity: 'HIGH', status: 'ACTIVE', location: 'Alfredówka', latitude: 50.4330, longitude: 21.7720, expiresAt: godziny(10) },
+    { title: 'Awaria transformatora – Tarnowska Wola', description: 'Przerwa w dostawie prądu dla części miejscowości, trwa naprawa stacji transformatorowej.', severity: 'MEDIUM', status: 'IN_PROGRESS', location: 'Tarnowska Wola', latitude: 50.4680, longitude: 21.7010, expiresAt: godziny(14) },
+    { title: 'Zerwany most na potoku – Poręby Dębskie', description: 'Wezbrana woda uszkodziła konstrukcję mostu, wstrzymano ruch pojazdów.', severity: 'HIGH', status: 'ACTIVE', location: 'Poręby Dębskie', latitude: 50.4400, longitude: 21.7900, expiresAt: godziny(40) },
+    { title: 'Uszkodzona kamienica po nawałnicy – ul. Kościuszki', description: 'Silny wiatr zerwał część elewacji budynku wielorodzinnego, konieczne zabezpieczenie terenu.', severity: 'MEDIUM', status: 'ACTIVE', location: 'ul. Kościuszki', latitude: 50.4180, longitude: 21.7480, expiresAt: godziny(22) },
+    { title: 'Zalanie piwnic po ulewie – Rynek', description: 'Intensywne opady spowodowały zalanie piwnic budynków przy Rynku.', severity: 'MEDIUM', status: 'ACTIVE', location: 'Rynek Nowa Dęba', latitude: 50.4171, longitude: 21.7511, expiresAt: godziny(15) },
+    { title: 'Zerwana trakcja kolejowa – Dworzec PKP', description: 'Uszkodzenie sieci trakcyjnej wstrzymało ruch pociągów przez Nową Dębę.', severity: 'HIGH', status: 'IN_PROGRESS', location: 'Dworzec PKP Nowa Dęba', latitude: 50.4102, longitude: 21.7562, expiresAt: godziny(9) },
+    { title: 'Pożar lasu komunalnego – Osiedle Podleśne', description: 'Pożar lasu w pobliżu zabudowań mieszkalnych, prowadzone działania gaśnicze z powietrza i ziemi.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Osiedle Podleśne', latitude: 50.4040, longitude: 21.7290, expiresAt: godziny(8) },
+    { title: 'Powalone drzewa blokujące dojazd – ul. Leśna', description: 'Kilka powalonych drzew blokuje jedyny dojazd do części osiedla.', severity: 'LOW', status: 'RESOLVED', location: 'ul. Leśna', latitude: 50.4230, longitude: 21.7350, expiresAt: godziny(-6) },
+    { title: 'Awaria zapory ziemnej – Zalew w Chmielowie', description: 'Stwierdzono nieszczelność zapory, istnieje ryzyko zalania terenów poniżej zbiornika.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Zalew w Chmielowie', latitude: 50.4560, longitude: 21.6840, expiresAt: godziny(50) },
+    { title: 'Zalanie ulicy po awarii kanalizacji – ul. Kwiatowa', description: 'Awaria kolektora sanitarnego spowodowała zalanie jezdni i chodników.', severity: 'MEDIUM', status: 'ACTIVE', location: 'ul. Kwiatowa', latitude: 50.4155, longitude: 21.7425, expiresAt: godziny(13) },
+    { title: 'Osunięcie ziemi po ulewnych deszczach – ul. Polna', description: 'Nasiąknięte zbocze osunęło się częściowo na jezdnię, droga zwężona.', severity: 'HIGH', status: 'ACTIVE', location: 'ul. Polna', latitude: 50.4260, longitude: 21.7420, expiresAt: godziny(28) },
+    { title: 'Zwalone ogrodzenie i drzewa – cmentarz komunalny', description: 'Silny wiatr powalił część ogrodzenia i kilka drzew na terenie cmentarza.', severity: 'LOW', status: 'RESOLVED', location: 'Cmentarz komunalny', latitude: 50.4120, longitude: 21.7530, expiresAt: godziny(-10) },
+    { title: 'Awaria ogrzewania w mroźną noc – Przedszkole nr 3', description: 'Awaria kotłowni pozostawiła placówkę bez ogrzewania, konieczne tymczasowe grzejniki.', severity: 'MEDIUM', status: 'ACTIVE', location: 'Przedszkole nr 3', latitude: 50.4165, longitude: 21.7488, expiresAt: godziny(19) },
+    { title: 'Zalanie sali widowiskowej – Dom Kultury', description: 'Nieszczelny dach po ulewie spowodował zalanie sali i sprzętu nagłośnieniowego.', severity: 'LOW', status: 'IN_PROGRESS', location: 'Dom Kultury', latitude: 50.4172, longitude: 21.7469, expiresAt: godziny(11) },
+    { title: 'Uszkodzone trybuny po wichurze – Stadion Miejski', description: 'Silny wiatr zerwał zadaszenie części trybun stadionu.', severity: 'MEDIUM', status: 'ACTIVE', location: 'Stadion Miejski', latitude: 50.4198, longitude: 21.7440, expiresAt: godziny(17) },
+    { title: 'Pożar budynku wielorodzinnego – ul. Krótka', description: 'Pożar w jednym z mieszkań rozprzestrzenił się na klatkę schodową, trwa ewakuacja mieszkańców.', severity: 'CRITICAL', status: 'ACTIVE', location: 'ul. Krótka', latitude: 50.4141, longitude: 21.7502, expiresAt: godziny(6) },
+    { title: 'Zerwana sieć telekomunikacyjna – ul. Wschodnia', description: 'Uszkodzenie linii światłowodowej pozbawiło część mieszkańców łączności internetowej.', severity: 'LOW', status: 'CANCELLED', location: 'ul. Wschodnia', latitude: 50.4210, longitude: 21.7580, expiresAt: godziny(-16) },
+    { title: 'Skażenie ujęcia wody pitnej – Osiedle Poligon II', description: 'Podejrzenie zanieczyszczenia lokalnego ujęcia wody, do odwołania obowiązuje zakaz picia wody z kranu.', severity: 'CRITICAL', status: 'ACTIVE', location: 'Osiedle Poligon II', latitude: 50.4115, longitude: 21.7405, expiresAt: godziny(44) },
+    { title: 'Podtopienie dróg dojazdowych – Jadachy', description: 'Wezbrane rowy przydrożne zalały odcinki dróg gminnych, utrudniony dojazd do sołectwa.', severity: 'HIGH', status: 'ACTIVE', location: 'Jadachy', latitude: 50.4340, longitude: 21.7650, expiresAt: godziny(26) },
   ];
 
   await prisma.alert.deleteMany({ where: { gminaId: { in: gminy.map((g) => g.id) } } });
-  await prisma.alert.createMany({ data: alerty });
+
+  for (let i = 0; i < alerty.length; i++) {
+    const a = alerty[i];
+    const koordynator = koordynatorzy[i % koordynatorzy.length];
+
+    const alert = await prisma.alert.create({
+      data: {
+        title: a.title,
+        description: a.description,
+        severity: a.severity,
+        status: a.status,
+        location: a.location,
+        latitude: a.latitude,
+        longitude: a.longitude,
+        gminaId: gminy[0].id,
+        authorId: koordynator.id,
+        organizationId: koordynator.organizationId,
+        expiresAt: a.expiresAt,
+      },
+    });
+
+    // Każdy alert dostaje 1-3 potrzeby (R11) w różnych kategoriach — wybór
+    // deterministyczny (patrz NEED_CATEGORY_OFFSETS), żeby ponowne odpalenie
+    // seeda dawało tę samą, ale wciąż zróżnicowaną macierz potrzeb.
+    const needCount = (i % 3) + 1;
+    await prisma.alertNeed.createMany({
+      data: Array.from({ length: needCount }, (_, k) => {
+        const categoryName = NEED_CATEGORY_NAMES[(i + NEED_CATEGORY_OFFSETS[k]) % NEED_CATEGORY_NAMES.length];
+        const category = byName(categoryName);
+        return {
+          alertId: alert.id,
+          categoryId: category.id,
+          title: NEED_TITLE_BY_CATEGORY[categoryName],
+          quantityNeeded: needQuantity(categoryName, i, k),
+          unit: NEED_UNIT_BY_CATEGORY[categoryName],
+          urgency: NEED_URGENCIES[(i + k) % NEED_URGENCIES.length],
+          createdById: koordynator.id,
+        };
+      }),
+    });
+  }
 }
 
 // Projekt jest pilotażem dla jednej gminy (Nowa Dęba) — usuwa wszelkie inne
@@ -315,17 +438,28 @@ async function main() {
     return;
   }
 
-  const admin = process.env.ADMIN_EMAIL
-    ? await prisma.user.findUnique({ where: { email: process.env.ADMIN_EMAIL } })
-    : null;
-
   const gminy = await seedGminy();
   const kategorie = await seedKategorie();
   const organizacje = await seedOrganizacje(gminy);
   await seedTestUsers(gminy, organizacje);
-  const koordynator = await prisma.user.findUnique({ where: { email: 'koordynator@example.com' } });
+  // Wszystkie 8 organizacji z własnym koordynatorem (patrz seedTestUsers) —
+  // nowe alerty (seedAlerty) rotują przez nich jako autorów, nigdy przez
+  // admina, żeby każdy alert miał realną organizationId (R6).
+  const koordynatorEmaile = [
+    'koordynator@example.com',
+    'koordynator2@example.com',
+    'koordynator3@example.com',
+    'koordynator4@example.com',
+    'koordynator5@example.com',
+    'koordynator6@example.com',
+    'koordynator7@example.com',
+    'koordynator8@example.com',
+  ];
+  const koordynatorzy = await Promise.all(
+    koordynatorEmaile.map((email) => prisma.user.findUniqueOrThrow({ where: { email } }))
+  );
   await seedZasoby(gminy, kategorie, organizacje);
-  await seedAlerty(gminy, admin?.id ?? null, koordynator?.id ?? null, organizacje);
+  await seedAlerty(gminy, kategorie, koordynatorzy);
   await cleanupObsoleteGminy(gminy.map((g) => g.id));
 
   console.log('🌱 Dane testowe (gminy, kategorie, zasoby, alerty) gotowe.');
