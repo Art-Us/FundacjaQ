@@ -342,11 +342,18 @@ describe('POST /api/admin/users', () => {
   it('creates the user as inactive, hashing the password', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockResolvedValue({ id: 'new-1' } as any);
 
     const res = await POST(
-      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
     );
 
     expect(res.status).toBe(201);
@@ -361,6 +368,29 @@ describe('POST /api/admin/users', () => {
         }),
       })
     );
+  });
+
+  it('requires an organization when creating a COORDINATOR/VOLUNTEER without one', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+
+    const res = await POST(
+      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+    );
+
+    expect(res.status).toBe(400);
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('does not require an organization when creating an ADMIN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-1' } as any);
+
+    const res = await POST(makeRequest({ email: 'new-admin2@example.com', password: STRONG_PASSWORD, role: 'ADMIN' }));
+
+    expect(res.status).toBe(201);
+    expect(prisma.user.create).toHaveBeenCalled();
   });
 
   it('rejects a duplicate email with 400 and does not create a user', async () => {
@@ -380,6 +410,7 @@ describe('POST /api/admin/users', () => {
     const { Prisma } = await import('@prisma/client');
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
@@ -389,7 +420,13 @@ describe('POST /api/admin/users', () => {
     );
 
     const res = await POST(
-      makeRequest({ email: 'race@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+      makeRequest({
+        email: 'race@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
     );
     const body = await res.json();
 
@@ -400,11 +437,18 @@ describe('POST /api/admin/users', () => {
   it('surfaces a generic error (not "email already registered") for an unrelated DB failure', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockRejectedValue(new Error('connection lost'));
 
     const res = await POST(
-      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
     );
     const body = await res.json();
 
@@ -415,11 +459,18 @@ describe('POST /api/admin/users', () => {
   it('rejects a password found in a breach database', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'g1' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     vi.mocked(isPasswordPwned).mockResolvedValue(true);
 
     const res = await POST(
-      makeRequest({ email: 'new@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', gminaId: 'g1' })
+      makeRequest({
+        email: 'new@example.com',
+        password: STRONG_PASSWORD,
+        role: 'VOLUNTEER',
+        gminaId: 'g1',
+        organizationId: 'org-1',
+      })
     );
 
     expect(res.status).toBe(400);
@@ -470,6 +521,7 @@ describe('POST /api/admin/users', () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.create.mockResolvedValue({ id: 'new-gmina', name: 'Nowa Gmina' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'new-gmina' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockResolvedValue({ id: 'new-1', gminaId: 'new-gmina' } as any);
 
@@ -479,6 +531,7 @@ describe('POST /api/admin/users', () => {
         password: STRONG_PASSWORD,
         role: 'VOLUNTEER',
         newGminaName: 'Nowa Gmina',
+        organizationId: 'org-1',
       })
     );
 
@@ -613,6 +666,7 @@ describe('POST /api/admin/users', () => {
   it('does not log a GMINA_CREATE entry when an existing gmina is reused by name', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findFirst.mockResolvedValue({ id: 'existing-gmina', name: 'Istniejąca' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'existing-gmina' } as any);
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.user.create.mockResolvedValue({ id: 'new-1', gminaId: 'existing-gmina' } as any);
 
@@ -622,6 +676,7 @@ describe('POST /api/admin/users', () => {
         password: STRONG_PASSWORD,
         role: 'VOLUNTEER',
         newGminaName: 'Istniejąca',
+        organizationId: 'org-1',
       })
     );
 

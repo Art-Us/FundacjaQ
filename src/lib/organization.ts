@@ -23,6 +23,11 @@ export function scopedOrganizationWhere(
   return { organizationId: actor.organizationId };
 }
 
+/** ADMIN accounts are site-wide (see prisma/seed.ts), everyone else must belong to an organization — mirrors requiresGmina in lib/gmina.ts. */
+export function requiresOrganization(role: Role): boolean {
+  return role !== 'ADMIN';
+}
+
 /** Trims and collapses internal whitespace, so "Caritas" / " Caritas  " / "Caritas" compare equal. */
 export function normalizeOrganizationName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ');

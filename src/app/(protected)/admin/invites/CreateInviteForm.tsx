@@ -1,24 +1,35 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mail, UserPlus, AlertTriangle } from 'lucide-react';
+import { Mail, UserPlus, AlertTriangle, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GminaSelect, type GminaOption, type GminaSelectValue } from '@/components/gmina/GminaSelect';
+import { OrganizationSelect, type OrganizationOption } from '@/components/organization/OrganizationSelect';
 
 const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 
 interface CreateInviteFormProps {
   gminas: GminaOption[];
+  organizations: OrganizationOption[];
   isAdmin: boolean;
   currentUserOrganizationId: string | null;
+  /** Display-only, for the "you're inviting into X" hint shown to a coordinator. */
+  currentUserOrganizationName: string | null;
 }
 
-export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }: CreateInviteFormProps) {
+export function CreateInviteForm({
+  gminas,
+  organizations,
+  isAdmin,
+  currentUserOrganizationId,
+  currentUserOrganizationName,
+}: CreateInviteFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<typeof ROLES[number]>('VOLUNTEER');
   const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: null, newGminaName: null });
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [emailConfigured, setEmailConfigured] = useState(false);
@@ -26,9 +37,26 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }:
   const [loading, setLoading] = useState(false);
 
   const gminaRequired = isAdmin && role !== 'ADMIN';
+  // Mirrors POST /api/admin/invites: an admin-issued invite now needs an
+  // organization up front for any organization-scoped role, same as creating
+  // a user directly does.
+  const organizationRequired = isAdmin && role !== 'ADMIN';
   // A coordinator's invite always goes to their own organization — if they
   // don't have one assigned, they can't invite anyone at all.
   const blockedNoOrganization = !isAdmin && !currentUserOrganizationId;
+
+  // Organization is itself gmina-scoped, so only offer ones belonging to the
+  // gmina currently selected above — same pattern as UserFormModal.
+  const organizationsInGmina = useMemo(
+    () => (gmina.gminaId ? organizations.filter((o) => o.gminaId === gmina.gminaId) : []),
+    [organizations, gmina.gminaId]
+  );
+
+  useEffect(() => {
+    if (organizationId && !organizationsInGmina.some((o) => o.id === organizationId)) {
+      setOrganizationId(null);
+    }
+  }, [organizationId, organizationsInGmina]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,6 +70,7 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }:
     if (isAdmin) {
       body.gminaId = gmina.gminaId || undefined;
       body.newGminaName = gmina.newGminaName || undefined;
+      body.organizationId = organizationId || undefined;
     }
 
     try {
@@ -55,6 +84,7 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }:
 
       if (res.ok) {
         setEmail('');
+        setOrganizationId(null);
         setInviteUrl(data.inviteUrl ?? null);
         setEmailConfigured(Boolean(data.emailConfigured));
         router.refresh();
@@ -128,6 +158,37 @@ export function CreateInviteForm({ gminas, isAdmin, currentUserOrganizationId }:
               required={gminaRequired}
               newGminaMode="modal"
             />
+          </div>
+        )}
+        {isAdmin && (
+          <div>
+            <label
+              className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5"
+              htmlFor="invite-organization"
+            >
+              Organizacja{organizationRequired && ' *'}
+            </label>
+            <OrganizationSelect
+              id="invite-organization"
+              organizations={organizationsInGmina}
+              gminas={gminas}
+              defaultGminaId={gmina.gminaId}
+              value={organizationId}
+              onChange={setOrganizationId}
+              required={organizationRequired}
+              disabled={role === 'ADMIN'}
+            />
+            {!gmina.gminaId && role !== 'ADMIN' && (
+              <p className="text-[11px] text-slate-400 mt-1">Wybierz najpierw gminę, aby wybrać organizację.</p>
+            )}
+          </div>
+        )}
+        {!isAdmin && currentUserOrganizationName && (
+          <div className="flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-xs text-indigo-800">
+            <Building2 className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>
+              Zaproszenie trafi do Twojej organizacji: <strong>{currentUserOrganizationName}</strong>.
+            </span>
           </div>
         )}
         {blockedNoOrganization && (

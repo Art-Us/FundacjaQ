@@ -6,7 +6,7 @@ import { requireAdmin, requireAdminOrCoordinator, canManageUser } from '@/lib/au
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { adminUserSelect, ROLE_LABELS } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
-import { scopedOrganizationWhere } from '@/lib/organization';
+import { requiresOrganization, scopedOrganizationWhere } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
 
@@ -195,6 +195,10 @@ export async function POST(req: NextRequest) {
   // becomes permanent — PATCH /api/admin/users/[id]'s equivalent check has no
   // such carve-out, so any later edit that doesn't explicitly clear
   // organizationId would be stuck rejecting forever.
+  if (requiresOrganization(role) && !organizationId) {
+    return NextResponse.json({ error: 'Organizacja jest wymagana dla tej roli.' }, { status: 400 });
+  }
+
   if (organizationId) {
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },

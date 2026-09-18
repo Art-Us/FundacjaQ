@@ -6,7 +6,7 @@ import { sendInviteEmail, isEmailConfigured } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
-import { scopedOrganizationWhere } from '@/lib/organization';
+import { requiresOrganization, scopedOrganizationWhere } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotInvite, auditInlineGminaCreation } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
@@ -18,6 +18,7 @@ const createInviteSchema = z.object({
   role: z.enum(ROLES),
   gminaId: z.string().optional(),
   newGminaName: z.string().trim().min(1).max(120).optional(),
+  organizationId: z.string().optional(),
 });
 
 export async function GET() {
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
   }
 
-  const { email, role, gminaId, newGminaName } = parsed.data;
+  const { email, role, gminaId, newGminaName, organizationId } = parsed.data;
 
   // Only ADMIN can grant ADMIN or COORDINATOR privileges.
   if ((role === 'ADMIN' || role === 'COORDINATOR') && user.role !== 'ADMIN') {
@@ -123,6 +124,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
     effectiveGminaId = resolved.id;
+  }
+
+  // Mirrors POST /api/admin/users: an admin-issued invite to an
+  // organization-scoped role must name the organization up front now,
+  // instead of leaving it to be assigned later. Validated the same way as
+  // there — must exist, and must belong to the same gmina the invite is
+  // going to (an organization is itself gmina-scoped).
+  if (user.role === 'ADMIN' && requiresOrganization(role)) {
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organizacja jest wymagana dla tej roli.' }, { status: 400 });
+    }
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, gminaId: true },
+    });
+    if (!organization) {
+      return NextResponse.json({ error: 'Wybrana organizacja nie istnieje.' }, { status: 400 });
+    }
+    if (organization.gminaId !== effectiveGminaId) {
+      return NextResponse.json(
+        { error: 'Wybrana organizacja należy do innej gminy niż zaproszenie.' },
+        { status: 400 }
+      );
+    }
+    effectiveOrganizationId = organization.id;
   }
 
   const existingUser = await prisma.user.findUnique({ where: { email } });

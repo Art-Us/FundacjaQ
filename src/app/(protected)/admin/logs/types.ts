@@ -34,6 +34,7 @@ export const ACTION_LABELS: Record<string, string> = {
   ORGANIZATION_DELETE: 'Usunięcie organizacji',
   INVITE_CREATE: 'Wysłanie zaproszenia',
   INVITE_REVOKE: 'Unieważnienie zaproszenia',
+  INVITE_REACTIVATE: 'Ponowne wysłanie zaproszenia',
 };
 
 // Coarse action "kind" for the filter dropdown — which entity it's about is

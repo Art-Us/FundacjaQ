@@ -178,14 +178,17 @@ describe('POST /api/admin/invites', () => {
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.create.mockResolvedValue({ id: 'new-gmina', name: 'Gmina Test' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'new-gmina' } as any);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
-    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', newGminaName: 'Gmina Test' }));
+    const res = await POST(
+      makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', newGminaName: 'Gmina Test', organizationId: 'org-1' })
+    );
 
     expect(res.status).toBe(200);
     expect(prisma.gmina.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'Gmina Test' } }));
     expect(prisma.inviteToken.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'new-gmina' }) })
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'new-gmina', organizationId: 'org-1' }) })
     );
     // Regression coverage: this inline "+ Nowa gmina" creation used to be
     // invisible to the audit log — only the dedicated gmina-management CRUD
@@ -197,13 +200,71 @@ describe('POST /api/admin/invites', () => {
     );
   });
 
+  it('requires an organization when ADMIN invites a COORDINATOR/VOLUNTEER', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+
+    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+
+    expect(res.status).toBe(400);
+    expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an organization that belongs to a different gmina than the invite', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-2' } as any);
+
+    const res = await POST(
+      makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('innej gminy');
+    expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+  });
+
+  it('lets ADMIN invite a VOLUNTEER into a chosen organization matching the gmina', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.inviteToken.create.mockResolvedValue({} as any);
+
+    const res = await POST(
+      makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    );
+
+    expect(res.status).toBe(200);
+    expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1', organizationId: 'org-1' }) })
+    );
+  });
+
+  it('does not require an organization when ADMIN invites an ADMIN', async () => {
+    mockSession('ADMIN', 'admin-1');
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.inviteToken.create.mockResolvedValue({} as any);
+
+    const res = await POST(makeRequest({ email: 'new-admin@example.com', role: 'ADMIN' }));
+
+    expect(res.status).toBe(200);
+    expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ organizationId: undefined }) })
+    );
+  });
+
   it('returns a clean 500 (not an unhandled crash) when creating the invite token fails', async () => {
     mockSession('ADMIN', 'admin-1');
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
     prisma.inviteToken.create.mockRejectedValue(new Error('connection lost'));
 
-    const res = await POST(makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+    const res = await POST(
+      makeRequest({ email: 'vol@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    );
 
     expect(res.status).toBe(500);
     expect(sendInviteEmail).not.toHaveBeenCalled();
@@ -213,9 +274,12 @@ describe('POST /api/admin/invites', () => {
     mockSession('ADMIN', 'admin-1');
     prisma.user.findUnique.mockResolvedValue(null);
     prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
     prisma.inviteToken.create.mockResolvedValue({} as any);
 
-    await POST(makeRequest({ email: 'new@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+    await POST(
+      makeRequest({ email: 'new@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    );
 
     const createCall = prisma.inviteToken.create.mock.calls[0][0] as any;
     const emailedUrl = vi.mocked(sendInviteEmail).mock.calls[0][1] as string;
@@ -227,9 +291,12 @@ describe('POST /api/admin/invites', () => {
   it('rejects a duplicate email with 400 and does not create a token', async () => {
     mockSession('ADMIN');
     prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
     prisma.user.findUnique.mockResolvedValue({ id: 'existing' } as any);
 
-    const res = await POST(makeRequest({ email: 'existing@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1' }));
+    const res = await POST(
+      makeRequest({ email: 'existing@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    );
 
     expect(res.status).toBe(400);
     expect(prisma.inviteToken.create).not.toHaveBeenCalled();
