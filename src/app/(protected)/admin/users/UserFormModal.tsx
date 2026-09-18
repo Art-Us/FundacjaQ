@@ -38,6 +38,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: user?.gmina?.id ?? null, newGminaName: null });
   const gminaRequired = mode === 'create' && role !== 'ADMIN';
+  const organizationRequired = mode === 'create' && role !== 'ADMIN';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,7 +236,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
 
           <div>
             <label htmlFor="user-organization" className={labelClasses}>
-              Organizacja
+              Organizacja{organizationRequired && ' *'}
             </label>
             <OrganizationSelect
               id="user-organization"
@@ -244,6 +245,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
               defaultGminaId={gmina.gminaId}
               value={organizationId}
               onChange={setOrganizationId}
+              required={organizationRequired}
             />
             {!gmina.gminaId && (
               <p className="text-[11px] text-slate-400 mt-1">Wybierz najpierw gminę, aby wybrać organizację.</p>

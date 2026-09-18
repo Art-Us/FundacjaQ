@@ -214,7 +214,7 @@ export const ACTION_KIND_MAP: Record<ActionKind, AuditAction[]> = {
   CREATE: ['USER_CREATE', 'GMINA_CREATE', 'ORGANIZATION_CREATE'],
   UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'ORGANIZATION_UPDATE'],
   DELETE: ['USER_DELETE', 'GMINA_DELETE', 'ORGANIZATION_DELETE'],
-  INVITE: ['INVITE_CREATE', 'INVITE_REVOKE'],
+  INVITE: ['INVITE_CREATE', 'INVITE_REVOKE', 'INVITE_REACTIVATE'],
 };
 
 export const ACTION_KIND_LABELS: Record<ActionKind, string> = {
@@ -233,6 +233,11 @@ export const ACTION_KIND_LABELS: Record<ActionKind, string> = {
  * able to restore its real password — silently producing a broken account is
  * worse than not offering the button. Every other action only ever touches
  * fields that ARE captured in the snapshot, so those can be reverted safely.
+ *
+ * INVITE_REACTIVATE is excluded for the same reason as USER_CREATE/DELETE:
+ * it mints a brand-new raw token that (like a password) is never stored, only
+ * its hash — reverting couldn't restore the invite to a working state anyway,
+ * it would just silently revoke a link that may already have been handed out.
  */
 const REVERTIBLE_ACTIONS = new Set<AuditAction>([
   'USER_UPDATE',
