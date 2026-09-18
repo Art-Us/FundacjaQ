@@ -37,7 +37,12 @@ interface AlertNeedsBlockProps {
   // (Крок 23) requires one, so there's no point showing "Przydziel zasoby" to
   // an ADMIN with no organization to donate from.
   canAllocate: boolean;
+  currentUserRole: string;
   currentUserOrganizationId: string | null;
+  // The alert's own organization — the recipient side of every allocation
+  // under it, needed by AllocationContributorsList to gate "Potwierdź
+  // dostawę"/"Uzgodnij zwrot" (Крок 24) per row.
+  alertOrganizationId: string | null;
   // Which of the alert's needs fall in a category the caller's own
   // organization already has something available in (lib/resourceMatching.ts,
   // Крок 43) — surfaced per-row as "W Twoim magazynie".
@@ -55,7 +60,9 @@ export default function AlertNeedsBlock({
   needs,
   canManageNeeds,
   canAllocate,
+  currentUserRole,
   currentUserOrganizationId,
+  alertOrganizationId,
   ownedCategoryIds,
 }: AlertNeedsBlockProps) {
   const [editingNeeds, setEditingNeeds] = useState(false);
@@ -140,7 +147,12 @@ export default function AlertNeedsBlock({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <AllocationContributorsList allocations={need.allocations} />
+                  <AllocationContributorsList
+                    allocations={need.allocations}
+                    currentUserRole={currentUserRole}
+                    currentUserOrganizationId={currentUserOrganizationId}
+                    alertOrganizationId={alertOrganizationId}
+                  />
                   {isOpen && canAllocate && (
                     <button
                       type="button"

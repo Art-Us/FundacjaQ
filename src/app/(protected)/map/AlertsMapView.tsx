@@ -361,11 +361,38 @@ export default function AlertsMapView({
     setTimeout(() => mapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
   }
 
+  // Odwrotny kierunek do handleFocusOnMap powyżej — z popupu na pinezce
+  // ("Przejdź do kartki zdarzenia") do odpowiadającej karty na liście
+  // Aktywne/Archiwum. Alert może być poza aktualnymi filtrami tej listy (np.
+  // szukanie/kategoria/organizacja), więc resetujemy te, które mogłyby go
+  // ukryć, zanim spróbujemy przewinąć do jego karty.
+  function handleGoToCard(alertId: string) {
+    const alert = kindAlerts.find((a) => a.id === alertId);
+    if (!alert) return;
+
+    const isArchived = alert.status === 'RESOLVED' || alert.status === 'CANCELLED';
+    if (isArchived) {
+      setArchiveSearch('');
+      setArchiveTimeframe('wszystkie');
+      setArchiveCategoryFilter('all');
+      setArchiveOrgFilter('all');
+    } else {
+      setActiveSearch('');
+      setActiveTimeframe('wszystkie');
+      setActiveCategoryFilter('all');
+      setActiveOrgFilter('all');
+    }
+
+    setTimeout(
+      () => document.getElementById(`alert-card-${alertId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      80
+    );
+  }
+
   function canManageAlert(alert: AlertWithGmina): boolean {
     if (!canManageAlerts) return false;
     return canManageAlertPolicy(alert, {
       role: currentUserRole,
-      gminaId: currentUserGminaId,
       organizationId: currentUserOrganizationId,
     });
   }
@@ -620,6 +647,7 @@ export default function AlertsMapView({
             mode={mapMode}
             onModeChange={setMapMode}
             kind={view}
+            onGoToCard={handleGoToCard}
           />
         </section>
       )}
@@ -822,11 +850,16 @@ export default function AlertsMapView({
 
               const eventColor = CATEGORY_MARKER_COLORS[alert.category] ?? CATEGORY_MARKER_COLORS.OTHER_EVENT;
               const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
+              const isOwnerOrg = isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
+              const openAllocationCount = alert.needs
+                .flatMap((need) => need.allocations)
+                .filter((a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED').length;
 
               return (
                 <div
                   key={alert.id}
-                  className={`rounded-3xl bg-white p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 ${
+                  id={`alert-card-${alert.id}`}
+                  className={`rounded-3xl bg-white p-6 shadow-xs border hover:shadow-md transition duration-200 flex flex-col justify-between space-y-4 scroll-mt-6 ${
                     isEventView
                       ? 'border-slate-200 hover:border-fuchsia-300'
                       : 'border-red-200 hover:border-red-300'
@@ -924,6 +957,7 @@ export default function AlertsMapView({
                           quantity: allocation.quantity,
                           unit: allocation.unit,
                           status: allocation.status,
+                          donorOrgId: allocation.donorOrgId,
                           donorOrgName: allocation.donorOrg.name,
                           createdByName: allocation.createdBy?.name ?? null,
                           createdAt: allocation.createdAt,
@@ -931,7 +965,9 @@ export default function AlertsMapView({
                       }))}
                       canManageNeeds={canManageNeedsForAlert(alert)}
                       canAllocate={canAllocateResources}
+                      currentUserRole={currentUserRole}
                       currentUserOrganizationId={currentUserOrganizationId}
+                      alertOrganizationId={alert.organizationId}
                       ownedCategoryIds={ownedCategoryIds}
                     />
                   </div>
@@ -960,10 +996,13 @@ export default function AlertsMapView({
 
                     <AlertActions
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
                       canDelete={canDelete}
+                      isOwnerOrg={isOwnerOrg}
+                      openAllocationCount={openAllocationCount}
                     />
                   </div>
                 </div>
@@ -1113,11 +1152,16 @@ export default function AlertsMapView({
               const durationMs = alert.updatedAt.getTime() - alert.createdAt.getTime();
               const isResolved = alert.status === 'RESOLVED';
               const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
+              const isOwnerOrg = isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
+              const openAllocationCount = alert.needs
+                .flatMap((need) => need.allocations)
+                .filter((a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED').length;
 
               return (
                 <div
                   key={alert.id}
-                  className="rounded-3xl bg-white p-6 border border-slate-200 hover:border-slate-300 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between"
+                  id={`alert-card-${alert.id}`}
+                  className="rounded-3xl bg-white p-6 border border-slate-200 hover:border-slate-300 hover:shadow-md transition duration-200 space-y-3.5 flex flex-col justify-between scroll-mt-6"
                 >
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1196,6 +1240,7 @@ export default function AlertsMapView({
                           quantity: allocation.quantity,
                           unit: allocation.unit,
                           status: allocation.status,
+                          donorOrgId: allocation.donorOrgId,
                           donorOrgName: allocation.donorOrg.name,
                           createdByName: allocation.createdBy?.name ?? null,
                           createdAt: allocation.createdAt,
@@ -1203,7 +1248,9 @@ export default function AlertsMapView({
                       }))}
                       canManageNeeds={canManageNeedsForAlert(alert)}
                       canAllocate={canAllocateResources}
+                      currentUserRole={currentUserRole}
                       currentUserOrganizationId={currentUserOrganizationId}
+                      alertOrganizationId={alert.organizationId}
                       ownedCategoryIds={ownedCategoryIds}
                     />
                   </div>
@@ -1232,10 +1279,13 @@ export default function AlertsMapView({
 
                     <AlertActions
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
                       canDelete={canDelete}
+                      isOwnerOrg={isOwnerOrg}
+                      openAllocationCount={openAllocationCount}
                     />
                   </div>
                 </div>

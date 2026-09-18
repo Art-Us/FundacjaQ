@@ -57,21 +57,20 @@ export function isAllocationRecipient(
 }
 
 /**
- * Whether `user` may manage (edit/cancel/etc.) `alert` — replaces the old
- * gmina-only check inline in AlertsMapView.tsx (`alert.gminaId ===
- * currentUserGminaId`), which had no concept of organizations at all. ADMIN
- * always can; VOLUNTEER never can (mirrors every other admin-style action in
- * this codebase — nothing here grants a volunteer alert-management rights
- * just because their organization happens to own the alert). A COORDINATOR
- * can manage it either because their organization owns it (isAlertOwnerOrg —
- * covers e.g. an org operating across more than one gmina) or, as before,
- * because the alert is in their own gmina.
+ * Whether `user` may manage (edit/resolve/cancel) `alert` — gates "Edytuj",
+ * "Rozwiąż" and "Odwołaj" on the alert's card (client, AlertsMapView.tsx) and
+ * PATCH /api/alerts/[id] (server) alike, from this single source of truth.
+ * ADMIN always can; VOLUNTEER never can. A COORDINATOR can manage it only if
+ * their own organization created it (isAlertOwnerOrg) — deliberately
+ * narrower than the original gmina-wide rule (any coordinator in the same
+ * gmina could manage any alert there), which predates the organization model
+ * and let coordinators edit/resolve/cancel alerts that weren't theirs.
  */
 export function canManageAlert(
-  alert: { organizationId: string | null; gminaId: string },
-  user: { role: string; gminaId: string | null; organizationId?: string | null }
+  alert: { organizationId: string | null },
+  user: { role: string; organizationId?: string | null }
 ): boolean {
   if (user.role === 'ADMIN') return true;
   if (user.role !== 'COORDINATOR') return false;
-  return isAlertOwnerOrg(alert, user) || alert.gminaId === user.gminaId;
+  return isAlertOwnerOrg(alert, user);
 }

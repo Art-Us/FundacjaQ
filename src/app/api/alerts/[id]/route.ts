@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
 
@@ -39,8 +39,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  // ADMIN może edytować dowolny alert; COORDINATOR tylko w swojej gminie.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
+  // ADMIN może edytować dowolny alert; COORDINATOR tylko ten, który należy do
+  // jego własnej organizacji (canManageAlert, lib/resourceAuthz.ts) — ta sama
+  // reguła, którą karta alertu stosuje po stronie klienta do pokazania
+  // przycisków "Edytuj"/"Rozwiąż"/"Odwołaj".
+  if (!canManageAlert(alert, user)) {
     return NextResponse.json({ error: 'Nie masz uprawnień do edycji tego alertu.' }, { status: 403 });
   }
 
