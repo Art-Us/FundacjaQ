@@ -9,10 +9,14 @@ export default async function AdminOrganizationsPage() {
     redirect('/');
   }
 
-  // Full gmina list, needed by the create/edit form's gmina picker — not the
-  // (paginated) organizations list itself, which OrganizationsDirectory fetches
-  // from the server on its own.
-  const gminas = await prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } });
+  // Full gmina list, needed by the create/edit form's gmina picker AND by the
+  // directory's voivodeship/powiat/gmina filter cascade — not the (paginated)
+  // organizations list itself, which OrganizationsDirectory fetches from the
+  // server on its own.
+  const gminas = await prisma.gmina.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, powiat: true, voivodeship: true },
+  });
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">

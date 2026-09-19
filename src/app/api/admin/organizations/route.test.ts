@@ -106,6 +106,46 @@ describe('GET /api/admin/organizations', () => {
     );
   });
 
+  it('sorts by powiat/voivodeship via the relation', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?sortBy=powiat&sortDir=desc'));
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ gmina: { powiat: 'desc' } }, { id: 'asc' }] })
+    );
+
+    await GET(makeGetRequest('?sortBy=voivodeship&sortDir=asc'));
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ gmina: { voivodeship: 'asc' } }, { id: 'asc' }] })
+    );
+  });
+
+  it('filters by gminaId alone', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?gminaId=g1'));
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { gminaId: 'g1' } }));
+  });
+
+  it('filters by voivodeship/powiat through the gmina relation', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?voivodeship=mazowieckie&powiat=warszawski'));
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { gmina: { voivodeship: 'mazowieckie', powiat: 'warszawski' } },
+      })
+    );
+  });
+
   it('paginates using page/pageSize', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.count.mockResolvedValue(0);
