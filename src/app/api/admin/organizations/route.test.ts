@@ -23,6 +23,10 @@ function makeRequest(body: unknown) {
   });
 }
 
+function makeGetRequest(query = '') {
+  return new NextRequest(`http://localhost/api/admin/organizations${query}`);
+}
+
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdmin).mockReset();
@@ -32,28 +36,101 @@ describe('GET /api/admin/organizations', () => {
   it('returns 403 with no DB call when the caller is not an ADMIN', async () => {
     vi.mocked(requireAdmin).mockResolvedValue(null);
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
 
     expect(res.status).toBe(403);
     expect(prisma.organization.findMany).not.toHaveBeenCalled();
+    expect(prisma.organization.count).not.toHaveBeenCalled();
   });
 
-  it('returns the organization list for an ADMIN session', async () => {
+  it('returns the organization list, total and pagination for an ADMIN session', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(1);
     prisma.organization.findMany.mockResolvedValue([{ id: 'o1', name: 'Caritas' }] as any);
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body.organizations).toHaveLength(1);
+    expect(body.total).toBe(1);
+    expect(body.totalPages).toBe(1);
+  });
+
+  it('applies page=1/pageSize=30 and name:asc ordering when no query params are given', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest());
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {},
+        skip: 0,
+        take: 30,
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      })
+    );
+  });
+
+  it('searches name/city/contact names/gmina name and orders by the requested field', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?q=caritas&sortBy=city&sortDir=desc'));
+
+    const call = prisma.organization.findMany.mock.calls[0][0] as any;
+    expect(call.orderBy).toEqual([{ city: 'desc' }, { id: 'asc' }]);
+    expect(call.where).toEqual({
+      OR: [
+        { name: { contains: 'caritas', mode: 'insensitive' } },
+        { city: { contains: 'caritas', mode: 'insensitive' } },
+        { contactFirstName: { contains: 'caritas', mode: 'insensitive' } },
+        { contactLastName: { contains: 'caritas', mode: 'insensitive' } },
+        { gmina: { name: { contains: 'caritas', mode: 'insensitive' } } },
+      ],
+    });
+  });
+
+  it('sorts by gmina name via the relation', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?sortBy=gmina&sortDir=asc'));
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ gmina: { name: 'asc' } }, { id: 'asc' }] })
+    );
+  });
+
+  it('paginates using page/pageSize', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?page=3&pageSize=10'));
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
+  });
+
+  it('rejects invalid query params with 400', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+
+    const res = await GET(makeGetRequest('?pageSize=9999'));
+
+    expect(res.status).toBe(400);
+    expect(prisma.organization.findMany).not.toHaveBeenCalled();
   });
 
   it('returns 500 when the database read fails', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.count.mockResolvedValue(0);
     prisma.organization.findMany.mockRejectedValue(new Error('connection lost'));
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
 
     expect(res.status).toBe(500);
   });

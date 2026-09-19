@@ -16,7 +16,15 @@ function formatAddress(organization: OrganizationListItem): string | null {
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
-export function OrganizationCard({ organization, gminas }: { organization: OrganizationListItem; gminas: GminaOption[] }) {
+export function OrganizationCard({
+  organization,
+  gminas,
+  onChanged,
+}: {
+  organization: OrganizationListItem;
+  gminas: GminaOption[];
+  onChanged: () => void;
+}) {
   const [showEdit, setShowEdit] = useState(false);
   const hasDependents = organization.usersCount > 0;
   const address = formatAddress(organization);
@@ -71,7 +79,11 @@ export function OrganizationCard({ organization, gminas }: { organization: Organ
         {hasDependents ? (
           <p className="text-[11px] text-slate-400 text-center">Nie można usunąć — istnieją powiązani użytkownicy.</p>
         ) : (
-          <DeleteOrganizationButton organizationId={organization.id} organizationName={organization.name} />
+          <DeleteOrganizationButton
+            organizationId={organization.id}
+            organizationName={organization.name}
+            onDeleted={onChanged}
+          />
         )}
       </div>
 
@@ -81,6 +93,7 @@ export function OrganizationCard({ organization, gminas }: { organization: Organ
           organization={organization}
           gminas={gminas}
           onClose={() => setShowEdit(false)}
+          onSuccess={onChanged}
         />
       )}
     </article>
