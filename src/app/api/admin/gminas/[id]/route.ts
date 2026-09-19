@@ -22,7 +22,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const target = await prisma.gmina.findUnique({ where: { id: params.id } });
+  let target;
+  try {
+    target = await prisma.gmina.findUnique({ where: { id: params.id } });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się pobrać gminy.' }, { status: 500 });
+  }
   if (!target) {
     return NextResponse.json({ error: 'Gmina nie istnieje.' }, { status: 404 });
   }
@@ -94,7 +99,12 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const target = await prisma.gmina.findUnique({ where: { id: params.id } });
+  let target;
+  try {
+    target = await prisma.gmina.findUnique({ where: { id: params.id } });
+  } catch {
+    return NextResponse.json({ error: 'Nie udało się usunąć gminy.' }, { status: 500 });
+  }
   if (!target) {
     return NextResponse.json({ error: 'Gmina nie istnieje.' }, { status: 404 });
   }

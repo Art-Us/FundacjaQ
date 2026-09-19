@@ -1,18 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function DeleteOrganizationButton({
   organizationId,
   organizationName,
+  onDeleted,
 }: {
   organizationId: string;
   organizationName: string;
+  onDeleted: () => void;
 }) {
-  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function DeleteOrganizationButton({
         return;
       }
 
-      router.refresh();
+      onDeleted();
     } catch (err) {
       console.error('[DeleteOrganizationButton] request failed:', err);
       setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
