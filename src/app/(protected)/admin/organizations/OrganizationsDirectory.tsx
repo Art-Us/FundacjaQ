@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, Building2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/Pagination';
@@ -17,6 +17,10 @@ const SORT_OPTIONS = [
   { value: 'name:desc', label: 'Nazwa (Z-A)' },
   { value: 'gmina:asc', label: 'Gmina (A-Z)' },
   { value: 'gmina:desc', label: 'Gmina (Z-A)' },
+  { value: 'powiat:asc', label: 'Powiat (A-Z)' },
+  { value: 'powiat:desc', label: 'Powiat (Z-A)' },
+  { value: 'voivodeship:asc', label: 'Województwo (A-Z)' },
+  { value: 'voivodeship:desc', label: 'Województwo (Z-A)' },
   { value: 'city:asc', label: 'Miasto (A-Z)' },
   { value: 'city:desc', label: 'Miasto (Z-A)' },
   { value: 'createdAt:desc', label: 'Data dodania (najnowsze)' },
@@ -26,6 +30,12 @@ const SORT_OPTIONS = [
 type SortValue = (typeof SORT_OPTIONS)[number]['value'];
 
 const PAGE_SIZE = 30;
+
+/** The `gminas` prop, extended with the location fields the filter cascade needs. */
+export interface GminaFilterOption extends GminaOption {
+  powiat: string | null;
+  voivodeship: string | null;
+}
 
 /** Shape GET /api/admin/organizations actually returns per row. */
 interface ApiOrganization {
@@ -65,7 +75,7 @@ function mapOrganization(organization: ApiOrganization): OrganizationListItem {
 }
 
 interface OrganizationsDirectoryProps {
-  gminas: GminaOption[];
+  gminas: GminaFilterOption[];
 }
 
 export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) {
@@ -74,6 +84,13 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
   // DB query (name/gmina/city/contact), not a client-side filter, so it
   // covers the whole directory instead of whatever page happened to load.
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  // 'ALL' means no filter. Powiat only ever makes sense once a voivodeship is
+  // picked — same cascade as GminasDirectory's own filter row. Gmina narrows
+  // further still, but (unlike powiat) stays pickable directly since a user
+  // may already know the exact gmina they want without narrowing top-down.
+  const [voivodeshipFilter, setVoivodeshipFilter] = useState<string>('ALL');
+  const [powiatFilter, setPowiatFilter] = useState<string>('ALL');
+  const [gminaFilter, setGminaFilter] = useState<string>('ALL');
   const [sort, setSort] = useState<SortValue>('name:asc');
   const [showCreate, setShowCreate] = useState(false);
 
@@ -89,8 +106,52 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
     return () => clearTimeout(timer);
   }, [query]);
 
+  // Voivodeships that actually exist among the system's gminas — derived
+  // from the `gminas` prop already fetched for the create/edit form's picker,
+  // so (unlike GminasDirectory's own locations endpoint) no extra round trip
+  // is needed here.
+  const voivodeships = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of gminas) if (g.voivodeship) set.add(g.voivodeship);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [gminas]);
+
+  const powiatsInVoivodeship = useMemo(() => {
+    if (voivodeshipFilter === 'ALL') return [];
+    const set = new Set<string>();
+    for (const g of gminas) {
+      if (g.voivodeship === voivodeshipFilter && g.powiat) set.add(g.powiat);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [gminas, voivodeshipFilter]);
+
+  const gminasInFilter = useMemo(() => {
+    // .filter() already returns a fresh array, so .sort() mutating it in
+    // place doesn't touch the original `gminas` prop — no extra .slice() copy needed.
+    return gminas
+      .filter((g) => voivodeshipFilter === 'ALL' || g.voivodeship === voivodeshipFilter)
+      .filter((g) => powiatFilter === 'ALL' || g.powiat === powiatFilter)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [gminas, voivodeshipFilter, powiatFilter]);
+
+  // If the voivodeship filter changes (or clears) after a powiat/gmina was
+  // already picked, that selection may no longer be valid for the new
+  // voivodeship — clear the stale selection rather than silently keep
+  // filtering by it (mirrors GminasDirectory's own powiat-clearing effect).
+  useEffect(() => {
+    if (powiatFilter !== 'ALL' && !powiatsInVoivodeship.includes(powiatFilter)) {
+      setPowiatFilter('ALL');
+    }
+  }, [powiatFilter, powiatsInVoivodeship]);
+
+  useEffect(() => {
+    if (gminaFilter !== 'ALL' && !gminasInFilter.some((g) => g.id === gminaFilter)) {
+      setGminaFilter('ALL');
+    }
+  }, [gminaFilter, gminasInFilter]);
+
   // Guards against a slower earlier response landing after a faster later one
-  // (e.g. rapidly retyping a search) overwriting fresh results with stale ones.
+  // (e.g. rapidly switching filters) overwriting fresh results with stale ones.
   const requestIdRef = useRef(0);
 
   const fetchOrganizations = useCallback(
@@ -99,6 +160,9 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
 
       try {
         const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
+        if (gminaFilter !== 'ALL') params.set('gminaId', gminaFilter);
+        if (voivodeshipFilter !== 'ALL') params.set('voivodeship', voivodeshipFilter);
+        if (powiatFilter !== 'ALL') params.set('powiat', powiatFilter);
         if (debouncedQuery) params.set('q', debouncedQuery);
         const [sortBy, sortDir] = sort.split(':');
         params.set('sortBy', sortBy);
@@ -115,10 +179,10 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
         }
 
         const serverTotalPages: number = data.totalPages ?? 1;
-        // The page we asked for no longer exists for this result set (e.g. it
-        // just shrank below the current page after a delete or a narrower
-        // search) — land back on the last real page instead of showing an
-        // empty page with a nonzero total.
+        // The page we asked for no longer exists for this filter/result set
+        // (e.g. it just shrank below the current page after a delete or a
+        // narrower filter) — land back on the last real page instead of
+        // showing an empty page with a nonzero total.
         if (targetPage > serverTotalPages) {
           setPage(serverTotalPages);
           return;
@@ -134,15 +198,15 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
         setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
       }
     },
-    [debouncedQuery, sort]
+    [gminaFilter, voivodeshipFilter, powiatFilter, debouncedQuery, sort]
   );
 
-  // Any search/sort change invalidates the current page number — always land
-  // back on page 1 rather than risk showing an out-of-range page for the new,
-  // differently-ordered result set.
+  // Any filter (or sort) change invalidates the current page number — always
+  // land back on page 1 rather than risk showing an out-of-range page for
+  // the new, differently-ordered result set.
   useEffect(() => {
     setPage(1);
-  }, [debouncedQuery, sort]);
+  }, [gminaFilter, voivodeshipFilter, powiatFilter, debouncedQuery, sort]);
 
   useEffect(() => {
     setLoading(true);
@@ -154,11 +218,15 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
     fetchOrganizations(page).finally(() => setLoading(false));
   }
 
-  const hasActiveFilters = query.trim() !== '';
+  const hasActiveFilters =
+    query.trim() !== '' || voivodeshipFilter !== 'ALL' || powiatFilter !== 'ALL' || gminaFilter !== 'ALL';
 
   function clearFilters() {
     setQuery('');
     setDebouncedQuery('');
+    setVoivodeshipFilter('ALL');
+    setPowiatFilter('ALL');
+    setGminaFilter('ALL');
   }
 
   const rangeLabel =
@@ -168,6 +236,60 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
     <div className="space-y-4">
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center gap-3 flex-wrap">
+          <select
+            value={voivodeshipFilter}
+            onChange={(e) => setVoivodeshipFilter(e.target.value)}
+            className="lg:flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2.5 px-3 text-xs font-semibold text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
+          >
+            <option value="ALL">Wszystkie województwa</option>
+            {voivodeships.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={powiatFilter}
+            onChange={(e) => setPowiatFilter(e.target.value)}
+            disabled={voivodeshipFilter === 'ALL'}
+            className="lg:flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2.5 px-3 text-xs font-semibold text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <option value="ALL">Wszystkie powiaty</option>
+            {powiatsInVoivodeship.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={gminaFilter}
+            onChange={(e) => setGminaFilter(e.target.value)}
+            className="lg:flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2.5 px-3 text-xs font-semibold text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
+          >
+            <option value="ALL">Wszystkie gminy</option>
+            {gminasInFilter.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortValue)}
+            className="lg:flex-1 rounded-xl border border-slate-200 bg-slate-50 py-2.5 px-3 text-xs font-semibold text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 flex-wrap pt-3 border-t border-slate-100">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
@@ -177,18 +299,6 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
               className="w-full lg:h-[39px] rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-3 text-sm text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
             />
           </div>
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortValue)}
-            className="lg:w-64 rounded-xl border border-slate-200 bg-slate-50 py-2.5 px-3 text-xs font-semibold text-slate-700 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 transition"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
 
           <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">{rangeLabel}</span>
 
@@ -232,7 +342,7 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
             <Building2 className="h-6 w-6" />
           </div>
           <h3 className="text-sm font-bold text-slate-700">Brak wyników</h3>
-          <p className="text-xs text-slate-400 mt-1">Zmień kryteria wyszukiwania.</p>
+          <p className="text-xs text-slate-400 mt-1">Zmień kryteria wyszukiwania lub filtry.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

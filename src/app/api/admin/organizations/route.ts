@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 
 const DEFAULT_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
-const SORT_FIELDS = ['name', 'city', 'gmina', 'createdAt'] as const;
+const SORT_FIELDS = ['name', 'city', 'gmina', 'powiat', 'voivodeship', 'createdAt'] as const;
 const SORT_DIRS = ['asc', 'desc'] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 type SortDir = (typeof SORT_DIRS)[number];
@@ -20,6 +20,24 @@ const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().max(1_000_000).optional().default(1),
   pageSize: z.coerce.number().int().positive().max(MAX_PAGE_SIZE).optional().default(DEFAULT_PAGE_SIZE),
   q: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+  // Organization has no powiat/voivodeship of its own — these filter through
+  // the required gmina relation (see buildOrderBy's matching `gmina: {...}`
+  // shape), same as the gmina:asc/desc sort option already did.
+  gminaId: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+  voivodeship: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+  powiat: z
     .string()
     .trim()
     .optional()
@@ -35,9 +53,13 @@ function buildOrderBy(sortBy: SortField, sortDir: SortDir): Prisma.OrganizationO
       ? { city: sortDir }
       : sortBy === 'gmina'
         ? { gmina: { name: sortDir } }
-        : sortBy === 'createdAt'
-          ? { createdAt: sortDir }
-          : { name: sortDir };
+        : sortBy === 'powiat'
+          ? { gmina: { powiat: sortDir } }
+          : sortBy === 'voivodeship'
+            ? { gmina: { voivodeship: sortDir } }
+            : sortBy === 'createdAt'
+              ? { createdAt: sortDir }
+              : { name: sortDir };
   return [primary, { id: 'asc' }];
 }
 
@@ -127,9 +149,20 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Nieprawidłowe parametry filtrowania.' }, { status: 400 });
   }
-  const { page, pageSize, q, sortBy, sortDir } = parsed.data;
+  const { page, pageSize, q, gminaId, voivodeship, powiat, sortBy, sortDir } = parsed.data;
+
+  // voivodeship and powiat both filter through the same `gmina` relation key
+  // — building them as two separate spreads (`{ gmina: {...} }` each) would
+  // have the second silently clobber the first instead of merging, so both
+  // are combined into one `gmina` object up front.
+  const gminaWhere: Prisma.GminaWhereInput = {
+    ...(voivodeship ? { voivodeship } : {}),
+    ...(powiat ? { powiat } : {}),
+  };
 
   const where: Prisma.OrganizationWhereInput = {
+    ...(gminaId ? { gminaId } : {}),
+    ...(Object.keys(gminaWhere).length > 0 ? { gmina: gminaWhere } : {}),
     ...(q ? { OR: buildSearchOr(q) } : {}),
   };
 
