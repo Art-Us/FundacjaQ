@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/lib/authz';
 import { requiresGmina } from '@/lib/gmina';
 import { parseClientIp } from '@/lib/clientIp';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 
 /** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
 export function requestMeta(req: Request): RequestMeta {
@@ -338,7 +339,7 @@ export async function revertAuditLog(
   meta?: RequestMeta
 ): Promise<RevertResult> {
   try {
-    const revertedLogIds = await prisma.$transaction(async (tx) => {
+    const { revertedLogIds, revertedUserIds } = await prisma.$transaction(async (tx) => {
       const target = await tx.auditLog.findUnique({ where: { id: logId } });
       if (!target) throw new RevertAbort(notFound('Wpis dziennika nie istnieje.'));
       if (target.revertedAt) throw new RevertAbort(conflict('Ta zmiana została już cofnięta.'));
@@ -429,8 +430,16 @@ export async function revertAuditLog(
         });
       }
 
-      return steps.map((step) => step.id);
+      return {
+        revertedLogIds: steps.map((step) => step.id),
+        revertedUserIds: steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+      };
     });
+
+    // Best-effort, outside the transaction: a USER step's write already
+    // committed above, so a cache left stale here only costs up to the
+    // 2-minute TTL (lib/userStatusCache.ts), not a security hole.
+    await Promise.all(revertedUserIds.map((id) => invalidateUserStatusCache(id)));
 
     return { ok: true, revertedLogIds };
   } catch (err) {

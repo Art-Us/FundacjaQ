@@ -6,6 +6,7 @@ import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { consumeLimit, passwordResetLimiter } from '@/lib/rateLimit';
 import { resetAttempts } from '@/lib/lockout';
 import { parseClientIp } from '@/lib/clientIp';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 
 export const runtime = 'nodejs';
 
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
     return invalidResponse;
   }
 
+  await invalidateUserStatusCache(resetToken.userId);
   await resetAttempts(resetToken.user.email);
 
   return NextResponse.json({ message: 'Hasło zostało zmienione. Możesz się zalogować.' });

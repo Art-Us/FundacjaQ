@@ -6,6 +6,7 @@ import { requireAdmin, isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/l
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 
 export const runtime = 'nodejs';
 
@@ -166,6 +167,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         select: adminUserSelect,
       });
     });
+    await invalidateUserStatusCache(user.id);
     await recordAudit({
       actor: admin,
       action: 'USER_UPDATE',
@@ -219,6 +221,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
 
   try {
     await prisma.user.delete({ where: { id: target.id } });
+    await invalidateUserStatusCache(target.id);
     await recordAudit({
       actor: admin,
       action: 'USER_DELETE',

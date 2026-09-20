@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
 import { recordAudit, requestMeta, snapshotUser } from '@/lib/auditLog';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     console.error('[users] failed to activate user:', err);
     return NextResponse.json({ error: 'Nie udało się aktywować konta.' }, { status: 500 });
   }
+
+  await invalidateUserStatusCache(target.id);
 
   await recordAudit({
     actor: user,

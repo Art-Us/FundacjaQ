@@ -15,11 +15,15 @@ vi.mock('@/lib/password', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/password')>();
   return { ...actual, isPasswordPwned: vi.fn() };
 });
+vi.mock('@/lib/userStatusCache', () => ({
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
 import { resetAttempts } from '@/lib/lockout';
 import { isPasswordPwned } from '@/lib/password';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { hashToken } from '@/lib/tokens';
 import { POST } from './route';
 
@@ -56,6 +60,7 @@ beforeEach(() => {
   vi.mocked(consumeLimit).mockReset().mockResolvedValue(true);
   vi.mocked(resetAttempts).mockReset().mockResolvedValue(undefined);
   vi.mocked(isPasswordPwned).mockReset().mockResolvedValue(false);
+  vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
 });
 
 describe('POST /api/auth/reset-password', () => {

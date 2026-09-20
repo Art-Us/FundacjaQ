@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
 import { redis } from './redis';
+import { invalidateUserStatusCache } from './userStatusCache';
 
 const MAX_FAILED_ATTEMPTS = 20;
 const LOCKOUT_SECONDS = 60 * 60; // 1h
@@ -67,8 +68,13 @@ export async function recordFailedAttempt(email: string): Promise<void> {
   // (e.g. the "invalid email or password" error in auth.ts).
   try {
     const until = new Date(Date.now() + LOCKOUT_SECONDS * 1000);
-    await prisma.user.update({ where: { email }, data: { lockedUntil: until } });
+    const locked = await prisma.user.update({ where: { email }, data: { lockedUntil: until }, select: { id: true } });
     await redis.set(lockKey(email), until.getTime(), 'EX', LOCKOUT_SECONDS);
+    // lockedUntil is one of the fields cached by lib/userStatusCache.ts — an
+    // already-active session with a still-fresh "not locked" cache entry
+    // would otherwise keep passing the jwt callback's revalidation for up to
+    // its TTL even after this lockout takes effect in Postgres.
+    await invalidateUserStatusCache(locked.id);
   } catch (err) {
     console.error('[lockout] failed to escalate to a full lockout (non-fatal):', err);
   }
@@ -82,8 +88,12 @@ export async function resetAttempts(email: string): Promise<void> {
   } catch (err) {
     console.error('[lockout] failed to clear redis lock key (non-fatal):', err);
   }
-  await prisma.user.update({
-    where: { email },
-    data: { failedAttempts: 0, lockedUntil: null },
-  }).catch(() => null);
+  const reset = await prisma.user
+    .update({
+      where: { email },
+      data: { failedAttempts: 0, lockedUntil: null },
+      select: { id: true },
+    })
+    .catch(() => null);
+  if (reset) await invalidateUserStatusCache(reset.id);
 }

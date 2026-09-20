@@ -28,6 +28,11 @@ vi.mock('./attemptTracker', () => ({
 vi.mock('./captcha', () => ({
   verifyCaptcha: vi.fn(),
 }));
+vi.mock('./userStatusCache', () => ({
+  getCachedUserStatus: vi.fn(),
+  setCachedUserStatus: vi.fn(),
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from './prisma';
 import { checkLockout, recordFailedAttempt, resetAttempts } from './lockout';
@@ -35,6 +40,7 @@ import { checkIpBlock, recordFailedLoginByIp, clearIpFailures } from './ipLockou
 import { checkLoginPairBlock, recordFailedLoginPair, clearLoginPairFailures } from './loginPairLockout';
 import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker';
 import { verifyCaptcha } from './captcha';
+import { getCachedUserStatus, setCachedUserStatus } from './userStatusCache';
 import { hashPassword } from './password';
 import { authOptions } from './auth';
 
@@ -68,6 +74,10 @@ beforeEach(() => {
   vi.mocked(clearAttempts).mockReset().mockResolvedValue(undefined);
   vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
   prisma.loginAttempt.create.mockResolvedValue({} as any);
+  // Defaults to a cache miss so every jwt-callback test still exercises (and
+  // asserts on) the Postgres fallback path, same as before the cache existed.
+  vi.mocked(getCachedUserStatus).mockReset().mockResolvedValue(null);
+  vi.mocked(setCachedUserStatus).mockReset().mockResolvedValue(undefined);
 });
 
 describe('authorize()', () => {

@@ -11,10 +11,14 @@ vi.mock('@/lib/authz', async () => {
     requireAdmin: vi.fn(),
   };
 });
+vi.mock('@/lib/userStatusCache', () => ({
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { GET, PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -58,6 +62,7 @@ beforeEach(() => {
   // reinstalled here (see the doc comment on installTransactionMock).
   installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
+  vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
 });
 
 describe('GET /api/admin/users/[id]', () => {
