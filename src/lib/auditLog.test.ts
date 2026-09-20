@@ -7,6 +7,9 @@ vi.mock('./authz', async () => {
   const actual = await vi.importActual<typeof import('./authz')>('./authz');
   return { ...actual, isLastActiveAdmin: vi.fn() };
 });
+vi.mock('./userStatusCache', () => ({
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from './prisma';
 // Imported by its real path (not the mocked './prisma' specifier) purely so
@@ -14,6 +17,7 @@ import { prisma as prismaImport } from './prisma';
 // on-disk module at runtime, so this is the identical instance either way.
 import { installTransactionMock } from './__mocks__/prisma';
 import { isLastActiveAdmin } from './authz';
+import { invalidateUserStatusCache } from './userStatusCache';
 import {
   recordAudit,
   requestMeta,
@@ -144,6 +148,7 @@ beforeEach(() => {
   installTransactionMock(prisma);
   vi.mocked(isLastActiveAdmin).mockReset();
   vi.mocked(isLastActiveAdmin).mockResolvedValue(false);
+  vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
 });
 
 describe('snapshot*', () => {

@@ -10,9 +10,13 @@ vi.mock('@/lib/authz', async () => {
     requireAdminOrCoordinator: vi.fn(),
   };
 });
+vi.mock('@/lib/userStatusCache', () => ({
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -44,6 +48,7 @@ function callRoute(id = 'target-1', body?: unknown) {
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdminOrCoordinator).mockReset();
+  vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
 });
 
 describe('POST /api/admin/users/[id]/deactivate', () => {

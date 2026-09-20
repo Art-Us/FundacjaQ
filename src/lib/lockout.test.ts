@@ -108,8 +108,8 @@ describe('recordFailedAttempt', () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 
-  it('locks the account in both Postgres and Redis once the threshold is reached', async () => {
-    prisma.user.update.mockResolvedValueOnce({ failedAttempts: 20 } as any).mockResolvedValueOnce({} as any);
+  it('locks the account in both Postgres and Redis once the threshold is reached, and invalidates the user-status cache', async () => {
+    prisma.user.update.mockResolvedValueOnce({ failedAttempts: 20 } as any).mockResolvedValueOnce({ id: 'user-1' } as any);
 
     await recordFailedAttempt('user@example.com');
 
@@ -118,6 +118,9 @@ describe('recordFailedAttempt', () => {
       expect.objectContaining({ data: expect.objectContaining({ lockedUntil: expect.any(Date) }) })
     );
     expect(redis.set).toHaveBeenCalledWith('lockout:user@example.com', expect.any(Number), 'EX', expect.any(Number));
+    // A session already cached as "not locked" (lib/userStatusCache.ts) must not
+    // outlive this lockout for up to its TTL — the cache entry has to go too.
+    expect(redis.del).toHaveBeenCalledWith('user-status:user-1');
   });
 
   it('silently no-ops for a nonexistent email instead of throwing (brute-force probe safety)', async () => {
@@ -137,8 +140,8 @@ describe('recordFailedAttempt', () => {
 });
 
 describe('resetAttempts', () => {
-  it('clears the Redis lock key and resets Postgres counters', async () => {
-    prisma.user.update.mockResolvedValue({} as any);
+  it('clears the Redis lock key, resets Postgres counters, and invalidates the user-status cache', async () => {
+    prisma.user.update.mockResolvedValue({ id: 'user-1' } as any);
 
     await resetAttempts('user@example.com');
 
@@ -146,7 +149,9 @@ describe('resetAttempts', () => {
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { email: 'user@example.com' },
       data: { failedAttempts: 0, lockedUntil: null },
+      select: { id: true },
     });
+    expect(redis.del).toHaveBeenCalledWith('user-status:user-1');
   });
 
   it('does not throw if the user no longer exists', async () => {

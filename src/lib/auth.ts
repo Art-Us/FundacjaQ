@@ -14,6 +14,7 @@ import { getAttemptCount, recordAttempt, clearAttempts } from './attemptTracker'
 import { verifyCaptcha } from './captcha';
 import { SESSION_COOKIE_NAME } from './sessionCookie';
 import { parseClientIp } from './clientIp';
+import { getCachedUserStatus, setCachedUserStatus, type CachedUserStatus } from './userStatusCache';
 
 const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8h
 const isProd = process.env.NODE_ENV === 'production';
@@ -151,29 +152,56 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
 
+      const userId = token.sub as string;
+
       // Re-validate on every session check so a deactivated account or a
       // password reset kills the session within one round trip, without
-      // needing a separate refresh-token/revocation-list system.
-      const dbUser = await prisma.user.findUnique({
-        where: { id: token.sub },
-        select: {
-          isActive: true,
-          lockedUntil: true,
-          passwordChangedAt: true,
-          role: true,
-          gminaId: true,
-          organizationId: true,
-        },
-      });
+      // needing a separate refresh-token/revocation-list system. Redis is the
+      // fast path (lib/userStatusCache.ts) so this only costs a Postgres
+      // round trip on a cache miss, not on every request — every write that
+      // affects these fields explicitly invalidates the cache, and a 2-minute
+      // TTL is the safety net for anything that doesn't (e.g. a direct DB edit).
+      let status: CachedUserStatus | null = await getCachedUserStatus(userId);
+      if (!status) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            isActive: true,
+            lockedUntil: true,
+            passwordChangedAt: true,
+            role: true,
+            gminaId: true,
+            organizationId: true,
+          },
+        });
+
+        // Distinguished from the other invalidation causes (stale password, temporary
+        // lockout) so the client can show "your account was deactivated, contact an
+        // admin" specifically for this one, rather than a generic session-expired redirect.
+        if (!dbUser) {
+          token.invalid = true;
+          token.invalidReason = 'deactivated';
+          return token;
+        }
+
+        status = {
+          isActive: dbUser.isActive,
+          lockedUntil: dbUser.lockedUntil ? dbUser.lockedUntil.toISOString() : null,
+          passwordChangedAt: dbUser.passwordChangedAt.toISOString(),
+          role: dbUser.role,
+          gminaId: dbUser.gminaId,
+          organizationId: dbUser.organizationId,
+        };
+        // Cached even when isActive is false, so a still-deactivated user's
+        // subsequent requests keep hitting the fast path too.
+        await setCachedUserStatus(userId, status);
+      }
 
       const issuedAtMs = typeof token.iat === 'number' ? token.iat * 1000 : 0;
-      const passwordChangedAfterIssue = dbUser ? dbUser.passwordChangedAt.getTime() > issuedAtMs : true;
-      const stillLocked = dbUser?.lockedUntil ? dbUser.lockedUntil.getTime() > Date.now() : false;
+      const passwordChangedAfterIssue = new Date(status.passwordChangedAt).getTime() > issuedAtMs;
+      const stillLocked = status.lockedUntil ? new Date(status.lockedUntil).getTime() > Date.now() : false;
 
-      // Distinguished from the other invalidation causes (stale password, temporary
-      // lockout) so the client can show "your account was deactivated, contact an
-      // admin" specifically for this one, rather than a generic session-expired redirect.
-      if (!dbUser || !dbUser.isActive) {
+      if (!status.isActive) {
         token.invalid = true;
         token.invalidReason = 'deactivated';
         return token;
@@ -185,9 +213,9 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
 
-      token.role = dbUser.role;
-      token.gminaId = dbUser.gminaId;
-      token.organizationId = dbUser.organizationId;
+      token.role = status.role;
+      token.gminaId = status.gminaId;
+      token.organizationId = status.organizationId;
       token.invalid = false;
       return token;
     },

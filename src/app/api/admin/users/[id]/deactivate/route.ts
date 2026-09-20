@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, canManageUser, isLastActiveAdmin } from '@/lib/authz';
 import { recordAudit, requestMeta, snapshotUser } from '@/lib/auditLog';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 
 export const runtime = 'nodejs';
 
@@ -51,6 +52,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     console.error('[users] failed to deactivate user:', err);
     return NextResponse.json({ error: 'Nie udało się dezaktywować konta.' }, { status: 500 });
   }
+
+  await invalidateUserStatusCache(target.id);
 
   await recordAudit({
     actor: user,
