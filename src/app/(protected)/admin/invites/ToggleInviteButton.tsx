@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useBackdropDismiss } from '@/components/ui/useBackdropDismiss';
+import { copyToClipboard } from '@/lib/clipboard';
 
 export type InviteStatus = 'Aktywne' | 'Wykorzystane' | 'Unieważnione' | 'Wygasłe';
 
@@ -62,8 +63,12 @@ export function ToggleInviteButton({ inviteId, status }: ToggleInviteButtonProps
 
   async function handleCopy() {
     if (!inviteUrl) return;
-    await navigator.clipboard.writeText(inviteUrl);
-    setCopied(true);
+    const ok = await copyToClipboard(inviteUrl);
+    if (ok) {
+      setCopied(true);
+    } else {
+      setError('Nie udało się skopiować linku — zaznacz go ręcznie i skopiuj (Ctrl+C).');
+    }
   }
 
   return (

@@ -10,6 +10,7 @@ import { getAttemptCount, recordAttempt } from '@/lib/attemptTracker';
 import { verifyCaptcha } from '@/lib/captcha';
 import { checkIpBlock, IP_BLOCKED_MESSAGE } from '@/lib/ipLockout';
 import { parseClientIp } from '@/lib/clientIp';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export interface AcceptInviteResult {
   ok: boolean;
@@ -125,6 +126,15 @@ export async function acceptInvite(
     console.error('[invite] failed to accept invite:', err);
     return { ok: false, error: 'Nie udało się utworzyć konta. Spróbuj ponownie później.' };
   }
+
+  // Self-service signup never goes through recordAudit() (no admin/system
+  // actor to attribute it to, and it's intentionally not part of the audit
+  // trail — see the REVERTIBLE_ACTIONS comment in lib/auditLog.ts), so this
+  // is published directly rather than picked up automatically the way every
+  // admin-driven USER mutation is. Lets an ADMIN's open tab learn about a
+  // new pending account (components/NewUserNotifier.tsx) the same way it
+  // learns about everything else.
+  await publishAdminEvent({ scope: 'users', action: 'USER_CREATE' });
 
   return { ok: true };
 }

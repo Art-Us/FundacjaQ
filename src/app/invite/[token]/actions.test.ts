@@ -25,6 +25,9 @@ vi.mock('@/lib/ipLockout', () => ({
 vi.mock('next/headers', () => ({
   headers: vi.fn(),
 }));
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
@@ -34,6 +37,7 @@ import { verifyCaptcha } from '@/lib/captcha';
 import { checkIpBlock } from '@/lib/ipLockout';
 import { headers } from 'next/headers';
 import { hashToken } from '@/lib/tokens';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { acceptInvite } from './actions';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -67,6 +71,7 @@ beforeEach(() => {
   vi.mocked(verifyCaptcha).mockReset().mockResolvedValue(true);
   vi.mocked(checkIpBlock).mockReset().mockResolvedValue({ blocked: false, until: null });
   vi.mocked(headers).mockReset().mockReturnValue(new Headers({ 'x-forwarded-for': '10.0.0.1' }) as any);
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
   prisma.user.findUnique.mockResolvedValue(null);
 });
 

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
 import { UsersDirectory } from './UsersDirectory';
+import { ClearNewUserNotice } from './ClearNewUserNotice';
 
 export default async function AdminUsersPage() {
   const session = await getSession();
@@ -33,6 +34,9 @@ export default async function AdminUsersPage() {
           dropdown props above, which are fetched here on the server and
           would otherwise go stale until the next full navigation. */}
       <AdminEventsRefresh scope={['gminas', 'organizations']} />
+      {/* The dot itself is ADMIN-only (Sidebar.tsx) — no point mounting the
+          listener for a COORDINATOR, who could never have lit it up. */}
+      {isAdmin && <ClearNewUserNotice />}
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Użytkownicy</h1>
         <p className="text-sm text-slate-500 mt-1">

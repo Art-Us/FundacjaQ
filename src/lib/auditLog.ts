@@ -89,8 +89,8 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 
   const entityScope = ENTITY_TYPE_TO_ADMIN_SCOPE[input.entityType];
   if (entityScope) {
-    await publishAdminEvent({ scope: 'logs' });
-    await publishAdminEvent({ scope: entityScope });
+    await publishAdminEvent({ scope: 'logs', action: input.action });
+    await publishAdminEvent({ scope: entityScope, action: input.action });
   }
 }
 
