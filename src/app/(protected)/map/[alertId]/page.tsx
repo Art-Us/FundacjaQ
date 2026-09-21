@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ArrowLeft, Building, Calendar, MapPin, MessageSquare, User } from 'lucide-react';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { alertInclude } from '@/lib/alertInclude';
 import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, isAlertOwnerOrg } from '@/lib/authz';
 import { availableCategoryIds } from '@/lib/resourceMatching';
 import { ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS, SEVERITY_LABELS, getSeverityBadgeInfo } from '@/lib/alertLabels';
@@ -22,23 +23,12 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
   }
   const currentUser = session.user;
 
+  // Same allowlisted shape as the /map list (lib/alertInclude.ts) — the author
+  // is narrowed to name + organization name before it ever reaches the client
+  // below, but the query itself must not pull passwordHash & co. either.
   const alert = await prisma.alert.findUnique({
     where: { id: params.alertId },
-    include: {
-      gmina: true,
-      author: { include: { organization: true } },
-      needs: {
-        include: {
-          allocations: {
-            include: {
-              donorOrg: { select: { id: true, name: true } },
-              createdBy: { select: { id: true, name: true } },
-            },
-          },
-        },
-      },
-      _count: { select: { messages: true } },
-    },
+    include: alertInclude,
   });
 
   // Fail closed exactly like the map's own list (scopedGminaWhere) — an

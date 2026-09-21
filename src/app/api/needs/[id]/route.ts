@@ -4,6 +4,7 @@ import { Prisma, type AlertNeed } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { describeCheckViolation } from '@/lib/dbErrors';
 
 export const runtime = 'nodejs';
 
@@ -101,7 +102,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   let need;
   try {
     need = await prisma.alertNeed.update({ where: { id: target.id }, data });
-  } catch {
+  } catch (err) {
+    // Snapshot check above vs. a donor allocating in the same instant — the
+    // CHECK constraint need_fulfilled_within_needed (Крок 3) has the final say.
+    const violation = describeCheckViolation(err);
+    if (violation) {
+      return NextResponse.json(
+        { error: 'Nie można ustawić ilości poniżej już przydzielonej w aktywnych przydziałach.' },
+        { status: 409 }
+      );
+    }
+    console.error('[needs] update failed:', err);
     return NextResponse.json({ error: 'Nie udało się zaktualizować zapotrzebowania.' }, { status: 500 });
   }
 

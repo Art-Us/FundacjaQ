@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import type { Prisma } from '@prisma/client';
+import type { AlertWithRelations } from '@/lib/alertInclude';
 import {
   ALERT_STATUS_LABELS,
   ALERT_CATEGORY_LABELS,
@@ -57,24 +57,10 @@ const AlertMap = dynamic(() => import('./AlertMap'), {
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
-const alertInclude = {
-  gmina: true,
-  author: { include: { organization: true } },
-  needs: {
-    include: {
-      allocations: {
-        include: {
-          donorOrg: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, name: true } },
-        },
-      },
-    },
-  },
-  // Total journal entries + replies (Крок 58) — feeds the "Forum" icon
-  // badge on each card below.
-  _count: { select: { messages: true } },
-} satisfies Prisma.AlertInclude;
-type AlertWithGmina = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
+// The exact shape of each alert is defined once in lib/alertInclude.ts (shared
+// with the /map server page that fetches them) — see the comment there for why
+// author/gmina are a narrow `select` and must never become `include: true`.
+type AlertWithGmina = AlertWithRelations;
 
 type Timeframe = '24h' | '48h' | '72h' | 'tydzien' | 'miesiac' | 'rok' | 'wszystkie' | 'custom';
 type SortOption = 'date-desc' | 'date-asc' | 'severity-desc' | 'severity-asc' | 'name-asc' | 'name-desc';

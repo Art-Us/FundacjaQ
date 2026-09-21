@@ -4,6 +4,7 @@ import { Prisma, type Resource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, type AuthorizedUser } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { describeCheckViolation } from '@/lib/dbErrors';
 
 export const runtime = 'nodejs';
 
@@ -116,7 +117,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   let resource;
   try {
     resource = await prisma.resource.update({ where: { id: target.id }, data });
-  } catch {
+  } catch (err) {
+    // The reservedQuantity comparison above used a snapshot; if an allocation
+    // reserved more in the meantime, the CHECK constraint
+    // resource_reserved_within_quantity (Крок 3) rejects the shrink here.
+    const violation = describeCheckViolation(err);
+    if (violation) {
+      return NextResponse.json(
+        { error: 'Nie można ustawić ilości poniżej już zarezerwowanej w aktywnych przydziałach.' },
+        { status: 409 }
+      );
+    }
+    console.error('[resources] update failed:', err);
     return NextResponse.json({ error: 'Nie udało się zaktualizować zasobu.' }, { status: 500 });
   }
 

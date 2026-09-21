@@ -11,6 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { fakeCheckViolation } from '@/lib/__mocks__/prismaErrors';
 import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -45,6 +46,23 @@ beforeEach(() => {
 });
 
 describe('PATCH /api/needs/[id]', () => {
+  // Snapshot said quantityFulfilled 0; a donor allocated 4 in the meantime;
+  // the owner shrinks quantityNeeded to 2 — the DB CHECK constraint
+  // need_fulfilled_within_needed has the final say, surfaced as the same 409
+  // the in-route guard gives.
+  it('maps a DB CHECK constraint violation on the shrink to 409', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue(baseNeed as any);
+    prisma.alertNeed.update.mockRejectedValue(fakeCheckViolation('need_fulfilled_within_needed', 'AlertNeed'));
+
+    const res = await PATCH(makeRequest('PATCH', { quantityNeeded: 2 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('poniżej już przydzielonej');
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it('returns 403 with no DB call when unauthenticated', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
 

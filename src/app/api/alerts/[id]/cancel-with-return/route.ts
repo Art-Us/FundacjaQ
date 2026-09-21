@@ -10,6 +10,7 @@ import {
   recalculateNeedFulfillment,
 } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { describeCheckViolation } from '@/lib/dbErrors';
 
 export const runtime = 'nodejs';
 
@@ -197,7 +198,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       return { updatedAlert, auditEntries };
     });
-  } catch {
+  } catch (err) {
+    // Same snapshot-vs-reality gap as return-events: the per-allocation
+    // projectedTotal check above can be stale by the time the transaction
+    // runs. A CHECK violation (Крок 3) rolls the whole cancel back — nothing
+    // is half-applied — so a 409 asking to reload is the right answer.
+    const violation = describeCheckViolation(err);
+    if (violation) {
+      return NextResponse.json({ error: violation.message }, { status: 409 });
+    }
+    console.error('[cancel-with-return] transaction failed:', err);
     return NextResponse.json({ error: 'Nie udało się anulować alertu.' }, { status: 500 });
   }
 
