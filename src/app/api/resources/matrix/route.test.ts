@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 import { NextRequest } from 'next/server';
@@ -14,6 +14,13 @@ import { requireAdminOrCoordinator } from '@/lib/authz';
 import { GET } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
+// resource.groupBy's real Prisma type is a heavily overloaded generic
+// (conditional on `by`/`orderBy`/`_sum`/...) — DeepMockProxy's mapped type
+// can't unify that with a mock function signature, so TS exposes the plain
+// method type instead of one with `mockResolvedValue`. It IS mocked at
+// runtime (mockReset(prisma) resets it like every other method); this is a
+// one-time cast so the tests below don't each need their own `as any`.
+const groupByMock = prisma.resource.groupBy as unknown as Mock;
 
 function makeRequest(query = '') {
   return new NextRequest(`http://localhost/api/resources/matrix${query}`);
@@ -58,7 +65,7 @@ describe('GET /api/resources/matrix', () => {
   it('restricts tiles to a single group when the group filter is set', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.resourceCategory.findMany.mockResolvedValue([]);
-    prisma.resource.groupBy.mockResolvedValue([] as any);
+    groupByMock.mockResolvedValue([]);
 
     const res = await GET(makeRequest('?group=WATER'));
     const body = await res.json();
@@ -72,11 +79,11 @@ describe('GET /api/resources/matrix', () => {
       { id: 'cat-water', name: 'Woda pitna', group: 'WATER' },
       { id: 'cat-eq', name: 'Sprzęt medyczny', group: 'EQUIPMENT' },
     ] as any);
-    prisma.resource.groupBy.mockResolvedValue([
+    groupByMock.mockResolvedValue([
       { categoryId: 'cat-water', horizon: 'H24', _sum: { quantity: 10, reservedQuantity: 4 } },
       { categoryId: 'cat-water', horizon: 'H72', _sum: { quantity: 5, reservedQuantity: 0 } },
       { categoryId: 'cat-eq', horizon: 'WEEK', _sum: { quantity: 3, reservedQuantity: 1 } },
-    ] as any);
+    ]);
 
     const res = await GET(makeRequest());
     const body = await res.json();
@@ -104,7 +111,7 @@ describe('GET /api/resources/matrix', () => {
   it('passes organizationId and group filters through to the groupBy query', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1' });
     prisma.resourceCategory.findMany.mockResolvedValue([]);
-    prisma.resource.groupBy.mockResolvedValue([] as any);
+    groupByMock.mockResolvedValue([]);
 
     await GET(makeRequest('?organizationId=o1&group=WATER'));
 

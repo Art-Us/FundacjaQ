@@ -57,6 +57,70 @@ export function isAllocationRecipient(
 }
 
 /**
+ * Whether `user`'s organization has donated at least one resource to `alert`
+ * — i.e. it shows up as `donorOrgId` on one of the alert's allocations,
+ * regardless of that allocation's status or which need it was made against.
+ * Gates replying in the alert's operational journal/forum thread
+ * (canReplyToAlertForum below), alongside the owner org and ADMIN/COORDINATOR
+ * — the same broad "everyone involved" group the original flat-forum design
+ * (R12) allowed to write, now that a narrower group (ADMIN/COORDINATOR only)
+ * is required to start a new root entry ("wpis").
+ */
+export function isAlertDonorOrg(
+  alert: { allocations: { donorOrgId: string }[] },
+  user: { organizationId?: string | null }
+): boolean {
+  return !!user.organizationId && alert.allocations.some((alloc) => alloc.donorOrgId === user.organizationId);
+}
+
+/**
+ * Whether `user` may create a new root entry ("wpis") in an alert's
+ * operational journal/forum — deliberately narrower than who may reply to
+ * one (canReplyToAlertForum below): only ADMIN/COORDINATOR run the journal,
+ * per the user's decision when refining Фаза 8 of
+ * docs/resource_management_plan.md (Крок 52).
+ */
+export function canPostAlertJournalEntry(user: { role: string }): boolean {
+  return user.role === 'ADMIN' || user.role === 'COORDINATOR';
+}
+
+/**
+ * Whether `user` may see an alert's operational journal/forum at all — the
+ * same gmina-scoped visibility rule that decides whether the alert itself
+ * shows up on the map (scopedGminaWhere, lib/gmina.ts), just re-checked
+ * against one already-fetched alert instead of filtering a list. Shared by
+ * both journal endpoints (Крок 53's root-entry route and Крок 54's replies
+ * route) so the two don't each carry their own copy of this check.
+ * Deliberately broader than the rest of the resource module
+ * (requireAdminOrCoordinator + the hard /zasoby perimeter, Крок 31) — the
+ * journal inherits the alert's own visibility, VOLUNTEER included (see
+ * docs/are-you-familiar-with-tidy-blum.md, розділ 4, "Форум алерту — окремий,
+ * м'якший периметр").
+ */
+export function canViewAlertJournal(
+  alert: { gminaId: string },
+  user: { role: string; gminaId: string | null }
+): boolean {
+  return user.role === 'ADMIN' || alert.gminaId === user.gminaId;
+}
+
+/**
+ * Whether `user` may post a reply in the chat thread under an existing
+ * journal entry — the same broad group the original flat-forum design (R12)
+ * allowed to write: the alert's owner org, any org that donated to it, or
+ * ADMIN/COORDINATOR. Deliberately not role-gated for org members (a
+ * VOLUNTEER whose organization owns or donated to the alert can still
+ * reply) — only creating the root entry itself is restricted to
+ * ADMIN/COORDINATOR (canPostAlertJournalEntry above).
+ */
+export function canReplyToAlertForum(
+  alert: { organizationId: string | null; allocations: { donorOrgId: string }[] },
+  user: { role: string; organizationId?: string | null }
+): boolean {
+  return canPostAlertJournalEntry(user) || isAlertOwnerOrg(alert, user) || isAlertDonorOrg(alert, user);
+}
+
+/**
  * Whether `user` may manage (edit/resolve/cancel) `alert` — gates "Edytuj",
  * "Rozwiąż" and "Odwołaj" on the alert's card (client, AlertsMapView.tsx) and
  * PATCH /api/alerts/[id] (server) alike, from this single source of truth.

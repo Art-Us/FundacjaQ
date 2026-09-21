@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import type { Prisma } from '@prisma/client';
 import {
   ALERT_STATUS_LABELS,
@@ -43,6 +44,7 @@ import {
   Siren,
   SlidersHorizontal,
   PackageCheck,
+  MessageSquare,
 } from 'lucide-react';
 
 const AlertMap = dynamic(() => import('./AlertMap'), {
@@ -68,6 +70,9 @@ const alertInclude = {
       },
     },
   },
+  // Total journal entries + replies (Крок 58) — feeds the "Forum" icon
+  // badge on each card below.
+  _count: { select: { messages: true } },
 } satisfies Prisma.AlertInclude;
 type AlertWithGmina = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
 
@@ -193,6 +198,32 @@ interface AlertsMapViewProps {
   // Крок 43/46) via lib/resourceMatching.ts. Not consumed yet: the badge
   // itself is wired into the card markup in Крок 46, alongside <AlertNeedsBlock>.
   myResources: { categoryId: string; quantity: number; reservedQuantity: number }[];
+}
+
+// "Forum" icon-link (Крок 58) — deliberately its own small component rather
+// than inline JSX in each card block below (active + archived render it
+// identically): links to the alert's detail subpage (map/[alertId], Крок
+// 55) with a badge showing the total journal entries + replies
+// (alert._count.messages, Крок 53/54). Always rendered, for every alert,
+// regardless of role or whether AlertNeedsBlock even renders anything —
+// unlike the rest of the resource module, the journal/forum is visible to
+// everyone who can see the alert at all (розділ 4,
+// docs/are-you-familiar-with-tidy-blum.md).
+function ForumLinkButton({ alertId, count }: { alertId: string; count: number }) {
+  return (
+    <Link
+      href={`/map/${alertId}`}
+      title="Dziennik operacyjny i forum komunikatu"
+      className="relative flex items-center justify-center h-9 w-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition shrink-0"
+    >
+      <MessageSquare className="h-4 w-4" />
+      {count > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] font-bold leading-none">
+          {count}
+        </span>
+      )}
+    </Link>
+  );
 }
 
 export default function AlertsMapView({
@@ -983,6 +1014,8 @@ export default function AlertsMapView({
                       <span>Na mapie</span>
                     </button>
 
+                    <ForumLinkButton alertId={alert.id} count={alert._count.messages} />
+
                     {canManageAlert(alert) && (
                       <button
                         type="button"
@@ -1265,6 +1298,8 @@ export default function AlertsMapView({
                       <MapPin className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Na mapie</span>
                     </button>
+
+                    <ForumLinkButton alertId={alert.id} count={alert._count.messages} />
 
                     {canManageAlert(alert) && (
                       <button

@@ -1,10 +1,3 @@
-export const SEVERITY_STYLES: Record<string, string> = {
-  CRITICAL: 'bg-rose-950 text-rose-300 border-rose-800',
-  HIGH: 'bg-orange-950 text-orange-300 border-orange-800',
-  MEDIUM: 'bg-amber-950 text-amber-300 border-amber-800',
-  LOW: 'bg-slate-800 text-slate-300 border-slate-700',
-};
-
 export const SEVERITY_LABELS: Record<string, string> = {
   CRITICAL: 'Krytyczny',
   HIGH: 'Wysoki',
@@ -45,6 +38,21 @@ export const ALERT_STATUS_LABELS: Record<string, string> = {
   RESOLVED: 'Rozwiązany',
   CANCELLED: 'Anulowany',
 };
+
+// Odznaka statusu na kartach alertów — ten sam zestaw kolorów co na
+// /map (AlertsMapView.tsx: cyan dla IN_PROGRESS, emerald dla rozwiązanych,
+// neutralny slate jako domyślny), żeby karty na dashboardzie (page.tsx)
+// wyglądały tak samo jak na mapie, a nie ciemnym, kontrastowym blokiem.
+export const ALERT_STATUS_BADGE_INFO: Record<string, { badgeClass: string }> = {
+  ACTIVE: { badgeClass: 'bg-rose-50 text-rose-700 border-rose-200' },
+  IN_PROGRESS: { badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+  RESOLVED: { badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  CANCELLED: { badgeClass: 'bg-slate-100 text-slate-500 border-slate-200' },
+};
+
+export function getStatusBadgeInfo(status: string) {
+  return ALERT_STATUS_BADGE_INFO[status] ?? ALERT_STATUS_BADGE_INFO.ACTIVE;
+}
 
 export const ALERT_CATEGORY_LABELS: Record<string, string> = {
   // kind = ALERT

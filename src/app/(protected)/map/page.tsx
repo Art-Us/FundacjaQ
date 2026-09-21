@@ -38,6 +38,10 @@ export default async function MapPage() {
                 },
               },
             },
+            // Total journal entries + replies (Крок 58) — feeds the "Forum"
+            // icon badge on each card, independent of AlertNeedsBlock (which
+            // renders nothing at all when there are no needs).
+            _count: { select: { messages: true } },
           },
           orderBy: { createdAt: 'desc' },
         }),
