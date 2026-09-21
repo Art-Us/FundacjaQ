@@ -718,7 +718,14 @@ async function revertOrganization(
       if (result.count === 0) return conflict('Organizacja została już usunięta.');
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
-        return conflict('Nie można cofnąć utworzenia tej organizacji, ponieważ są z nią powiązani użytkownicy.');
+        // Same as DELETE /api/admin/organizations/[id]'s own P2003 catch —
+        // every relation pointing at Organization is RESTRICT now (users,
+        // resources, allocations, invites, alerts), so this can't claim a
+        // single specific cause without risking the same false diagnosis
+        // that route was fixed for.
+        return conflict(
+          'Nie można cofnąć utworzenia tej organizacji, ponieważ istnieją powiązane rekordy (np. użytkownicy, zasoby, zaproszenia, alerty lub alokacje zasobów jako darczyńca).'
+        );
       }
       return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
     }

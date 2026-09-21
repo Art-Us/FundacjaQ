@@ -149,6 +149,10 @@ export const authOptions: NextAuthOptions = {
         token.gminaId = user.gminaId;
         token.organizationId = user.organizationId;
         token.invalid = false;
+        // Real millisecond precision, unlike the JWT-standard `iat` NextAuth
+        // sets on this same token (always floored to whole seconds) — see the
+        // staleness check below for why that matters.
+        token.issuedAtMs = Date.now();
         return token;
       }
 
@@ -197,7 +201,22 @@ export const authOptions: NextAuthOptions = {
         await setCachedUserStatus(userId, status);
       }
 
-      const issuedAtMs = typeof token.iat === 'number' ? token.iat * 1000 : 0;
+      // Prefer the real millisecond-precision issuedAtMs (set above, on this
+      // same token, at the sign-in that created it) over the JWT-standard
+      // `iat`, which NextAuth always floors to whole seconds — comparing a
+      // floored iat against millisecond-precision passwordChangedAt used to
+      // falsely flag a session as stale whenever a password change and the
+      // very next sign-in landed in the same wall-clock second (the floor
+      // always rounds iat to an earlier instant than it truly was). Falling
+      // back to iat*1000 only covers a token issued before this field
+      // existed, during the rollout of this fix — every session naturally
+      // gets issuedAtMs on its next real sign-in.
+      const issuedAtMs =
+        typeof token.issuedAtMs === 'number'
+          ? token.issuedAtMs
+          : typeof token.iat === 'number'
+            ? token.iat * 1000
+            : 0;
       const passwordChangedAfterIssue = new Date(status.passwordChangedAt).getTime() > issuedAtMs;
       const stillLocked = status.lockedUntil ? new Date(status.lockedUntil).getTime() > Date.now() : false;
 

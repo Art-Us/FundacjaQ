@@ -5,6 +5,7 @@ import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { AdminEventsBridge } from '@/components/AdminEventsBridge';
 import { NewUserNotifier } from '@/components/NewUserNotifier';
+import { ApiUnauthorizedRedirect } from '@/components/ApiUnauthorizedRedirect';
 
 interface ProtectedShellProps {
   children: React.ReactNode;
@@ -35,6 +36,7 @@ export function ProtectedShell({
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] flex">
+      <ApiUnauthorizedRedirect />
       {canSeeAdminEvents && <AdminEventsBridge />}
       {role === 'ADMIN' && <NewUserNotifier />}
       <button

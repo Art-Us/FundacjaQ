@@ -1,4 +1,4 @@
-import { RateLimiterRedis } from 'rate-limiter-flexible';
+import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
 import { redis } from './redis';
 
 // Login attempts are throttled by ipLockout.ts (IP-wide) and
@@ -59,12 +59,26 @@ export const geocodeLimiter = new RateLimiterRedis({
   blockDuration: 3,
 });
 
-/** Returns true if the action is allowed; false if rate-limited. Consumes on every call. */
+/**
+ * Returns true if the action is allowed; false if rate-limited. Consumes on
+ * every call.
+ *
+ * Fails open (like attemptTracker.ts/ipLockout.ts/lockout.ts elsewhere in
+ * this codebase) on an actual Redis/store error — rate-limiter-flexible
+ * rejects consume() with a RateLimiterRes when points are exhausted, but
+ * with a plain Error when the store itself failed (see its own d.ts: "only
+ * for store and database limiters ... rejRes is Error object"). Treating
+ * both the same as "rate limited" would turn a Redis blip into a blanket 429
+ * across login/password-reset/invite-accept for every user, which is a
+ * worse outage than the abuse this is meant to catch.
+ */
 export async function consumeLimit(limiter: RateLimiterRedis, key: string): Promise<boolean> {
   try {
     await limiter.consume(key);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (err instanceof RateLimiterRes) return false;
+    console.error('[rateLimit] consume failed (store error), failing open:', err);
+    return true;
   }
 }

@@ -391,6 +391,68 @@ describe('jwt callback', () => {
     expect(token.invalid).toBe(true);
     expect(token.invalidReason).toBe('stale');
   });
+
+  it('falls back to floored iat*1000 (pre-existing imprecision) for a legacy token with no issuedAtMs', async () => {
+    // A token issued before issuedAtMs existed only has JWT-standard
+    // second-precision iat to compare against — this is the known,
+    // self-healing transitional gap (every session gets issuedAtMs on its
+    // next real sign-in), not something this fallback path can fix on its
+    // own without a fabricated precision that isn't actually there.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    prisma.user.findUnique.mockResolvedValue({
+      isActive: true,
+      lockedUntil: null,
+      passwordChangedAt: new Date(nowSeconds * 1000 + 900),
+      role: 'VOLUNTEER',
+      gminaId: null,
+    } as any);
+
+    const token = await jwt({ token: { sub: 'u1', iat: nowSeconds } } as any);
+
+    expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('stale');
+  });
+
+  it('using the real millisecond-precision issuedAtMs, does not falsely invalidate a fresh sign-in that lands in the same wall-clock second as an earlier password change', async () => {
+    const nowMs = Date.now();
+    const secondStartMs = Math.floor(nowMs / 1000) * 1000;
+    prisma.user.findUnique.mockResolvedValue({
+      isActive: true,
+      lockedUntil: null,
+      // Changed at the 100ms mark of this second...
+      passwordChangedAt: new Date(secondStartMs + 100),
+      role: 'VOLUNTEER',
+      gminaId: null,
+    } as any);
+
+    // ...and THIS token was issued later in that same second (900ms) — a
+    // real sign-in with the new password, which floor(iat) alone couldn't
+    // distinguish from "changed after".
+    const token = await jwt({ token: { sub: 'u1', iat: Math.floor(secondStartMs / 1000), issuedAtMs: secondStartMs + 900 } } as any);
+
+    expect(token.invalid).toBe(false);
+  });
+
+  it('using issuedAtMs, still invalidates a token whose password changed later in the same wall-clock second (anti-hijack preserved at ms precision)', async () => {
+    const nowMs = Date.now();
+    const secondStartMs = Math.floor(nowMs / 1000) * 1000;
+    prisma.user.findUnique.mockResolvedValue({
+      isActive: true,
+      lockedUntil: null,
+      // Changed at the 900ms mark...
+      passwordChangedAt: new Date(secondStartMs + 900),
+      role: 'VOLUNTEER',
+      gminaId: null,
+    } as any);
+
+    // ...but this token was issued earlier in that same second (100ms) — an
+    // attacker's session that predates the reset by 800ms, which the old
+    // floor-both-to-seconds fix would have missed entirely.
+    const token = await jwt({ token: { sub: 'u1', iat: Math.floor(secondStartMs / 1000), issuedAtMs: secondStartMs + 100 } } as any);
+
+    expect(token.invalid).toBe(true);
+    expect(token.invalidReason).toBe('stale');
+  });
 });
 
 describe('session callback', () => {

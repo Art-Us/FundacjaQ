@@ -61,7 +61,7 @@ describe('consumeLimit + RateLimiterRedis (real semantics via ioredis-mock)', ()
     expect(stillAllowedForOtherKey).toBe(true);
   });
 
-  it('returns false (fails closed) if the underlying store rejects', async () => {
+  it('returns true (fails open) if the underlying store errors — a Redis outage must not 429 every user', async () => {
     const brokenLimiter = new RateLimiterRedis({
       storeClient: { multi: () => { throw new Error('redis down'); }, defineCommand: () => {} } as any,
       keyPrefix: 'test:broken',
@@ -69,6 +69,16 @@ describe('consumeLimit + RateLimiterRedis (real semantics via ioredis-mock)', ()
       duration: 900,
     });
 
-    await expect(consumeLimit(brokenLimiter, 'anyone')).resolves.toBe(false);
+    await expect(consumeLimit(brokenLimiter, 'anyone')).resolves.toBe(true);
+  });
+
+  it('still returns false (fails closed) for a genuine rate-limit rejection, not just any store error', async () => {
+    for (let i = 0; i < 5; i++) {
+      await consumeLimit(limiter, 'attacker@example.com:1.2.3.4');
+    }
+
+    const allowed = await consumeLimit(limiter, 'attacker@example.com:1.2.3.4');
+
+    expect(allowed).toBe(false);
   });
 });

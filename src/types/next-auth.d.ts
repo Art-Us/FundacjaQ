@@ -30,5 +30,10 @@ declare module 'next-auth/jwt' {
     organizationId?: string | null;
     invalid?: boolean;
     invalidReason?: 'deactivated' | 'stale';
+    // Real millisecond-precision issuance time, set alongside the
+    // JWT-standard `iat` (which is always truncated to whole seconds) — see
+    // the jwt() callback's staleness check for why the extra precision
+    // matters. Absent on a token issued before this field existed.
+    issuedAtMs?: number;
   }
 }
