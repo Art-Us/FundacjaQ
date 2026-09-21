@@ -2,7 +2,7 @@ import { prisma } from './prisma';
 import { redis } from './redis';
 import { invalidateUserStatusCache } from './userStatusCache';
 
-const MAX_FAILED_ATTEMPTS = 20;
+const MAX_FAILED_ATTEMPTS = 100; // TEMP: was 20 — revert after [reason/date]
 const LOCKOUT_SECONDS = 60 * 60; // 1h
 
 function lockKey(email: string): string {

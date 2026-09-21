@@ -8,7 +8,7 @@ import { redis } from './redis';
 export const inviteAcceptLimiter = new RateLimiterRedis({
   storeClient: redis,
   keyPrefix: 'rl:invite-accept',
-  points: 10,
+  points: 100, // TEMP: was 10 — revert after [reason/date]
   duration: 60 * 60,
   blockDuration: 60 * 60,
 });
@@ -16,7 +16,7 @@ export const inviteAcceptLimiter = new RateLimiterRedis({
 export const passwordResetLimiter = new RateLimiterRedis({
   storeClient: redis,
   keyPrefix: 'rl:pwd-reset',
-  points: 5,
+  points: 100, // TEMP: was 5 — revert after [reason/date]
   duration: 60 * 60,
   blockDuration: 60 * 60,
 });
@@ -34,7 +34,7 @@ export const passwordResetPerAccountLimiter = new RateLimiterRedis({
 export const inviteCreateLimiter = new RateLimiterRedis({
   storeClient: redis,
   keyPrefix: 'rl:invite-create',
-  points: 20,
+  points: 100, // TEMP: was 20 — revert after [reason/date]
   duration: 60 * 60,
   blockDuration: 60 * 60,
 });
