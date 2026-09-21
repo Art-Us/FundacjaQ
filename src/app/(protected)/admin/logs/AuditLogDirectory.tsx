@@ -5,6 +5,7 @@ import { History, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AuditLogRow } from './AuditLogRow';
 import { ACTION_KIND_LABELS, ENTITY_TYPE_LABELS, type AuditLogItem } from './types';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
 
 const PAGE_SIZE = 50;
 
@@ -89,6 +90,11 @@ export function AuditLogDirectory() {
     setLoading(true);
     fetchPage(null, true).finally(() => setLoading(false));
   }
+
+  // Another admin's own revert (or any other admin-panel mutation, since
+  // reverts can touch USER/GMINA/ORGANIZATION/INVITE_TOKEN rows) — same
+  // full-first-page reload as our own handleReverted above.
+  useAdminEvents('logs', handleReverted);
 
   return (
     <div className="space-y-4">

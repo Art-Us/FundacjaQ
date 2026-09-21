@@ -7,6 +7,8 @@ import { Pagination } from '@/components/ui/Pagination';
 import { GminaFormModal } from '@/components/gmina/GminaFormModal';
 import { GminaCard } from './GminaCard';
 import type { GminaListItem } from './types';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
+import { getCachedList, setCachedList } from '@/lib/adminListCache';
 
 // Encoded as a single "field:direction" value so one <select> can drive both
 // — sorting is applied server-side (see GET /api/admin/gminas' sortBy/sortDir),
@@ -63,6 +65,12 @@ function mapGmina(gmina: ApiGmina): GminaListItem {
     inviteTokensCount: gmina._count.inviteTokens,
     organizationsCount: gmina._count.organizations,
   };
+}
+
+interface CachedGminasPage {
+  gminas: GminaListItem[];
+  total: number;
+  totalPages: number;
 }
 
 export function GminasDirectory() {
@@ -133,19 +141,33 @@ export function GminasDirectory() {
   const requestIdRef = useRef(0);
 
   const fetchGminas = useCallback(
-    async (targetPage: number) => {
+    async (targetPage: number, opts?: { allowCache?: boolean }) => {
+      const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
+      if (voivodeshipFilter !== 'ALL') params.set('voivodeship', voivodeshipFilter);
+      if (powiatFilter !== 'ALL') params.set('powiat', powiatFilter);
+      if (debouncedQuery) params.set('q', debouncedQuery);
+      const [sortBy, sortDir] = sort.split(':');
+      params.set('sortBy', sortBy);
+      params.set('sortDir', sortDir);
+      const cacheKey = params.toString();
+
+      // Only ever consulted right after mount (see the effect below) — see
+      // lib/adminListCache.ts for why this can't serve stale data.
+      if (opts?.allowCache) {
+        const cached = getCachedList<CachedGminasPage>('gminas', cacheKey);
+        if (cached) {
+          setGminas(cached.gminas);
+          setTotal(cached.total);
+          setTotalPages(cached.totalPages);
+          setError(null);
+          return;
+        }
+      }
+
       const requestId = ++requestIdRef.current;
 
       try {
-        const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
-        if (voivodeshipFilter !== 'ALL') params.set('voivodeship', voivodeshipFilter);
-        if (powiatFilter !== 'ALL') params.set('powiat', powiatFilter);
-        if (debouncedQuery) params.set('q', debouncedQuery);
-        const [sortBy, sortDir] = sort.split(':');
-        params.set('sortBy', sortBy);
-        params.set('sortDir', sortDir);
-
-        const res = await fetch(`/api/admin/gminas?${params.toString()}`);
+        const res = await fetch(`/api/admin/gminas?${cacheKey}`);
         const data = await res.json().catch(() => ({}));
 
         if (requestId !== requestIdRef.current) return; // superseded by a newer request
@@ -165,10 +187,13 @@ export function GminasDirectory() {
           return;
         }
 
-        setGminas((data.gminas as ApiGmina[]).map(mapGmina));
-        setTotal(data.total ?? 0);
+        const mappedGminas = (data.gminas as ApiGmina[]).map(mapGmina);
+        const total = data.total ?? 0;
+        setGminas(mappedGminas);
+        setTotal(total);
         setTotalPages(serverTotalPages);
         setError(null);
+        setCachedList('gminas', cacheKey, { gminas: mappedGminas, total, totalPages: serverTotalPages });
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         console.error('[GminasDirectory] failed to fetch:', err);
@@ -185,15 +210,22 @@ export function GminasDirectory() {
     setPage(1);
   }, [voivodeshipFilter, powiatFilter, debouncedQuery, sort]);
 
+  const didMountRef = useRef(false);
   useEffect(() => {
+    const allowCache = !didMountRef.current;
+    didMountRef.current = true;
     setLoading(true);
-    fetchGminas(page).finally(() => setLoading(false));
+    fetchGminas(page, { allowCache }).finally(() => setLoading(false));
   }, [page, fetchGminas]);
 
   function refetch() {
     setLoading(true);
     Promise.all([fetchGminas(page), fetchLocations()]).finally(() => setLoading(false));
   }
+
+  // Another admin's own create/edit/delete — see AdminEventsBridge (mounted
+  // in admin/layout.tsx) for how this arrives.
+  useAdminEvents('gminas', refetch);
 
   const hasActiveFilters = query.trim() !== '' || voivodeshipFilter !== 'ALL' || powiatFilter !== 'ALL';
 

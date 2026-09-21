@@ -14,11 +14,15 @@ vi.mock('@/lib/email', () => ({
   sendInviteEmail: vi.fn(),
   isEmailConfigured: false,
 }));
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { consumeLimit } from '@/lib/rateLimit';
 import { sendInviteEmail } from '@/lib/email';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -45,6 +49,7 @@ beforeEach(() => {
   vi.mocked(requireAdminOrCoordinator).mockReset();
   vi.mocked(consumeLimit).mockReset().mockResolvedValue(true);
   vi.mocked(sendInviteEmail).mockReset().mockResolvedValue(undefined);
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
 });
 
 describe('POST /api/admin/invites/[id]/reactivate', () => {

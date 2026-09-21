@@ -6,9 +6,13 @@ vi.mock('@/lib/prisma');
 vi.mock('@/lib/authz', () => ({
   requireAdminOrCoordinator: vi.fn(),
 }));
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -33,6 +37,7 @@ function callRoute(id = 'inv1') {
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdminOrCoordinator).mockReset();
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
 });
 
 describe('POST /api/admin/invites/[id]/revoke', () => {

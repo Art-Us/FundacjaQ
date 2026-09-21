@@ -11,6 +11,9 @@ vi.mock('@/lib/authz', async () => {
     requireAdmin: vi.fn(),
   };
 });
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';

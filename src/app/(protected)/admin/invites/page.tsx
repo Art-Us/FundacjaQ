@@ -4,7 +4,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
 import { scopedOrganizationWhere } from '@/lib/organization';
-import { RefreshOnMount } from '@/components/RefreshOnMount';
+import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
 import { CreateInviteForm } from './CreateInviteForm';
 import { ToggleInviteButton, type InviteStatus } from './ToggleInviteButton';
 
@@ -55,7 +55,10 @@ export default async function AdminInvitesPage() {
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
-      <RefreshOnMount />
+      {/* Covers both this page's own invite list AND its gmina/organization
+          picker (server-rendered above) — either kind of change re-runs the
+          whole RSC fetch via router.refresh(). */}
+      <AdminEventsRefresh scope={['invites', 'gminas', 'organizations']} />
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Zaproszenia</h1>
         <p className="text-sm text-slate-500 mt-1">

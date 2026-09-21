@@ -15,11 +15,15 @@ vi.mock('@/lib/email', () => ({
 vi.mock('next-auth', () => ({
   getServerSession: vi.fn(),
 }));
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { consumeLimit } from '@/lib/rateLimit';
 import { sendInviteEmail } from '@/lib/email';
 import { getServerSession } from 'next-auth';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { GET, POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -46,6 +50,7 @@ beforeEach(() => {
   vi.mocked(consumeLimit).mockReset().mockResolvedValue(true);
   vi.mocked(sendInviteEmail).mockReset().mockResolvedValue(undefined);
   vi.mocked(getServerSession).mockReset();
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
 });
 
 describe('GET /api/admin/invites', () => {

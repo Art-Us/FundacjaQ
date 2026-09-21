@@ -8,6 +8,9 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return { ...actual, requireAdmin: vi.fn() };
 });
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/authz';
