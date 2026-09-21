@@ -133,6 +133,20 @@ describe('POST /api/admin/invites/[id]/reactivate', () => {
     expect(prisma.inviteToken.update).not.toHaveBeenCalled();
   });
 
+  it('rejects reactivating when an account already exists for the invite email', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.inviteToken.findUnique.mockResolvedValue(baseInvite() as any);
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', email: 'volunteer@example.com' } as any);
+
+    const res = await callRoute();
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Konto dla tego adresu email już istnieje.');
+    expect(prisma.inviteToken.update).not.toHaveBeenCalled();
+    expect(sendInviteEmail).not.toHaveBeenCalled();
+  });
+
   it('returns 429 when the per-user invite rate limit is exceeded', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     vi.mocked(consumeLimit).mockResolvedValue(false);

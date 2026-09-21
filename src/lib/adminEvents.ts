@@ -47,12 +47,21 @@ const globalForAdminEvents = globalThis as unknown as {
 const listeners = globalForAdminEvents.adminEventsListeners ?? new Set<Listener>();
 if (process.env.NODE_ENV !== 'production') globalForAdminEvents.adminEventsListeners = listeners;
 
+// A true module-scope singleton (not just conditionally stashed on
+// globalThis) — getSubscriber() is called once per SSE connection, so a
+// singleton that only persisted in dev would mean production duplicates the
+// connection on every call. globalForAdminEvents is still consulted/updated
+// so a dev hot-reload reuses the same connection instead of leaking one.
+let subscriberInstance: Redis | undefined = globalForAdminEvents.adminEventsSubscriber;
+
 function getSubscriber(): Redis {
-  let subscriber = globalForAdminEvents.adminEventsSubscriber;
-  if (!subscriber) {
-    subscriber = redis.duplicate();
-    subscriber.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
-    subscriber.on('message', (_channel, message) => {
+  if (!subscriberInstance) {
+    subscriberInstance = redis.duplicate();
+    // Required — see lib/redis.ts's own 'error' listener for why an
+    // unhandled one would crash the process instead of just logging.
+    subscriberInstance.on('error', (err) => console.error('[adminEvents] subscriber connection error:', err));
+    subscriberInstance.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
+    subscriberInstance.on('message', (_channel, message) => {
       let event: AdminEvent;
       try {
         event = JSON.parse(message);
@@ -61,9 +70,9 @@ function getSubscriber(): Redis {
       }
       listeners.forEach((listener) => listener(event));
     });
-    if (process.env.NODE_ENV !== 'production') globalForAdminEvents.adminEventsSubscriber = subscriber;
+    if (process.env.NODE_ENV !== 'production') globalForAdminEvents.adminEventsSubscriber = subscriberInstance;
   }
-  return subscriber;
+  return subscriberInstance;
 }
 
 /** Registers `listener` for every published AdminEvent; returns an unsubscribe function. Called from the SSE route (lib/adminEvents.ts's only intended caller) once per open connection. */

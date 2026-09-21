@@ -2,7 +2,7 @@ import { prisma } from './prisma';
 import { redis } from './redis';
 import { invalidateUserStatusCache } from './userStatusCache';
 
-const MAX_FAILED_ATTEMPTS = 20;
+const MAX_FAILED_ATTEMPTS = 100; // TEMP: was 20 — revert after [reason/date]
 const LOCKOUT_SECONDS = 60 * 60; // 1h
 
 function lockKey(email: string): string {
@@ -80,9 +80,17 @@ export async function recordFailedAttempt(email: string): Promise<void> {
   }
 }
 
-export async function resetAttempts(email: string): Promise<void> {
-  // Best-effort cleanup on a successful login — must never throw and block
-  // an already-authenticated user from completing sign-in.
+/**
+ * Returns whether the Postgres counters were actually cleared — existing
+ * callers on the login path (auth.ts, reset-password) discard it, since
+ * there this must never throw or block an already-authenticated user
+ * completing sign-in regardless of the outcome. POST
+ * /api/admin/users/[id]/unlock does check it: an admin explicitly asking to
+ * lift a lockout needs to know if the write silently failed (DB blip, or the
+ * account being deleted concurrently) instead of getting a false "success"
+ * and an audit-log entry that doesn't match reality.
+ */
+export async function resetAttempts(email: string): Promise<boolean> {
   try {
     await redis.del(lockKey(email));
   } catch (err) {
@@ -96,4 +104,5 @@ export async function resetAttempts(email: string): Promise<void> {
     })
     .catch(() => null);
   if (reset) await invalidateUserStatusCache(reset.id);
+  return reset !== null;
 }

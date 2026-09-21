@@ -115,6 +115,7 @@ enum AuditAction {
   USER_DELETE
   USER_ACTIVATE
   USER_DEACTIVATE
+  USER_UNLOCK
   GMINA_CREATE
   GMINA_UPDATE
   GMINA_DELETE
@@ -154,15 +155,14 @@ model User {
   organizationId     String?
   // Optional relation, but deliberately RESTRICT (not Prisma's SET-NULL
   // default for an optional FK) — an org with users still assigned to it
-  // must not be deletable out from under them. gminaId below stays SET NULL
-  // by contrast: that FK predates this one and hasn't been revisited, but a
-  // gmina delete silently detaching its users while the delete route's own
-  // error message claims it would be blocked is a known pre-existing
-  // inconsistency, not a pattern to copy here.
+  // must not be deletable out from under them. gminaId below is RESTRICT for
+  // the same reason (it used to default to SET NULL, silently detaching
+  // users while DELETE /api/admin/gminas/[id]'s own error message claimed
+  // it would be blocked — see that route's P2003 catch).
   organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   phone              String?
   gminaId            String?
-  gmina              Gmina?        @relation(fields: [gminaId], references: [id])
+  gmina              Gmina?        @relation(fields: [gminaId], references: [id], onDelete: Restrict)
   emailVerified      DateTime?
   isActive           Boolean       @default(true)
   lastActivatedAt    DateTime?
@@ -190,13 +190,21 @@ model InviteToken {
   email          String
   role           Role
   gminaId        String?
-  gmina          Gmina?        @relation(fields: [gminaId], references: [id])
+  // Same RESTRICT-over-SET-NULL reasoning as User.gmina — an invite still
+  // pointing at a deleted gmina is exactly the kind of silent inconsistency
+  // this is meant to prevent, and the gmina delete route's error message
+  // already claims invites are one of the blockers.
+  gmina          Gmina?        @relation(fields: [gminaId], references: [id], onDelete: Restrict)
   // A COORDINATOR's invite is now scoped to their own organization (not just
   // their gmina) — see POST /api/admin/invites. ADMIN-issued invites can
   // leave this unset (organization is assigned later, same as it already is
   // for admin-created users via POST /api/admin/users).
   organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
+  // Same RESTRICT-over-SET-NULL reasoning as gmina above — the delete route's
+  // error message already claims organizations are one of the P2003 causes
+  // (see DELETE /api/admin/organizations/[id]), so this must actually behave
+  // that way rather than silently null out live invites.
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   tokenHash      String        @unique
   createdById    String
   createdBy      User          @relation(fields: [createdById], references: [id])
@@ -409,7 +417,8 @@ model Alert {
   // authorId is optional, making that path unreliable for a value everything
   // else (ownership/authz checks) depends on.
   organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
+  // Same RESTRICT-over-SET-NULL reasoning as InviteToken.organization above.
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   gminaId        String
   gmina          Gmina         @relation(fields: [gminaId], references: [id])
   expiresAt      DateTime?

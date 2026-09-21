@@ -234,7 +234,7 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_KIND_MAP: Record<ActionKind, AuditAction[]> = {
   CREATE: ['USER_CREATE', 'GMINA_CREATE', 'ORGANIZATION_CREATE'],
-  UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'ORGANIZATION_UPDATE'],
+  UPDATE: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'USER_UNLOCK', 'ORGANIZATION_UPDATE'],
   DELETE: ['USER_DELETE', 'GMINA_DELETE', 'ORGANIZATION_DELETE'],
   INVITE: ['INVITE_CREATE', 'INVITE_REVOKE', 'INVITE_REACTIVATE'],
 };
@@ -260,6 +260,11 @@ export const ACTION_KIND_LABELS: Record<ActionKind, string> = {
  * it mints a brand-new raw token that (like a password) is never stored, only
  * its hash — reverting couldn't restore the invite to a working state anyway,
  * it would just silently revoke a link that may already have been handed out.
+ *
+ * USER_UNLOCK is excluded because "reverting" it would mean re-locking the
+ * account for whatever time was left on the original block — a block that,
+ * by the time anyone would revert this, has almost certainly already
+ * expired, making the revert a no-op at best and confusing at worst.
  */
 const REVERTIBLE_ACTIONS = new Set<AuditAction>([
   'USER_UPDATE',
@@ -718,7 +723,14 @@ async function revertOrganization(
       if (result.count === 0) return conflict('Organizacja została już usunięta.');
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
-        return conflict('Nie można cofnąć utworzenia tej organizacji, ponieważ są z nią powiązani użytkownicy.');
+        // Same as DELETE /api/admin/organizations/[id]'s own P2003 catch —
+        // every relation pointing at Organization is RESTRICT now (users,
+        // resources, allocations, invites, alerts), so this can't claim a
+        // single specific cause without risking the same false diagnosis
+        // that route was fixed for.
+        return conflict(
+          'Nie można cofnąć utworzenia tej organizacji, ponieważ istnieją powiązane rekordy (np. użytkownicy, zasoby, zaproszenia, alerty lub alokacje zasobów jako darczyńca).'
+        );
       }
       return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
     }

@@ -27,6 +27,18 @@ export function AdminEventsBridge() {
       invalidateCachedList(event.scope);
       window.dispatchEvent(new CustomEvent('admin-event', { detail: event }));
     };
+    source.onerror = () => {
+      // A non-200 response (403 — session revoked, or role changed away from
+      // admin/coordinator mid-session) permanently closes the connection:
+      // readyState CLOSED, no browser retry (per spec, an HTTP-level failure
+      // "fails the connection" rather than scheduling a reconnect). A
+      // transient network drop instead leaves readyState CONNECTING while
+      // the browser retries on its own, so only the permanent case is worth
+      // logging — otherwise this would fire on every ordinary reconnect blip.
+      if (source.readyState === EventSource.CLOSED) {
+        console.error('[AdminEventsBridge] SSE connection closed permanently (likely session/role change)');
+      }
+    };
     return () => source.close();
   }, []);
 

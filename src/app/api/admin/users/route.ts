@@ -86,12 +86,22 @@ function buildSearchOr(q: string): Prisma.UserWhereInput[] {
     { organization: { name: { contains: escaped, mode: 'insensitive' } } },
     { gmina: { name: { contains: escaped, mode: 'insensitive' } } },
   ];
+  // .startsWith(), not .includes(): 'nieaktywny' is literally 'nie' + 'aktywny',
+  // so checking "is `lower` found anywhere in this label" meant ANY match of
+  // the shorter word — up to and including the exact full word "aktywny" —
+  // was *also* always a substring match of the longer one. That silently
+  // OR'd in both isActive: true AND isActive: false, which (isActive being a
+  // boolean) is true for every user and defeated the entire search. Prefix
+  // matching means the two can never both match the same query, since the
+  // words diverge at their very first letter ('a' vs 'n') — same fix applied
+  // to the role labels below for the identical reason (e.g. 'o' is a
+  // substring of all three "Administrator"/"Koordynator"/"Wolontariusz").
   const matchingRoles = (Object.keys(ROLE_LABELS) as Array<keyof typeof ROLE_LABELS>).filter((r) =>
-    ROLE_LABELS[r].toLowerCase().includes(lower)
+    ROLE_LABELS[r].toLowerCase().startsWith(lower)
   );
   if (matchingRoles.length > 0) conditions.push({ role: { in: matchingRoles } });
-  if ('aktywny'.includes(lower)) conditions.push({ isActive: true });
-  if ('nieaktywny'.includes(lower)) conditions.push({ isActive: false });
+  if ('aktywny'.startsWith(lower)) conditions.push({ isActive: true });
+  if ('nieaktywny'.startsWith(lower)) conditions.push({ isActive: false });
   return conditions;
 }
 

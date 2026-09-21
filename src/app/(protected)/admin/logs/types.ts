@@ -26,6 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   USER_DELETE: 'Usunięcie użytkownika',
   USER_ACTIVATE: 'Aktywacja użytkownika',
   USER_DEACTIVATE: 'Dezaktywacja użytkownika',
+  USER_UNLOCK: 'Zdjęcie blokady konta',
   GMINA_CREATE: 'Utworzenie gminy',
   GMINA_UPDATE: 'Edycja gminy',
   GMINA_DELETE: 'Usunięcie gminy',

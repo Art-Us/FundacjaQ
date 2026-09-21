@@ -24,4 +24,5 @@ export interface UserListItem {
   gmina: UserGmina | null;
   isSelf: boolean;
   canManage: boolean;
+  lockedUntil: string | null;
 }

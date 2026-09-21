@@ -388,7 +388,7 @@ describe('DELETE /api/admin/organizations/[id]', () => {
     expect(prisma.organization.delete).toHaveBeenCalledWith({ where: { id: 'target-1' } });
   });
 
-  it('returns 409 when the organization has users assigned, blocking deletion (P2003)', async () => {
+  it('returns 409 when the organization has dependent records (users, resources, or allocations) blocking deletion (P2003)', async () => {
     const { Prisma } = await import('@prisma/client');
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization() as any);

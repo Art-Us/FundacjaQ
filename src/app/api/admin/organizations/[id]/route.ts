@@ -218,13 +218,20 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       meta: requestMeta(req),
     });
   } catch (err) {
-    // User.organizationId is ON DELETE RESTRICT (deliberately, unlike
-    // User.gminaId — see the schema.prisma comment), so an organization with
-    // any users still assigned fails with P2003 — the only *expected*
-    // failure here; anything else is a real server error.
+    // Every relation pointing at Organization is now RESTRICT (see the
+    // schema.prisma comments on each): User.organizationId,
+    // Resource.organizationId, ResourceAllocation.donorOrgId,
+    // InviteToken.organization, and Alert.organization. P2003 doesn't say
+    // which one fired, so the message can't claim a single specific cause —
+    // that would actively mislead an admin who deletes an org with 0 users
+    // but leftover resources/invites/alerts/allocations. This is the only
+    // *expected* failure here; anything else is a real server error.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
       return NextResponse.json(
-        { error: 'Nie można usunąć tej organizacji, ponieważ są z nią powiązani użytkownicy.' },
+        {
+          error:
+            'Nie można usunąć tej organizacji, ponieważ istnieją powiązane rekordy (np. użytkownicy, zasoby, zaproszenia, alerty lub alokacje zasobów jako darczyńca).',
+        },
         { status: 409 }
       );
     }

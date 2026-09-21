@@ -296,6 +296,51 @@ describe('GET /api/admin/users', () => {
     );
   });
 
+  // Regression for BUG-01: 'nieaktywny' is literally 'nie' + 'aktywny', so an
+  // .includes() check on both status words independently meant matching the
+  // shorter word (even a single incidental letter like 'k', found in both
+  // words) always ALSO matched the longer one — silently OR-ing in both
+  // isActive: true AND isActive: false, which (a boolean) matches every user
+  // and defeats the whole search regardless of what else was typed.
+  it('does not match every user via both isActive: true and isActive: false for a short incidental-letter query', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.findMany.mockResolvedValue([]);
+
+    await callGet('?q=k');
+
+    const call = prisma.user.findMany.mock.calls[0][0] as any;
+    const or = call.where.OR as unknown[];
+    expect(or).not.toContainEqual({ isActive: true });
+    expect(or).not.toContainEqual({ isActive: false });
+  });
+
+  it('matching the exact status word "aktywny" only adds isActive: true, not also isActive: false', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.findMany.mockResolvedValue([]);
+
+    await callGet('?q=aktywny');
+
+    const call = prisma.user.findMany.mock.calls[0][0] as any;
+    const or = call.where.OR as unknown[];
+    expect(or).toContainEqual({ isActive: true });
+    expect(or).not.toContainEqual({ isActive: false });
+  });
+
+  it('matching the status word "nieaktywny" only adds isActive: false, not also isActive: true', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.findMany.mockResolvedValue([]);
+
+    await callGet('?q=nieaktywny');
+
+    const call = prisma.user.findMany.mock.calls[0][0] as any;
+    const or = call.where.OR as unknown[];
+    expect(or).toContainEqual({ isActive: false });
+    expect(or).not.toContainEqual({ isActive: true });
+  });
+
   it('escapes LIKE wildcard characters in q so they match literally', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.count.mockResolvedValue(0);

@@ -85,12 +85,31 @@ export async function middleware(req: NextRequest) {
   // DB-backed check happens via getServerSession() in src/app/(protected)/layout.tsx, which
   // every protected page is under.
   if (!token || token.invalid) {
+    // An API caller expects JSON back, not an HTML page — a redirect here
+    // would send fetch() transparently following it to the /login page (200,
+    // HTML), and the caller's res.json() would then throw on the markup
+    // instead of surfacing "you're signed out" the way a real 401 does.
+    if (pathname.startsWith('/api')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('callbackUrl', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (pathname.startsWith('/admin') && token.role !== 'ADMIN' && token.role !== 'COORDINATOR') {
+  // Defense-in-depth, not the authoritative check: every /api/admin/* route
+  // already calls requireAdmin()/requireAdminOrCoordinator() itself (a live,
+  // DB-backed check — see authz.ts), which is what actually enforces the
+  // ADMIN-vs-COORDINATOR distinction per route. This coarse gate exists so a
+  // route that someday forgets that call still fails closed here instead of
+  // being wide open, the same way the /admin page check below already
+  // protects pages. It can only ever be as strict as the loosest real admin
+  // API route (ADMIN or COORDINATOR), never route-specific.
+  const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+  if (isAdminPath && token.role !== 'ADMIN' && token.role !== 'COORDINATOR') {
+    if (pathname.startsWith('/api')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     return NextResponse.redirect(new URL('/', req.url));
   }
 

@@ -101,4 +101,69 @@ describe('middleware', () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe('protected API routes', () => {
+    it('returns a JSON 401 instead of redirecting when there is no token', async () => {
+      vi.mocked(getToken).mockResolvedValue(null);
+
+      const res = await middleware(makeReq('/api/admin/users'));
+
+      expect(res.status).toBe(401);
+      expect(res.headers.get('location')).toBeNull();
+      expect(await res.json()).toEqual({ error: 'Unauthorized' });
+    });
+
+    it('returns a JSON 401 instead of redirecting when the token is invalid', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: true } as any);
+
+      const res = await middleware(makeReq('/api/resources/matrix'));
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'Unauthorized' });
+    });
+
+    it('allows a valid token through to a protected API route', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: false, role: 'VOLUNTEER' } as any);
+
+      const res = await middleware(makeReq('/api/resources/matrix'));
+
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('/api/admin/* role gate (defense-in-depth over each route\'s own requireAdmin/requireAdminOrCoordinator)', () => {
+    it('returns a JSON 403 (not a redirect) for a VOLUNTEER hitting an admin API route', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: false, role: 'VOLUNTEER' } as any);
+
+      const res = await middleware(makeReq('/api/admin/users'));
+
+      expect(res.status).toBe(403);
+      expect(res.headers.get('location')).toBeNull();
+      expect(await res.json()).toEqual({ error: 'Forbidden' });
+    });
+
+    it('allows a COORDINATOR through to an admin API route (fine-grained ADMIN-only checks stay in the route itself)', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: false, role: 'COORDINATOR' } as any);
+
+      const res = await middleware(makeReq('/api/admin/users'));
+
+      expect(res.status).toBe(200);
+    });
+
+    it('allows an ADMIN through to an admin API route', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: false, role: 'ADMIN' } as any);
+
+      const res = await middleware(makeReq('/api/admin/gminas'));
+
+      expect(res.status).toBe(200);
+    });
+
+    it('does not gate a non-admin API route by role (only the /api/admin/* prefix is affected)', async () => {
+      vi.mocked(getToken).mockResolvedValue({ invalid: false, role: 'VOLUNTEER' } as any);
+
+      const res = await middleware(makeReq('/api/alerts'));
+
+      expect(res.status).toBe(200);
+    });
+  });
 });

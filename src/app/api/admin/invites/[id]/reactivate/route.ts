@@ -46,6 +46,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'To zaproszenie jest już aktywne.' }, { status: 400 });
   }
 
+  // Same check POST /api/admin/invites does before creating one — an
+  // account for this email may have been created (or the invite accepted
+  // through some other route) any time since this invite was revoked/expired.
+  // Without it, reactivating just emails a token that /invite/[token]'s own
+  // accept flow will dead-end on with "account already exists".
+  const existingUser = await prisma.user.findUnique({ where: { email: invite.email } });
+  if (existingUser) {
+    return NextResponse.json({ error: 'Konto dla tego adresu email już istnieje.' }, { status: 400 });
+  }
+
   const rawToken = generateToken();
   let updated;
   try {
