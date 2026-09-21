@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
+import { AdminEventsBridge } from '@/components/AdminEventsBridge';
+import { NewUserNotifier } from '@/components/NewUserNotifier';
 
 interface ProtectedShellProps {
   children: React.ReactNode;
@@ -22,9 +24,19 @@ export function ProtectedShell({
   resourceInboxCount,
 }: ProtectedShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Mounted here (not admin/layout.tsx) so it stays open across the WHOLE
+  // app, not just while on an /admin/* page — that's what lets the sidebar's
+  // "new user" dot and the corner toast fire even when an admin is looking
+  // at, say, the alerts map. Gated to the roles that can ever act on these
+  // events at all: a VOLUNTEER holding one open would be pure waste (the SSE
+  // route itself would 403 them anyway — see api/admin/events/route.ts —
+  // but there's no reason to make their browser even try).
+  const canSeeAdminEvents = role === 'ADMIN' || role === 'COORDINATOR';
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] flex">
+      {canSeeAdminEvents && <AdminEventsBridge />}
+      {role === 'ADMIN' && <NewUserNotifier />}
       <button
         type="button"
         onClick={() => setIsSidebarOpen(true)}

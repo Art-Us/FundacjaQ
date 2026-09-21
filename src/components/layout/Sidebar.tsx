@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { Home, UserPlus, Users, MapPin, Building2, History, LogOut, ChevronRight, Package } from 'lucide-react';
+import { useHasNewUser } from '@/hooks/useHasNewUser';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
@@ -37,6 +38,7 @@ export function Sidebar({
   resourceInboxCount,
 }: SidebarProps) {
   const pathname = usePathname();
+  const hasNewUser = useHasNewUser();
 
   const linkClasses = (active: boolean) =>
     `group flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
@@ -129,8 +131,14 @@ export function Sidebar({
                 </Link>
                 <Link href="/admin/users" onClick={onCloseMobile} className={linkClasses(pathname === '/admin/users')}>
                   <div className="flex items-center gap-3">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition">
+                    <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition">
                       <Users className="h-4 w-4" />
+                      {/* New pending account since this was last visited — see
+                          lib/newUserNotice.ts. ADMIN-only, same as the toast
+                          that fires alongside it (components/NewUserNotifier.tsx). */}
+                      {role === 'ADMIN' && hasNewUser && (
+                        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
+                      )}
                     </div>
                     <span>Użytkownicy</span>
                   </div>

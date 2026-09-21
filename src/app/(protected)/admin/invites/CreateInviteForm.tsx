@@ -6,6 +6,7 @@ import { Mail, UserPlus, AlertTriangle, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GminaSelect, type GminaOption, type GminaSelectValue } from '@/components/gmina/GminaSelect';
 import { OrganizationSelect, type OrganizationOption } from '@/components/organization/OrganizationSelect';
+import { copyToClipboard } from '@/lib/clipboard';
 
 const ROLES = ['ADMIN', 'COORDINATOR', 'VOLUNTEER'] as const;
 
@@ -99,8 +100,12 @@ export function CreateInviteForm({
 
   async function handleCopy() {
     if (!inviteUrl) return;
-    await navigator.clipboard.writeText(inviteUrl);
-    setCopied(true);
+    const ok = await copyToClipboard(inviteUrl);
+    if (ok) {
+      setCopied(true);
+    } else {
+      setMessage('Nie udało się skopiować linku — zaznacz go ręcznie i skopiuj (Ctrl+C).');
+    }
   }
 
   return (

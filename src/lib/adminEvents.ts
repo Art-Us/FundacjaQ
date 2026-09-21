@@ -12,6 +12,13 @@ export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organiz
 
 export interface AdminEvent {
   scope: AdminEventScope;
+  // Which AuditAction caused this, when the publisher knows it (recordAudit
+  // always does; a couple of direct callers that don't go through the audit
+  // log, like invite acceptance, still set it by hand). Optional because
+  // not every listener cares — right now only the new-pending-user notifier
+  // (components/NewUserNotifier.tsx) distinguishes 'USER_CREATE' from every
+  // other 'users'-scope change.
+  action?: string;
 }
 
 /** Best-effort — a dropped event just means an open tab waits for its own next action or a manual reload, exactly like before this existed. */
