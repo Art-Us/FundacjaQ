@@ -4,6 +4,20 @@ import { isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/lib/authz';
 import { requiresGmina } from '@/lib/gmina';
 import { parseClientIp } from '@/lib/clientIp';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
+import { publishAdminEvent, type AdminEventScope } from '@/lib/adminEvents';
+
+// Which entity types have a live-updating admin page today — RESOURCE/
+// ALERT_NEED/RESOURCE_ALLOCATION/ORGANIZATION audit entries still get
+// written as usual, just without a matching page to push them to yet
+// (see the SSE plan for alerts/resources/chat). Extending coverage later
+// is exactly one new entry here — recordAudit and revertAuditLog both key
+// off this single map, nothing else needs to change.
+const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScope>> = {
+  USER: 'users',
+  GMINA: 'gminas',
+  INVITE_TOKEN: 'invites',
+  ORGANIZATION: 'organizations',
+};
 
 /** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
 export function requestMeta(req: Request): RequestMeta {
@@ -70,6 +84,13 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
     });
   } catch (err) {
     console.error('[auditLog] failed to record audit entry:', err);
+    return; // nothing was actually written — no admin page needs to hear about it
+  }
+
+  const entityScope = ENTITY_TYPE_TO_ADMIN_SCOPE[input.entityType];
+  if (entityScope) {
+    await publishAdminEvent({ scope: 'logs' });
+    await publishAdminEvent({ scope: entityScope });
   }
 }
 
@@ -339,7 +360,7 @@ export async function revertAuditLog(
   meta?: RequestMeta
 ): Promise<RevertResult> {
   try {
-    const { revertedLogIds, revertedUserIds } = await prisma.$transaction(async (tx) => {
+    const { revertedLogIds, revertedUserIds, revertedEntityTypes } = await prisma.$transaction(async (tx) => {
       const target = await tx.auditLog.findUnique({ where: { id: logId } });
       if (!target) throw new RevertAbort(notFound('Wpis dziennika nie istnieje.'));
       if (target.revertedAt) throw new RevertAbort(conflict('Ta zmiana została już cofnięta.'));
@@ -433,6 +454,7 @@ export async function revertAuditLog(
       return {
         revertedLogIds: steps.map((step) => step.id),
         revertedUserIds: steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+        revertedEntityTypes: new Set(steps.map((step) => step.entityType)),
       };
     });
 
@@ -440,6 +462,18 @@ export async function revertAuditLog(
     // committed above, so a cache left stale here only costs up to the
     // 2-minute TTL (lib/userStatusCache.ts), not a security hole.
     await Promise.all(revertedUserIds.map((id) => invalidateUserStatusCache(id)));
+
+    // Same best-effort spirit as the cache invalidation above — a dropped
+    // event just means an open admin page waits for its next own action or a
+    // manual reload. 'logs' always fires (any revert is visible there,
+    // whatever it touched); the entity-specific scope reuses the same map
+    // recordAudit uses, so e.g. a GMINA revert notifies admin/gminas (and
+    // admin/users' + admin/invites' gmina pickers) without a separate check.
+    await publishAdminEvent({ scope: 'logs' });
+    for (const entityType of Array.from(revertedEntityTypes)) {
+      const scope = ENTITY_TYPE_TO_ADMIN_SCOPE[entityType];
+      if (scope) await publishAdminEvent({ scope });
+    }
 
     return { ok: true, revertedLogIds };
   } catch (err) {

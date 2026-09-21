@@ -20,6 +20,9 @@ vi.mock('@/lib/password', async () => {
     isPasswordPwned: vi.fn(),
   };
 });
+vi.mock('@/lib/adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 // Imported by its real path purely so vi.mock('@/lib/prisma') (resolved via
@@ -28,6 +31,7 @@ import { prisma as prismaImport } from '@/lib/prisma';
 import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin, requireAdminOrCoordinator } from '@/lib/authz';
 import { hashPassword, isPasswordPwned } from '@/lib/password';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { GET, POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -57,6 +61,7 @@ beforeEach(() => {
   vi.mocked(requireAdminOrCoordinator).mockReset();
   vi.mocked(hashPassword).mockReset().mockResolvedValue('hashed');
   vi.mocked(isPasswordPwned).mockReset().mockResolvedValue(false);
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
 });
 
 describe('GET /api/admin/users', () => {

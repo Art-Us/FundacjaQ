@@ -7,6 +7,8 @@ import { Pagination } from '@/components/ui/Pagination';
 import { formatDate } from '@/lib/utils';
 import { ROLE_LABELS } from '@/lib/users';
 import type { OrganizationOption } from '@/components/organization/OrganizationSelect';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
+import { getCachedList, setCachedList } from '@/lib/adminListCache';
 import { UserCard } from './UserCard';
 import { UserFormModal } from './UserFormModal';
 import type { UserGmina, UserListItem, UserRole } from './types';
@@ -80,6 +82,12 @@ function mapUser(user: ApiUser): UserListItem {
   };
 }
 
+interface CachedUsersPage {
+  users: UserListItem[];
+  total: number;
+  totalPages: number;
+}
+
 interface UsersDirectoryProps {
   gminas: UserGmina[];
   organizations: OrganizationOption[];
@@ -143,22 +151,39 @@ export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirector
   const requestIdRef = useRef(0);
 
   const fetchUsers = useCallback(
-    async (targetPage: number) => {
+    async (targetPage: number, opts?: { allowCache?: boolean }) => {
+      const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
+      if (roleFilter !== 'ALL') params.set('role', roleFilter);
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (gminaFilter !== 'ALL') params.set('gminaId', gminaFilter);
+      if (organizationFilter !== 'ALL') params.set('organizationId', organizationFilter);
+      if (onlyPending) params.set('onlyPending', 'true');
+      if (debouncedQuery) params.set('q', debouncedQuery);
+      const [sortBy, sortDir] = sort.split(':');
+      params.set('sortBy', sortBy);
+      params.set('sortDir', sortDir);
+      const cacheKey = params.toString();
+
+      // Only ever consulted right after mount (see the effect below) — a
+      // cache hit here means this exact query already ran, nothing has
+      // invalidated it since (lib/adminListCache.ts, cleared by
+      // AdminEventsBridge on a real change), so re-fetching would just
+      // reproduce what's already on screen.
+      if (opts?.allowCache) {
+        const cached = getCachedList<CachedUsersPage>('users', cacheKey);
+        if (cached) {
+          setUsers(cached.users);
+          setTotal(cached.total);
+          setTotalPages(cached.totalPages);
+          setError(null);
+          return;
+        }
+      }
+
       const requestId = ++requestIdRef.current;
 
       try {
-        const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
-        if (roleFilter !== 'ALL') params.set('role', roleFilter);
-        if (statusFilter !== 'ALL') params.set('status', statusFilter);
-        if (gminaFilter !== 'ALL') params.set('gminaId', gminaFilter);
-        if (organizationFilter !== 'ALL') params.set('organizationId', organizationFilter);
-        if (onlyPending) params.set('onlyPending', 'true');
-        if (debouncedQuery) params.set('q', debouncedQuery);
-        const [sortBy, sortDir] = sort.split(':');
-        params.set('sortBy', sortBy);
-        params.set('sortDir', sortDir);
-
-        const res = await fetch(`/api/admin/users?${params.toString()}`);
+        const res = await fetch(`/api/admin/users?${cacheKey}`);
         const data = await res.json().catch(() => ({}));
 
         if (requestId !== requestIdRef.current) return; // superseded by a newer request
@@ -178,10 +203,13 @@ export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirector
           return;
         }
 
-        setUsers((data.users as ApiUser[]).map(mapUser));
-        setTotal(data.total ?? 0);
+        const mappedUsers = (data.users as ApiUser[]).map(mapUser);
+        const total = data.total ?? 0;
+        setUsers(mappedUsers);
+        setTotal(total);
         setTotalPages(serverTotalPages);
         setError(null);
+        setCachedList('users', cacheKey, { users: mappedUsers, total, totalPages: serverTotalPages });
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         console.error('[UsersDirectory] failed to fetch:', err);
@@ -198,15 +226,25 @@ export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirector
     setPage(1);
   }, [roleFilter, statusFilter, gminaFilter, organizationFilter, onlyPending, debouncedQuery, sort]);
 
+  // allowCache only on the very first run of this effect (the initial mount)
+  // — a filter/page change after that always means the user just asked for
+  // different data, which must go to the network regardless of what's cached.
+  const didMountRef = useRef(false);
   useEffect(() => {
+    const allowCache = !didMountRef.current;
+    didMountRef.current = true;
     setLoading(true);
-    fetchUsers(page).finally(() => setLoading(false));
+    fetchUsers(page, { allowCache }).finally(() => setLoading(false));
   }, [page, fetchUsers]);
 
   function refetch() {
     setLoading(true);
     fetchUsers(page).finally(() => setLoading(false));
   }
+
+  // Another admin/coordinator's own create/activate/deactivate/edit/delete —
+  // see AdminEventsBridge (mounted in admin/layout.tsx) for how this arrives.
+  useAdminEvents('users', refetch);
 
   // onlyPending is a view toggle (pending queue vs. full directory), not a
   // filter — it doesn't count toward "are filters active" and clearFilters()

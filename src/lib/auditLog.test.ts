@@ -10,6 +10,9 @@ vi.mock('./authz', async () => {
 vi.mock('./userStatusCache', () => ({
   invalidateUserStatusCache: vi.fn(),
 }));
+vi.mock('./adminEvents', () => ({
+  publishAdminEvent: vi.fn(),
+}));
 
 import { prisma as prismaImport } from './prisma';
 // Imported by its real path (not the mocked './prisma' specifier) purely so
@@ -18,6 +21,7 @@ import { prisma as prismaImport } from './prisma';
 import { installTransactionMock } from './__mocks__/prisma';
 import { isLastActiveAdmin } from './authz';
 import { invalidateUserStatusCache } from './userStatusCache';
+import { publishAdminEvent } from './adminEvents';
 import {
   recordAudit,
   requestMeta,
@@ -149,6 +153,7 @@ beforeEach(() => {
   vi.mocked(isLastActiveAdmin).mockReset();
   vi.mocked(isLastActiveAdmin).mockResolvedValue(false);
   vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
 });
 
 describe('snapshot*', () => {

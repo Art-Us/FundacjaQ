@@ -8,6 +8,8 @@ import { OrganizationFormModal } from '@/components/organization/OrganizationFor
 import type { GminaOption } from '@/components/gmina/GminaSelect';
 import { OrganizationCard } from './OrganizationCard';
 import type { OrganizationListItem } from './types';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
+import { getCachedList, setCachedList } from '@/lib/adminListCache';
 
 // Encoded as a single "field:direction" value so one <select> can drive both
 // — sorting is applied server-side (see GET /api/admin/organizations'
@@ -72,6 +74,12 @@ function mapOrganization(organization: ApiOrganization): OrganizationListItem {
     contactEmail: organization.contactEmail,
     usersCount: organization._count.users,
   };
+}
+
+interface CachedOrganizationsPage {
+  organizations: OrganizationListItem[];
+  total: number;
+  totalPages: number;
 }
 
 interface OrganizationsDirectoryProps {
@@ -155,20 +163,34 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
   const requestIdRef = useRef(0);
 
   const fetchOrganizations = useCallback(
-    async (targetPage: number) => {
+    async (targetPage: number, opts?: { allowCache?: boolean }) => {
+      const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
+      if (gminaFilter !== 'ALL') params.set('gminaId', gminaFilter);
+      if (voivodeshipFilter !== 'ALL') params.set('voivodeship', voivodeshipFilter);
+      if (powiatFilter !== 'ALL') params.set('powiat', powiatFilter);
+      if (debouncedQuery) params.set('q', debouncedQuery);
+      const [sortBy, sortDir] = sort.split(':');
+      params.set('sortBy', sortBy);
+      params.set('sortDir', sortDir);
+      const cacheKey = params.toString();
+
+      // Only ever consulted right after mount (see the effect below) — see
+      // lib/adminListCache.ts for why this can't serve stale data.
+      if (opts?.allowCache) {
+        const cached = getCachedList<CachedOrganizationsPage>('organizations', cacheKey);
+        if (cached) {
+          setOrganizations(cached.organizations);
+          setTotal(cached.total);
+          setTotalPages(cached.totalPages);
+          setError(null);
+          return;
+        }
+      }
+
       const requestId = ++requestIdRef.current;
 
       try {
-        const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
-        if (gminaFilter !== 'ALL') params.set('gminaId', gminaFilter);
-        if (voivodeshipFilter !== 'ALL') params.set('voivodeship', voivodeshipFilter);
-        if (powiatFilter !== 'ALL') params.set('powiat', powiatFilter);
-        if (debouncedQuery) params.set('q', debouncedQuery);
-        const [sortBy, sortDir] = sort.split(':');
-        params.set('sortBy', sortBy);
-        params.set('sortDir', sortDir);
-
-        const res = await fetch(`/api/admin/organizations?${params.toString()}`);
+        const res = await fetch(`/api/admin/organizations?${cacheKey}`);
         const data = await res.json().catch(() => ({}));
 
         if (requestId !== requestIdRef.current) return; // superseded by a newer request
@@ -188,10 +210,17 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
           return;
         }
 
-        setOrganizations((data.organizations as ApiOrganization[]).map(mapOrganization));
-        setTotal(data.total ?? 0);
+        const mappedOrganizations = (data.organizations as ApiOrganization[]).map(mapOrganization);
+        const total = data.total ?? 0;
+        setOrganizations(mappedOrganizations);
+        setTotal(total);
         setTotalPages(serverTotalPages);
         setError(null);
+        setCachedList('organizations', cacheKey, {
+          organizations: mappedOrganizations,
+          total,
+          totalPages: serverTotalPages,
+        });
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         console.error('[OrganizationsDirectory] failed to fetch:', err);
@@ -208,10 +237,17 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
     setPage(1);
   }, [gminaFilter, voivodeshipFilter, powiatFilter, debouncedQuery, sort]);
 
+  const didMountRef = useRef(false);
   useEffect(() => {
+    const allowCache = !didMountRef.current;
+    didMountRef.current = true;
     setLoading(true);
-    fetchOrganizations(page).finally(() => setLoading(false));
+    fetchOrganizations(page, { allowCache }).finally(() => setLoading(false));
   }, [page, fetchOrganizations]);
+
+  // Another admin's own create/edit/delete — see AdminEventsBridge (mounted
+  // in admin/layout.tsx) for how this arrives.
+  useAdminEvents('organizations', refetch);
 
   function refetch() {
     setLoading(true);

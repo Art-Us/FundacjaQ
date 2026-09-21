@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { RefreshOnMount } from '@/components/RefreshOnMount';
+import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
 import { UsersDirectory } from './UsersDirectory';
 
 export default async function AdminUsersPage() {
@@ -28,7 +28,11 @@ export default async function AdminUsersPage() {
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
-      <RefreshOnMount />
+      {/* The user LIST refreshes itself (UsersDirectory listens for 'users'
+          events client-side) — this only covers the gmina/organization
+          dropdown props above, which are fetched here on the server and
+          would otherwise go stale until the next full navigation. */}
+      <AdminEventsRefresh scope={['gminas', 'organizations']} />
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Użytkownicy</h1>
         <p className="text-sm text-slate-500 mt-1">
