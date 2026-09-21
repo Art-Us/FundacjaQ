@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Mail, Phone, Building2, MapPin, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToggleUserActiveButton } from '@/components/users/ToggleUserActiveButton';
+import { UnlockUserButton } from '@/components/users/UnlockUserButton';
 import type { OrganizationOption } from '@/components/organization/OrganizationSelect';
 import { ROLE_LABELS } from '@/lib/users';
 import { DeleteUserButton } from './DeleteUserButton';
@@ -28,6 +29,7 @@ interface UserCardProps {
 export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: UserCardProps) {
   const [showEdit, setShowEdit] = useState(false);
   const canDelete = isAdmin && !user.isSelf;
+  const isLocked = !!user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now();
 
   return (
     <article className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition flex flex-col justify-between gap-4">
@@ -41,15 +43,22 @@ export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: Us
               {ROLE_LABELS[user.role]}
             </span>
           </div>
-          {user.isActive ? (
-            <span className="shrink-0 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200">
-              Aktywny
-            </span>
-          ) : (
-            <span className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-50 text-rose-700 text-[11px] font-bold border border-rose-200">
-              Nieaktywny
-            </span>
-          )}
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            {user.isActive ? (
+              <span className="px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200">
+                Aktywny
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-xl bg-rose-50 text-rose-700 text-[11px] font-bold border border-rose-200">
+                Nieaktywny
+              </span>
+            )}
+            {isLocked && (
+              <span className="px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-200">
+                Zablokowany
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-xs text-slate-600">
@@ -105,6 +114,7 @@ export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: Us
           {user.canManage && (
             <ToggleUserActiveButton userId={user.id} isActive={user.isActive} onSuccess={onChanged} />
           )}
+          {user.canManage && isLocked && <UnlockUserButton userId={user.id} onSuccess={onChanged} />}
         </div>
         {canDelete && (
           <DeleteUserButton userId={user.id} userLabel={user.name ?? user.email} onSuccess={onChanged} />

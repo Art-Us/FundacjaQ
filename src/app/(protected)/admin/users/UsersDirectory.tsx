@@ -62,6 +62,7 @@ interface ApiUser {
   gmina: { id: string; name: string } | null;
   isSelf: boolean;
   canManage: boolean;
+  lockedUntil: string | null;
 }
 
 function mapUser(user: ApiUser): UserListItem {
@@ -79,6 +80,7 @@ function mapUser(user: ApiUser): UserListItem {
     gmina: user.gmina,
     isSelf: user.isSelf,
     canManage: user.canManage,
+    lockedUntil: user.lockedUntil,
   };
 }
 

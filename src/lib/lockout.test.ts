@@ -140,10 +140,10 @@ describe('recordFailedAttempt', () => {
 });
 
 describe('resetAttempts', () => {
-  it('clears the Redis lock key, resets Postgres counters, and invalidates the user-status cache', async () => {
+  it('clears the Redis lock key, resets Postgres counters, invalidates the user-status cache, and reports success', async () => {
     prisma.user.update.mockResolvedValue({ id: 'user-1' } as any);
 
-    await resetAttempts('user@example.com');
+    await expect(resetAttempts('user@example.com')).resolves.toBe(true);
 
     expect(redis.del).toHaveBeenCalledWith('lockout:user@example.com');
     expect(prisma.user.update).toHaveBeenCalledWith({
@@ -154,16 +154,16 @@ describe('resetAttempts', () => {
     expect(redis.del).toHaveBeenCalledWith('user-status:user-1');
   });
 
-  it('does not throw if the user no longer exists', async () => {
+  it('does not throw if the user no longer exists, and reports failure', async () => {
     prisma.user.update.mockRejectedValue(new Error('Record to update not found'));
 
-    await expect(resetAttempts('nobody@example.com')).resolves.toBeUndefined();
+    await expect(resetAttempts('nobody@example.com')).resolves.toBe(false);
   });
 
-  it('does not throw (never blocks an already-authenticated login) when Redis errors', async () => {
+  it('does not throw (never blocks an already-authenticated login) when Redis errors, and still reports the Postgres outcome', async () => {
     vi.mocked(redis.del).mockRejectedValue(new Error('connection lost'));
     prisma.user.update.mockResolvedValue({} as any);
 
-    await expect(resetAttempts('user@example.com')).resolves.toBeUndefined();
+    await expect(resetAttempts('user@example.com')).resolves.toBe(true);
   });
 });

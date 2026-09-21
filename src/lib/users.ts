@@ -23,6 +23,7 @@ export const adminUserSelect = {
   lastActivatedAt: true,
   lastDeactivatedAt: true,
   deactivationReason: true,
+  lockedUntil: true,
   emailVerified: true,
   createdAt: true,
   updatedAt: true,
