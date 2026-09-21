@@ -17,13 +17,17 @@ interface AllocatableResource {
 
 interface AllocateResourcesModalProps {
   alertId: string;
+  alertLocationLabel: string;
   needId: string;
   needTitle: string;
   needCategoryId: string;
-  // How much the need still lacks — shown as a hint and used only for a soft
-  // over-allocation warning (нюанс #9: "варто додати попередження w UI"),
-  // never a hard cap: the API itself doesn't reject donations past this
-  // amount, since a need can legitimately end up over-covered.
+  needQuantityNeeded: number;
+  needQuantityFulfilled: number;
+  needUnit: string;
+  // How much the need still lacks — a HARD cap now, matching the API's own
+  // check in POST /api/alerts/[id]/allocations: a single donation can never
+  // push a need past what it's missing, even if the donor's own stock would
+  // allow more.
   remainingQuantity: number;
   currentUserOrganizationId: string | null;
   onClose: () => void;
@@ -33,14 +37,18 @@ interface AllocateResourcesModalProps {
 // "Przydziel zasoby" (R11) — a donor organization picks one of ITS OWN
 // resources in the need's category and offers a quantity toward it. POSTs to
 // /api/alerts/[id]/allocations (Крок 23), which does the actual ownership/
-// availability checks server-side; this form only pre-filters the dropdown to
-// what could plausibly work; so a stale/raced quantity is still refused by
-// the API's own check.
+// availability/remaining-need checks server-side; this form only pre-filters
+// the dropdown and caps the quantity input to what could plausibly work, so a
+// stale/raced quantity is still refused by the API's own check.
 export default function AllocateResourcesModal({
   alertId,
+  alertLocationLabel,
   needId,
   needTitle,
   needCategoryId,
+  needQuantityNeeded,
+  needQuantityFulfilled,
+  needUnit,
   remainingQuantity,
   currentUserOrganizationId,
   onClose,
@@ -51,6 +59,7 @@ export default function AllocateResourcesModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [resourceId, setResourceId] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [confirmNameMismatch, setConfirmNameMismatch] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,9 +78,25 @@ export default function AllocateResourcesModal({
 
   const selected = resources?.find((r) => r.id === resourceId) ?? null;
   const available = selected ? selected.quantity - selected.reservedQuantity : 0;
+  // The hard cap on what this one donation may be: never more than the
+  // donor's own free stock, and never more than the need is still missing.
+  const allowedMax = Math.min(available, remainingQuantity);
   const quantityNum = Number(quantity);
-  const canSubmit = !!selected && quantityNum > 0 && Number.isInteger(quantityNum) && quantityNum <= available;
-  const overRemaining = remainingQuantity > 0 && quantityNum > remainingQuantity;
+  // The dropdown lists every resource in the need's category (Sprzęt
+  // medyczny can mean both "Zestawy pierwszej pomocy" and "Nosze
+  // ratownicze") — there's no structural link between a need's title and a
+  // resource's name, only the shared category. This can't tell "same item,
+  // different wording" apart from "genuinely different item", so it's a
+  // confirmable warning, not a hard block.
+  const nameMismatch = !!selected && selected.name.trim().toLowerCase() !== needTitle.trim().toLowerCase();
+  const canSubmit =
+    !!selected &&
+    quantityNum > 0 &&
+    Number.isInteger(quantityNum) &&
+    quantityNum <= allowedMax &&
+    (!nameMismatch || confirmNameMismatch);
+  const exceedsAvailable = selected && quantityNum > available;
+  const exceedsRemaining = selected && quantityNum > remainingQuantity && quantityNum <= available;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -116,6 +141,24 @@ export default function AllocateResourcesModal({
           </button>
         </div>
 
+        <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-2 text-xs">
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-slate-500 shrink-0">Miejsce zdarzenia:</span>
+            <span className="font-semibold text-slate-900 text-right">{alertLocationLabel}</span>
+          </div>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-slate-500 shrink-0">Potrzebny zasób:</span>
+            <span className="font-semibold text-indigo-600 text-right">{needTitle}</span>
+          </div>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-slate-500 shrink-0">Stan realizacji:</span>
+            <span className="font-semibold text-slate-900 text-right">
+              {needQuantityFulfilled} / {needQuantityNeeded} {needUnit}{' '}
+              <span className="font-normal text-slate-500">(Brakuje: {remainingQuantity} {needUnit})</span>
+            </span>
+          </div>
+        </div>
+
         {loadError ? (
           <p className="text-xs text-rose-600 py-6 text-center">{loadError}</p>
         ) : resources === null ? (
@@ -138,6 +181,7 @@ export default function AllocateResourcesModal({
                 onChange={(e) => {
                   setResourceId(e.target.value);
                   setQuantity('');
+                  setConfirmNameMismatch(false);
                 }}
                 required
                 className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-3 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
@@ -152,29 +196,94 @@ export default function AllocateResourcesModal({
                   );
                 })}
               </select>
+
+              {nameMismatch && (
+                <div className="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-2">
+                  <p className="flex items-start gap-2 text-[11px] text-amber-700 font-medium">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    Nazwa zasobu („{selected?.name}") różni się od nazwy zapotrzebowania („{needTitle}"). Mimo wspólnej
+                    kategorii to może być inny przedmiot.
+                  </p>
+                  <label className="flex items-start gap-2 text-[11px] text-amber-800 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={confirmNameMismatch}
+                      onChange={(e) => setConfirmNameMismatch(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    Tak, celowo przekazuję inny przedmiot na to zapotrzebowanie.
+                  </label>
+                </div>
+              )}
             </div>
 
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Ilość</label>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Ilość do przekazania{selected ? ` (${selected.unit})` : ''}
+                </label>
+                {selected && (
+                  <span className="text-[11px] text-slate-400">
+                    {exceedsAvailable ? (
+                      <span className="text-rose-600 font-semibold">Brakuje: {quantityNum - available}</span>
+                    ) : (
+                      <>W magazynie: {available}</>
+                    )}
+                  </span>
+                )}
+              </div>
               <input
                 type="number"
                 min={1}
                 step={1}
-                max={available || undefined}
+                max={allowedMax || undefined}
                 required
                 disabled={!selected}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={selected ? `maks. ${available} ${selected.unit}` : undefined}
+                placeholder={selected ? `maks. ${allowedMax} ${selected.unit}` : undefined}
                 className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-3 text-slate-900 text-xs font-bold focus:bg-white focus:border-indigo-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               />
-              {selected && quantityNum > available && (
-                <p className="text-[11px] text-rose-600 mt-1">Przekracza dostępną ilość tego zasobu.</p>
+
+              {selected && allowedMax > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  {[5, 10].map((quick) =>
+                    quick < allowedMax ? (
+                      <button
+                        key={quick}
+                        type="button"
+                        onClick={() => setQuantity(String(quick))}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          quantityNum === quick
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {quick} {selected.unit}
+                      </button>
+                    ) : null
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(String(allowedMax))}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                      quantityNum === allowedMax
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Maks. dozwolony przydział ({allowedMax})
+                  </button>
+                </div>
               )}
-              {overRemaining && quantityNum <= available && (
-                <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  Zapotrzebowanie potrzebuje jeszcze {remainingQuantity} {selected?.unit} — przydzielasz więcej.
+
+              {exceedsAvailable && (
+                <p className="text-[11px] text-rose-600 mt-1.5">Przekracza dostępną ilość tego zasobu.</p>
+              )}
+              {exceedsRemaining && (
+                <p className="text-[11px] text-rose-600 mt-1.5 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  Przekracza brakującą ilość zapotrzebowania — maksymalnie {remainingQuantity} {selected?.unit}.
                 </p>
               )}
             </div>

@@ -35,6 +35,8 @@ export interface MapAlert {
   latitude: number | null;
   longitude: number | null;
   createdAt: Date | string;
+  startsAt: Date | string | null;
+  expiresAt: Date | string | null;
   gmina: { name: string };
   author: { name: string | null; organization: { name: string } | null } | null;
   // "Zapotrzebowanie na zasoby" (R11) shown right in the marker popup — same
@@ -160,7 +162,15 @@ export default function AlertMap({
   );
 
   return (
-    <div className="relative w-full rounded-3xl overflow-hidden border border-slate-200 bg-white">
+    // `isolate` (CSS isolation: isolate) gives this its own stacking context —
+    // without it, Leaflet's internal panes/controls (z-index up to 1000, see
+    // leaflet.css) and this component's own z-[1000] overlays (mode switch,
+    // legend below) compete directly with the app's global chrome z-index
+    // (sidebar z-40/z-50, modal backdrops z-50/z-60), and always win. That's
+    // what let the map bleed through the mobile sidebar drawer and through
+    // modal backdrops (AlertEditModal etc.) while scrolled — isolate contains
+    // all of the map's internal z-index values inside this box instead.
+    <div className="relative isolate w-full rounded-3xl overflow-hidden border border-slate-200 bg-white">
       {/* Przełącznik trybu wizualizacji (kategoria / krytyczność) — tylko dla
           komunikatów kryzysowych, bo zdarzenia codzienne nie mają krytyczności. */}
       {!isEventView && (
@@ -307,7 +317,7 @@ export default function AlertMap({
       </MapContainer>
 
       {/* Legenda mapy, zależna od aktywnego trybu wizualizacji */}
-      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-white/90 p-3 shadow-lg backdrop-blur-md border border-slate-200/80 text-[11px] text-slate-600 hidden sm:block max-w-xs">
+      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-white/90 p-3 shadow-lg backdrop-blur-md border border-slate-200/80 text-[11px] text-slate-600 hidden sm:block">
         <p className="font-bold text-slate-900 mb-1.5">
           {isEventView
             ? `Legenda: Typy wydarzeń (${withCoords.length})`
@@ -315,14 +325,14 @@ export default function AlertMap({
             ? `Legenda: Kategorie (${withCoords.length})`
             : `Legenda: Krytyczność (${withCoords.length})`}
         </p>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex flex-col gap-1">
           {(isEventView ? EVENT_CATEGORIES : legendMode === 'category' ? ALERT_CATEGORIES : SEVERITIES).map((key) => {
             const color = legendMode === 'category' ? CATEGORY_MARKER_COLORS[key] : SEVERITY_MARKER_COLORS[key];
             const label = legendMode === 'category' ? ALERT_CATEGORY_LABELS[key] : SEVERITY_LABELS[key];
             return (
               <div key={key} className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                <span>{label}</span>
+                <span className="whitespace-nowrap">{label}</span>
               </div>
             );
           })}

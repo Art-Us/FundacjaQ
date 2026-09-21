@@ -174,6 +174,21 @@ describe('POST /api/alerts/[id]/allocations', () => {
     expect(prisma.resourceAllocation.create).not.toHaveBeenCalled();
   });
 
+  it('rejects allocating more than the need still lacks, even with plenty of resource stock', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'donor-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    // quantityNeeded 5, quantityFulfilled 2 -> only 3 left to fill.
+    prisma.alertNeed.findUnique.mockResolvedValue({ ...baseNeed, quantityFulfilled: 2, unit: 'szt' } as any);
+    prisma.resource.findUnique.mockResolvedValue({ ...baseResource, quantity: 100, reservedQuantity: 0 } as any);
+
+    const res = await POST(makeRequest('POST', { needId: 'need1', resourceId: 'r1', quantity: 4 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('brakuje 3 szt');
+    expect(prisma.resourceAllocation.create).not.toHaveBeenCalled();
+  });
+
   it('creates the allocation, reserves the resource, recalculates the need, and records an audit entry', async () => {
     const user = { id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'donor-org' };
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue(user as any);

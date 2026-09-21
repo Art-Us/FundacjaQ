@@ -157,6 +157,8 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
             latitude: alert.latitude,
             longitude: alert.longitude,
             createdAt: alert.createdAt,
+            startsAt: alert.startsAt,
+            expiresAt: alert.expiresAt,
             gmina: { name: alert.gmina.name },
             author: alert.author
               ? { name: alert.author.name, organization: alert.author.organization }

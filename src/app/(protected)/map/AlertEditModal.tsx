@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { X, Pencil, Save } from 'lucide-react';
@@ -28,6 +29,17 @@ const LocationPicker = dynamic(() => import('./LocationPicker'), {
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
+// datetime-local expects "YYYY-MM-DDTHH:mm" in LOCAL time — toISOString()
+// gives UTC with seconds/Z, so this builds the offset-naive local string
+// instead of just slicing the ISO string (which would silently shift the
+// displayed hour for any timezone other than UTC).
+function toDatetimeLocal(value: Date | string | null | undefined): string {
+  if (!value) return '';
+  const d = new Date(value);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 interface AlertEditModalProps {
   alert: MapAlert;
   onClose: () => void;
@@ -48,6 +60,8 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
     alert.latitude != null && alert.longitude != null ? { lat: alert.latitude, lng: alert.longitude } : null
   );
+  const [startsAt, setStartsAt] = useState(() => toDatetimeLocal(alert.startsAt));
+  const [expiresAt, setExpiresAt] = useState(() => toDatetimeLocal(alert.expiresAt));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +74,12 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (startsAt && expiresAt && new Date(startsAt) > new Date(expiresAt)) {
+      setError('Data rozpoczęcia nie może być późniejsza niż data zakończenia.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -73,6 +93,8 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
         category,
         location: location || undefined,
         ...(coords ? { latitude: coords.lat, longitude: coords.lng } : {}),
+        startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       }),
     });
 
@@ -88,7 +110,16 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
     onClose();
   }
 
-  return (
+  // Portaled to document.body — every other modal in this app already does
+  // this (ResourceFormModal, NeedFormModal, AllocateResourcesModal, ...);
+  // this one was the one exception, left rendered inline inside
+  // AlertsMapView's tree. That's harmless for layout, but its
+  // `fixed inset-0 z-50` backdrop then shares a stacking context with
+  // whatever else is on the page — including the map's `isolate`-free
+  // internals before the fix above — so nothing here actually caused the
+  // bleed-through, but portaling removes any doubt and matches the
+  // established pattern.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
       <div className="w-full max-w-xl rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xl space-y-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -194,6 +225,33 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
           </div>
 
           <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+              Zakres czasowy {isEvent ? 'wydarzenia' : 'alertu'} (opcjonalnie) — decyduje o filtrach czasowych na
+              liście
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <span className="block text-[10px] text-slate-400 mb-0.5">Aktywny od</span>
+                <input
+                  type="datetime-local"
+                  value={startsAt}
+                  onChange={(e) => setStartsAt(e.target.value)}
+                  className="w-full rounded-xl bg-slate-50 border border-slate-200 py-1.5 px-2.5 text-xs text-slate-900"
+                />
+              </div>
+              <div>
+                <span className="block text-[10px] text-slate-400 mb-0.5">Aktywny do</span>
+                <input
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                  className="w-full rounded-xl bg-slate-50 border border-slate-200 py-1.5 px-2.5 text-xs text-slate-900"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1.5">
               <span>Zmień lokalizację punktu na mapie</span>
             </label>
@@ -236,6 +294,7 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

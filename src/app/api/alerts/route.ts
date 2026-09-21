@@ -24,7 +24,11 @@ const createAlertSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   gminaId: z.string().min(1, 'Gmina jest wymagana.'),
+  startsAt: z.coerce.date().optional(),
   expiresAt: z.coerce.date().optional(),
+}).refine((data) => !data.startsAt || !data.expiresAt || data.startsAt <= data.expiresAt, {
+  message: 'Data rozpoczęcia nie może być późniejsza niż data zakończenia.',
+  path: ['startsAt'],
 });
 
 export async function POST(req: NextRequest) {

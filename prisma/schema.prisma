@@ -423,6 +423,13 @@ model Alert {
   organization   Organization? @relation(fields: [organizationId], references: [id])
   gminaId        String
   gmina          Gmina         @relation(fields: [gminaId], references: [id])
+  // Declared "Zakres czasowy" (start/end of when the alert/event is active) —
+  // both optional and independent of createdAt (when it was reported/
+  // entered into the system). A null startsAt means "active from creation";
+  // application code (matchesTimeframe in AlertsMapView.tsx) falls back to
+  // createdAt for filtering when it's unset, rather than backfilling it here,
+  // since createdAt already varies per row and a static @default can't copy it.
+  startsAt       DateTime?
   expiresAt      DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt

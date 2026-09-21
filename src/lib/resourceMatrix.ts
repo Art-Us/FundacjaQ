@@ -41,8 +41,8 @@ export interface ComputeResourceMatrixParams {
 /**
  * The "Matryca Zasobów w Czasie" aggregation (R10) — shared by
  * GET /api/resources/matrix (Крок 20, for the client's "Odśwież" refetch) and
- * the /zasoby server page (Крок 31, for the first paint) so the cumulative
- * horizon math lives in exactly one place.
+ * the /zasoby server page (Крок 31, for the first paint) so the horizon
+ * bucketing math lives in exactly one place.
  */
 export async function computeResourceMatrix({
   gminaFilter,
@@ -76,44 +76,48 @@ export async function computeResourceMatrix({
     });
   }
 
-  // Horizon is cumulative (decision #2, docs/are-you-familiar-with-tidy-blum.md):
-  // a resource available within H24 also counts toward the H48/H72/WEEK
-  // columns, since anything available sooner is by definition also available
-  // by any later deadline.
-  function cumulativeCell(categoryId: string, uptoIndex: number): MatrixCell {
-    let quantity = 0;
-    let reservedQuantity = 0;
-    for (let i = 0; i <= uptoIndex; i++) {
-      const entry = sumsByKey.get(`${categoryId}|${MATRIX_HORIZONS[i]}`);
-      if (entry) {
-        quantity += entry.quantity;
-        reservedQuantity += entry.reservedQuantity;
-      }
-    }
+  // Each horizon column shows only what was declared at exactly that
+  // horizon — a resource declared "H72" does NOT also count toward the WEEK
+  // column, even though 72h fits inside a week. Buckets are mutually
+  // exclusive, so summing across all four gives the group's true grand total.
+  function exactCell(categoryId: string, horizon: MatrixHorizon): MatrixCell {
+    const entry = sumsByKey.get(`${categoryId}|${horizon}`);
+    const quantity = entry?.quantity ?? 0;
+    const reservedQuantity = entry?.reservedQuantity ?? 0;
     return { quantity, reservedQuantity, available: Math.max(quantity - reservedQuantity, 0) };
   }
 
   const categoryRows: MatrixCategoryRow[] = categories.map((category) => {
     const horizons = {} as Record<MatrixHorizon, MatrixCell>;
-    MATRIX_HORIZONS.forEach((horizon, idx) => {
-      horizons[horizon] = cumulativeCell(category.id, idx);
+    MATRIX_HORIZONS.forEach((horizon) => {
+      horizons[horizon] = exactCell(category.id, horizon);
     });
     return { categoryId: category.id, name: category.name, group: category.group as MatrixGroup, horizons };
   });
 
-  // Each tile's main figure is the group's grand total (the WEEK column,
-  // which cumulatively includes every horizon); "within24h" is the same
-  // group's H24 column, shown as the tile's secondary figure (fot. 1).
+  // Each tile's main figure is the group's grand total across all four
+  // (now mutually exclusive) horizon buckets combined; "within24h" is just
+  // the H24 bucket, shown as the tile's secondary figure (fot. 1).
   const tiles: MatrixTile[] = tileGroups.map((tileGroup) => {
     const rows = categoryRows.filter((row) => row.group === tileGroup);
     return rows.reduce(
-      (acc, row) => ({
-        group: tileGroup,
-        quantity: acc.quantity + row.horizons.WEEK.quantity,
-        reservedQuantity: acc.reservedQuantity + row.horizons.WEEK.reservedQuantity,
-        available: acc.available + row.horizons.WEEK.available,
-        within24h: acc.within24h + row.horizons.H24.quantity,
-      }),
+      (acc, row) => {
+        const rowTotal = MATRIX_HORIZONS.reduce(
+          (sum, h) => ({
+            quantity: sum.quantity + row.horizons[h].quantity,
+            reservedQuantity: sum.reservedQuantity + row.horizons[h].reservedQuantity,
+            available: sum.available + row.horizons[h].available,
+          }),
+          { quantity: 0, reservedQuantity: 0, available: 0 }
+        );
+        return {
+          group: tileGroup,
+          quantity: acc.quantity + rowTotal.quantity,
+          reservedQuantity: acc.reservedQuantity + rowTotal.reservedQuantity,
+          available: acc.available + rowTotal.available,
+          within24h: acc.within24h + row.horizons.H24.quantity,
+        };
+      },
       { group: tileGroup, quantity: 0, reservedQuantity: 0, available: 0, within24h: 0 }
     );
   });

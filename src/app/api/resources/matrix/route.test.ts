@@ -73,7 +73,7 @@ describe('GET /api/resources/matrix', () => {
     expect(body.tiles).toEqual([{ group: 'WATER', quantity: 0, reservedQuantity: 0, available: 0, within24h: 0 }]);
   });
 
-  it('builds cumulative horizon columns and per-group tiles', async () => {
+  it('builds exact (non-cumulative) horizon columns and per-group tiles', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.resourceCategory.findMany.mockResolvedValue([
       { id: 'cat-water', name: 'Woda pitna', group: 'WATER' },
@@ -91,17 +91,18 @@ describe('GET /api/resources/matrix', () => {
     const water = body.categories.find((c: any) => c.categoryId === 'cat-water');
     // H24 column: just the H24 row.
     expect(water.horizons.H24).toEqual({ quantity: 10, reservedQuantity: 4, available: 6 });
-    // H48 column: still just H24 (nothing declared at H48 itself), cumulative.
-    expect(water.horizons.H48).toEqual({ quantity: 10, reservedQuantity: 4, available: 6 });
-    // H72 column: H24 + H72 rows combined.
-    expect(water.horizons.H72).toEqual({ quantity: 15, reservedQuantity: 4, available: 11 });
-    // WEEK column: same as H72 (nothing declared at WEEK itself).
-    expect(water.horizons.WEEK).toEqual({ quantity: 15, reservedQuantity: 4, available: 11 });
+    // H48 column: nothing declared at H48 itself — empty, not inherited from H24.
+    expect(water.horizons.H48).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
+    // H72 column: just the H72 row, not combined with H24.
+    expect(water.horizons.H72).toEqual({ quantity: 5, reservedQuantity: 0, available: 5 });
+    // WEEK column: nothing declared at WEEK itself — empty, not inherited from H72.
+    expect(water.horizons.WEEK).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
 
     const eq = body.categories.find((c: any) => c.categoryId === 'cat-eq');
     expect(eq.horizons.H24).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
     expect(eq.horizons.WEEK).toEqual({ quantity: 3, reservedQuantity: 1, available: 2 });
 
+    // Tile totals sum across all four (now mutually exclusive) buckets.
     const waterTile = body.tiles.find((t: any) => t.group === 'WATER');
     expect(waterTile).toEqual({ group: 'WATER', quantity: 15, reservedQuantity: 4, available: 11, within24h: 10 });
     const eqTile = body.tiles.find((t: any) => t.group === 'EQUIPMENT');

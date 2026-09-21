@@ -50,7 +50,9 @@ export default function LocationPicker({ center, value, onPick, color, icon = 'a
         : createPinIcon(color, 40);
 
   return (
-    <div className="relative rounded-lg overflow-hidden border border-gray-300" style={{ height: 260 }}>
+    // `isolate` contains Leaflet's internal z-index (up to 1000 for its zoom
+    // control) inside this box — see the same note in AlertMap.tsx.
+    <div className="relative isolate rounded-lg overflow-hidden border border-gray-300" style={{ height: 260 }}>
       <MapContainer
         center={value ? [value.lat, value.lng] : center}
         zoom={14}

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { BellRing, CalendarDays, LoaderCircle, MapPin, SearchX, Send } from 'lucide-react';
+import { BellRing, CalendarDays, LoaderCircle, MapPin, Package, Plus, SearchX, Send, Trash2, X } from 'lucide-react';
 import {
   SEVERITY_LABELS,
   ALERT_CATEGORY_LABELS,
@@ -13,6 +13,8 @@ import {
   categoriesForKind,
 } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
+import { getResourceGroupInfo, getNeedUrgencyInfo } from '@/lib/resourceLabels';
+import type { MatrixCategoryRow, MatrixGroup } from '@/lib/resourceMatrix';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import type { Role } from '@/types';
 import type { GminaOption } from './AlertsMapView';
@@ -41,6 +43,39 @@ const INPUT_CLASS =
   'rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs sm:text-sm px-3.5 py-2.5 outline-none transition-colors focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10';
 const LABEL_CLASS = 'text-xs font-semibold uppercase tracking-wide text-slate-500';
 
+const NEED_URGENCIES = ['NORMAL', 'PILNE', 'KRYTYCZNY'] as const;
+const GROUP_ORDER: MatrixGroup[] = ['PEOPLE', 'WATER', 'EQUIPMENT', 'OTHER'];
+
+// A "Zapotrzebowanie na zasoby" row filled in while creating the alert —
+// always a brand-new AlertNeed (no `id`/quantityFulfilled, unlike
+// NeedFormModal's NeedRow which also edits existing ones), POSTed to
+// /api/alerts/[id]/needs right after the alert itself is created.
+interface NeedDraftRow {
+  key: string;
+  categoryId: string;
+  title: string;
+  quantityNeeded: string;
+  unit: string;
+  urgency: (typeof NEED_URGENCIES)[number];
+}
+
+let needRowSeq = 0;
+function emptyNeedRow(defaultCategoryId: string): NeedDraftRow {
+  needRowSeq += 1;
+  return { key: `need-${needRowSeq}`, categoryId: defaultCategoryId, title: '', quantityNeeded: '', unit: 'szt', urgency: 'NORMAL' };
+}
+
+// A row the reporter never touched (still fully at its default) is silently
+// dropped on submit rather than forcing them to either fill it in or
+// explicitly delete it — only a PARTIALLY filled row blocks submission.
+function isNeedRowEmpty(row: NeedDraftRow): boolean {
+  return !row.title.trim() && row.quantityNeeded.trim() === '';
+}
+
+function isNeedRowValid(row: NeedDraftRow): boolean {
+  return !!row.categoryId && row.title.trim().length > 0 && Number(row.quantityNeeded) >= 1;
+}
+
 interface AlertFormProps {
   gminy: GminaOption[];
   currentUserGminaId: string | null;
@@ -48,6 +83,10 @@ interface AlertFormProps {
   initialCoords: { lat: number; lng: number } | null;
   kind: AlertKindValue;
   onDone: () => void;
+  // Collapses the form back to the "+ Opublikuj..." button without
+  // submitting — distinct from onDone (which also router.refresh()es after a
+  // successful POST).
+  onCancel: () => void;
 }
 
 export default function AlertForm({
@@ -57,6 +96,7 @@ export default function AlertForm({
   initialCoords,
   kind,
   onDone,
+  onCancel,
 }: AlertFormProps) {
   const router = useRouter();
   const isEvent = kind === 'EVENT';
@@ -71,8 +111,17 @@ export default function AlertForm({
   const [latText, setLatText] = useState(initialCoords ? String(initialCoords.lat) : '');
   const [lngText, setLngText] = useState(initialCoords ? String(initialCoords.lng) : '');
   const [geo, setGeo] = useState<GeoState>({ status: 'idle' });
+  const [startsAt, setStartsAt] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [needCategories, setNeedCategories] = useState<MatrixCategoryRow[] | null>(null);
+  const [needCategoriesError, setNeedCategoriesError] = useState<string | null>(null);
+  const [needRows, setNeedRows] = useState<NeedDraftRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Set once POST /api/alerts succeeds — guards against a second click on the
+  // submit button re-creating a second alert while the form stays open (only
+  // happens if some of the need rows below failed to save; see handleSubmit).
+  const [createdAlertId, setCreatedAlertId] = useState<string | null>(null);
   // Jeden timer i jeden licznik dla OBU kierunków geokodowania: nowe żądanie
   // anuluje poprzednie niezależnie od tego, czy przyszło z kliknięcia w mapę,
   // czy z wpisywania adresu, a `seq` odrzuca spóźnione odpowiedzi, które
@@ -195,11 +244,54 @@ export default function AlertForm({
     };
   }, []);
 
+  // Self-fetched, same pattern NeedFormModal.tsx uses for its own TYP
+  // dropdown — no server-component plumbing carries a category list into
+  // this client form today, so this mirrors the existing convention rather
+  // than inventing a new one.
+  useEffect(() => {
+    fetch('/api/resources/matrix')
+      .then((res) => res.json())
+      .then((data) => setNeedCategories(data.categories ?? []))
+      .catch(() => setNeedCategoriesError('Nie udało się pobrać listy kategorii zasobów.'));
+  }, []);
+
+  function addNeedRow() {
+    setNeedRows((prev) => [...prev, emptyNeedRow(needCategories?.[0]?.categoryId ?? '')]);
+  }
+
+  function updateNeedRow(key: string, patch: Partial<NeedDraftRow>) {
+    setNeedRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  }
+
+  function removeNeedRow(key: string) {
+    setNeedRows((prev) => prev.filter((row) => row.key !== key));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    // The alert already exists (created on a previous submit) and only some
+    // need rows failed to save — a second click just closes the form instead
+    // of creating a duplicate alert.
+    if (createdAlertId) {
+      onDone();
+      return;
+    }
+
     if (!coords) {
       setMessage('Wskaż lokalizację zdarzenia na mapie poniżej.');
+      return;
+    }
+
+    const filledNeedRows = needRows.filter((row) => !isNeedRowEmpty(row));
+    const invalidNeedRow = filledNeedRows.find((row) => !isNeedRowValid(row));
+    if (invalidNeedRow) {
+      setMessage('Uzupełnij lub usuń niekompletną pozycję w "Zapotrzebowanie na zasoby".');
+      return;
+    }
+
+    if (startsAt && expiresAt && new Date(startsAt) > new Date(expiresAt)) {
+      setMessage('Data rozpoczęcia nie może być późniejsza niż data zakończenia.');
       return;
     }
 
@@ -220,18 +312,54 @@ export default function AlertForm({
         latitude: coords.lat,
         longitude: coords.lng,
         gminaId,
+        ...(startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
+        ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
       }),
     });
 
     const data = await res.json();
-    setLoading(false);
 
     if (!res.ok) {
+      setLoading(false);
       setMessage(data.error ?? 'Coś poszło nie tak.');
       return;
     }
 
+    const newAlertId: string = data.alert.id;
+    setCreatedAlertId(newAlertId);
+
+    const needFailures: string[] = [];
+    for (const row of filledNeedRows) {
+      const needRes = await fetch(`/api/alerts/${newAlertId}/needs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryId: row.categoryId,
+          title: row.title.trim(),
+          quantityNeeded: Number(row.quantityNeeded),
+          unit: row.unit.trim() || 'szt',
+          urgency: row.urgency,
+        }),
+      });
+      if (!needRes.ok) {
+        const needData = await needRes.json().catch(() => ({}));
+        needFailures.push(`„${row.title.trim()}”: ${needData.error ?? 'błąd zapisu'}`);
+      }
+    }
+
+    setLoading(false);
     router.refresh();
+
+    if (needFailures.length > 0) {
+      // Alert was created successfully — keep the form open only so this
+      // message stays visible; createdAlertId above turns the submit button
+      // into a plain "close", so it can't create a second alert.
+      setMessage(
+        `Alert utworzony, ale nie udało się dodać części zapotrzebowania: ${needFailures.join(' ')} Możesz je dodać później przez „Edytuj zapotrzebowanie”.`
+      );
+      return;
+    }
+
     onDone();
   }
 
@@ -240,24 +368,34 @@ export default function AlertForm({
       onSubmit={handleSubmit}
       className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs flex flex-col gap-5"
     >
-      <div className="flex items-center gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
-            isEvent ? 'bg-fuchsia-50 text-fuchsia-600' : 'bg-indigo-50 text-indigo-600'
-          }`}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+              isEvent ? 'bg-fuchsia-50 text-fuchsia-600' : 'bg-indigo-50 text-indigo-600'
+            }`}
+          >
+            {isEvent ? <CalendarDays className="h-5 w-5" /> : <BellRing className="h-5 w-5" />}
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              {isEvent ? 'Dodaj nowe zdarzenie codzienne' : 'Opublikuj nowy komunikat kryzysowy'}
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {isEvent
+                ? 'Festyn, koncert, zebranie mieszkańców — kliknij punkt na mapie, nazwa miejscowości zostanie wykryta automatycznie.'
+                : 'Kliknij punkt na mapie — nazwa miejscowości zostanie wykryta automatycznie.'}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          title="Zamknij"
+          className="shrink-0 rounded-xl p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
         >
-          {isEvent ? <CalendarDays className="h-5 w-5" /> : <BellRing className="h-5 w-5" />}
-        </div>
-        <div>
-          <h3 className="text-base font-bold text-slate-900">
-            {isEvent ? 'Dodaj nowe zdarzenie codzienne' : 'Opublikuj nowy komunikat kryzysowy'}
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {isEvent
-              ? 'Festyn, koncert, zebranie mieszkańców — kliknij punkt na mapie, nazwa miejscowości zostanie wykryta automatycznie.'
-              : 'Kliknij punkt na mapie — nazwa miejscowości zostanie wykryta automatycznie.'}
-          </p>
-        </div>
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-12">
@@ -351,6 +489,40 @@ export default function AlertForm({
               </div>
             )}
           </div>
+
+          <div>
+            <label className={`${LABEL_CLASS} block mb-1.5`}>
+              Zakres czasowy {isEvent ? 'wydarzenia' : 'alertu'} (opcjonalnie)
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Aktywny od — puste znaczy "od teraz"
+                </span>
+                <input
+                  type="datetime-local"
+                  value={startsAt}
+                  onChange={(e) => setStartsAt(e.target.value)}
+                  className={INPUT_CLASS}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Aktywny do — puste znaczy "do odwołania"
+                </span>
+                <input
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                  className={INPUT_CLASS}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Ten zakres decyduje o tym, w jakich filtrach czasowych ("Ostatnie 24h", "Tydzień"...) ten wpis się
+              pojawi.
+            </p>
+          </div>
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-2">
@@ -439,6 +611,139 @@ export default function AlertForm({
         </div>
       </div>
 
+      <div className="border-t border-slate-100 pt-5 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
+              <Package className="h-4 w-4 text-slate-500" />
+              Zapotrzebowanie na zasoby (zapytania / potrzebne wsparcie)
+            </h4>
+            <p className="text-[11px] text-slate-500 mt-0.5 max-w-xl">
+              Określ czego i w jakiej ilości potrzebują służby na miejscu zdarzenia (np. woda, agregaty, pompy,
+              ratownicy). Inne jednostki będą mogły przydzielić swoje zasoby. Opcjonalne — możesz dodać to też
+              później.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={addNeedRow}
+            disabled={!needCategories || needCategories.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold border border-amber-300 transition disabled:opacity-50 shrink-0"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Dodaj zapotrzebowanie
+          </button>
+        </div>
+
+        {needCategoriesError && <p className="text-xs text-rose-600">{needCategoriesError}</p>}
+
+        {needRows.length > 0 && (
+          <div className="space-y-3">
+            {needRows.map((row) => (
+              <div
+                key={row.key}
+                className="grid grid-cols-1 sm:grid-cols-[1.1fr_2fr_0.8fr_0.6fr_0.9fr_auto] gap-3 items-end rounded-2xl border border-slate-200 p-3"
+              >
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Typ
+                  </label>
+                  <select
+                    value={row.categoryId}
+                    onChange={(e) => updateNeedRow(row.key, { categoryId: e.target.value })}
+                    required
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
+                  >
+                    {!needCategories && <option value="">Ładowanie…</option>}
+                    {needCategories &&
+                      GROUP_ORDER.map((group) => {
+                        const inGroup = needCategories.filter((c) => c.group === group);
+                        if (inGroup.length === 0) return null;
+                        return (
+                          <optgroup key={group} label={getResourceGroupInfo(group).label}>
+                            {inGroup.map((c) => (
+                              <option key={c.categoryId} value={c.categoryId}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Nazwa / opis zasobu
+                  </label>
+                  <input
+                    type="text"
+                    value={row.title}
+                    onChange={(e) => updateNeedRow(row.key, { title: e.target.value })}
+                    maxLength={200}
+                    placeholder="np. Woda butelkowana 1.5L"
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Potrzebna ilość
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={row.quantityNeeded}
+                    onChange={(e) => updateNeedRow(row.key, { quantityNeeded: e.target.value })}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs font-bold focus:bg-white focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Jedn.
+                  </label>
+                  <input
+                    type="text"
+                    value={row.unit}
+                    onChange={(e) => updateNeedRow(row.key, { unit: e.target.value })}
+                    maxLength={20}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                    Pilność
+                  </label>
+                  <select
+                    value={row.urgency}
+                    onChange={(e) => updateNeedRow(row.key, { urgency: e.target.value as NeedDraftRow['urgency'] })}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
+                  >
+                    {NEED_URGENCIES.map((u) => (
+                      <option key={u} value={u}>
+                        {getNeedUrgencyInfo(u).label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeNeedRow(row.key)}
+                  title="Usuń pozycję"
+                  className="justify-self-end sm:justify-self-auto rounded-xl p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {message && <p className="text-sm text-rose-600">{message}</p>}
 
       <div className="flex justify-end pt-2 border-t border-slate-100">
@@ -452,6 +757,8 @@ export default function AlertForm({
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               <span>{isEvent ? 'Dodawanie...' : 'Publikowanie...'}</span>
             </>
+          ) : createdAlertId ? (
+            <span>Zamknij</span>
           ) : (
             <>
               <Send className="h-4 w-4" />

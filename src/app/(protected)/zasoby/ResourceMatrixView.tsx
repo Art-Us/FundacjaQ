@@ -38,6 +38,8 @@ interface ResourceMatrixViewProps {
   initialTiles: MatrixTile[];
   initialCategories: MatrixCategoryRow[];
   organizations: { id: string; name: string }[];
+  currentUserOrganizationId: string | null;
+  isAdmin: boolean;
 }
 
 interface SelectedCell {
@@ -53,7 +55,13 @@ interface SelectedCell {
 // групою решта груп зникли б зі стану аж до наступного оновлення без
 // фільтра; чіпи категорій продовжують фільтрувати вже завантажені дані на
 // клієнті миттєво, незалежно від "Odśwież".
-export default function ResourceMatrixView({ initialTiles, initialCategories, organizations }: ResourceMatrixViewProps) {
+export default function ResourceMatrixView({
+  initialTiles,
+  initialCategories,
+  organizations,
+  currentUserOrganizationId,
+  isAdmin,
+}: ResourceMatrixViewProps) {
   const [tiles, setTiles] = useState(initialTiles);
   const [categories, setCategories] = useState(initialCategories);
   const [selectedGroup, setSelectedGroup] = useState<MatrixGroup | null>(null);
@@ -79,6 +87,15 @@ export default function ResourceMatrixView({ initialTiles, initialCategories, or
       const data = await res.json();
       setTiles(data.tiles);
       setCategories(data.categories);
+      // ResourceMatrixCellDrawer's `category` prop is a snapshot taken when
+      // the cell was clicked — without this, its "Łączna dostępna ilość"
+      // header would keep showing pre-edit numbers after a save inside the
+      // drawer (ResourceEditModal) triggers this same refresh.
+      setSelectedCell((prev) => {
+        if (!prev) return prev;
+        const fresh = (data.categories as MatrixCategoryRow[]).find((c) => c.categoryId === prev.category.categoryId);
+        return fresh ? { category: fresh, horizon: prev.horizon } : prev;
+      });
     } catch {
       setRefreshError('Nie udało się odświeżyć danych.');
     } finally {
@@ -299,6 +316,10 @@ export default function ResourceMatrixView({ initialTiles, initialCategories, or
           category={selectedCell.category}
           horizon={selectedCell.horizon}
           organizationId={selectedOrganizationId}
+          categories={categories}
+          currentUserOrganizationId={currentUserOrganizationId}
+          isAdmin={isAdmin}
+          onChanged={() => refreshMatrix(selectedOrganizationId)}
           onClose={() => setSelectedCell(null)}
         />
       )}

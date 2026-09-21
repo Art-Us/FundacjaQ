@@ -84,6 +84,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'To zapotrzebowanie zostało zamknięte.' }, { status: 409 });
   }
 
+  // Hard cap: a single donation can never push the need past what it still
+  // lacks — `quantityFulfilled` is kept in sync with the sum of every
+  // non-cancelled allocation by recalculateNeedFulfillment() below, so this
+  // is the true remaining amount, not a client-supplied figure.
+  const stillNeeded = need.quantityNeeded - need.quantityFulfilled;
+  if (parsed.data.quantity > stillNeeded) {
+    return NextResponse.json(
+      { error: `Przekracza brakującą ilość zapotrzebowania (brakuje ${stillNeeded} ${need.unit}).` },
+      { status: 409 }
+    );
+  }
+
   const resource = await prisma.resource.findUnique({ where: { id: parsed.data.resourceId } });
   if (!resource) {
     return NextResponse.json({ error: 'Zasób nie istnieje.' }, { status: 404 });

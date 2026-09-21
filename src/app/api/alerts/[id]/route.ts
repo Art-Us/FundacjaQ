@@ -25,7 +25,11 @@ const updateAlertSchema = z.object({
   location: z.string().max(200).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
+  startsAt: z.coerce.date().nullable().optional(),
   expiresAt: z.coerce.date().nullable().optional(),
+}).refine((data) => !data.startsAt || !data.expiresAt || data.startsAt <= data.expiresAt, {
+  message: 'Data rozpoczęcia nie może być późniejsza niż data zakończenia.',
+  path: ['startsAt'],
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
