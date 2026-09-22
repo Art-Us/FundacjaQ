@@ -44,7 +44,13 @@ export default async function ZasobyPage() {
 
       <AllocationInboxPanel recipient={inbox.recipient} donor={inbox.donor} />
 
-      <ResourceMatrixView initialTiles={matrix.tiles} initialCategories={matrix.categories} organizations={organizations} />
+      <ResourceMatrixView
+        initialTiles={matrix.tiles}
+        initialCategories={matrix.categories}
+        organizations={organizations}
+        currentUserOrganizationId={organizationId ?? null}
+        isAdmin={role === 'ADMIN'}
+      />
     </main>
   );
 }

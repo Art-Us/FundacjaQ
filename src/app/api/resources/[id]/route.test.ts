@@ -11,6 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { fakeCheckViolation } from '@/lib/__mocks__/prismaErrors';
 import { GET, PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -93,6 +94,23 @@ describe('GET /api/resources/[id]', () => {
 });
 
 describe('PATCH /api/resources/[id]', () => {
+  // The snapshot said reservedQuantity 0, an allocation reserved 8 in the
+  // meantime, and the owner shrinks quantity to 5 — the DB CHECK constraint
+  // resource_reserved_within_quantity rejects it; must read as the same 409
+  // the in-route reservedQuantity guard gives, not as a 500.
+  it('maps a DB CHECK constraint violation on the shrink to 409', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'o1' });
+    prisma.resource.findUnique.mockResolvedValue({ ...baseResource, reservedQuantity: 0 } as any);
+    prisma.resource.update.mockRejectedValue(fakeCheckViolation('resource_reserved_within_quantity'));
+
+    const res = await PATCH(makeRequest('PATCH', { quantity: 5 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('poniżej już zarezerwowanej');
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it('rejects a COORDINATOR from a different organization before validating the body', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'other-org' });
     prisma.resource.findUnique.mockResolvedValue(baseResource as any);

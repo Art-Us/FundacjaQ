@@ -11,7 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
-import { PATCH } from './route';
+import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
@@ -36,6 +36,8 @@ const ctx = { params: { id: 'a1' } };
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdminOrCoordinator).mockReset();
+  prisma.$transaction.mockImplementation(((arg: unknown) =>
+    typeof arg === 'function' ? (arg as (tx: typeof prisma) => unknown)(prisma) : Promise.all(arg as Promise<unknown>[])) as any);
 });
 
 describe('PATCH /api/alerts/[id]', () => {
@@ -57,8 +59,8 @@ describe('PATCH /api/alerts/[id]', () => {
     expect(res.status).toBe(404);
   });
 
-  it('rejects a COORDINATOR from a different gmina', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'other-gmina' });
+  it('rejects a COORDINATOR from a different organization, even in the same gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'other-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
 
     const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
@@ -68,7 +70,7 @@ describe('PATCH /api/alerts/[id]', () => {
   });
 
   it('rejects an empty body', async () => {
-    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1' });
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
 
     const res = await PATCH(makeRequest({}), ctx);
@@ -134,5 +136,180 @@ describe('PATCH /api/alerts/[id]', () => {
 
     expect(res.status).toBe(200);
     expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
+  });
+
+  // The bug this guards: cancel-with-return (Крок 28) permanently CLOSEs
+  // every need on an alert it cancels. "Wznów komunikat" only PATCHes the
+  // alert's own status back to ACTIVE — without this, its needs stayed
+  // CLOSED forever (0/N, 0%, no "Przydziel zasoby" button, and no way to
+  // reopen one by hand: PATCH /api/needs/[id] never accepts OPEN).
+  describe('reactivating a cancelled/resolved alert reopens its CLOSED needs', () => {
+    const closedNeeds = [
+      { id: 'need-partial', quantityNeeded: 25 },
+      { id: 'need-fulfilled', quantityNeeded: 10 },
+      { id: 'need-untouched', quantityNeeded: 5 },
+    ];
+    const allocationsByNeed: Record<string, { status: string; quantity: number }[]> = {
+      'need-partial': [{ status: 'DELIVERY_AGREED', quantity: 20 }],
+      'need-fulfilled': [{ status: 'DELIVERED', quantity: 10 }],
+      // Every allocation was itself cancelled — nothing was ever actually
+      // delivered, so this one goes back to OPEN, not "fulfilled with 0".
+      'need-untouched': [{ status: 'CANCELLED', quantity: 5 }],
+    };
+
+    beforeEach(() => {
+      vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+      prisma.alertNeed.findMany.mockResolvedValue(closedNeeds as any);
+      prisma.resourceAllocation.findMany.mockImplementation(
+        ((args: any) => Promise.resolve(allocationsByNeed[args.where.needId] ?? [])) as any
+      );
+      prisma.alertNeed.update.mockResolvedValue({} as any);
+      prisma.alert.update.mockResolvedValue({} as any);
+    });
+
+    it('recomputes each CLOSED need from its real allocations before setting the alert ACTIVE', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'CANCELLED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).toHaveBeenCalledWith({
+        where: { alertId: 'a1', status: 'CLOSED' },
+        select: { id: true, quantityNeeded: true },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-partial' },
+        data: { quantityFulfilled: 20, status: 'PARTIALLY_FULFILLED' },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-fulfilled' },
+        data: { quantityFulfilled: 10, status: 'FULFILLED' },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-untouched' },
+        data: { quantityFulfilled: 0, status: 'OPEN' },
+      });
+      expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { status: 'ACTIVE' } });
+    });
+
+    it('works the same reactivating from RESOLVED', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'RESOLVED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.update).toHaveBeenCalledTimes(3);
+    });
+
+    it('does nothing extra when the alert was already ACTIVE', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'ACTIVE' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).not.toHaveBeenCalled();
+      expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+    });
+
+    it('does not reopen needs when the alert transitions to a non-ACTIVE status', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'CANCELLED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'RESOLVED' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).not.toHaveBeenCalled();
+      expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+    });
+  });
+});
+
+function makeDeleteRequest() {
+  return new NextRequest('http://localhost/api/alerts/a1', { method: 'DELETE' });
+}
+
+describe('DELETE /api/alerts/[id]', () => {
+  it('returns 403 with no DB call when unauthenticated', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-ADMIN before touching the DB', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the alert does not exist', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(null);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(404);
+  });
+
+  // The bug this guards: Alert -> AlertNeed -> ResourceAllocation cascade on
+  // delete, but nothing released the reservation those allocations held on
+  // Resource.reservedQuantity — deleting an alert permanently stranded it.
+  it('releases the outstanding reservation of every active allocation before deleting the alert', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([
+      { resourceId: 'res-1', quantity: 5, quantityReturned: 0, quantityNotReturnable: 0 },
+      // Partially returned (1 of 3) — only the still-outstanding 2 should be released.
+      { resourceId: 'res-2', quantity: 3, quantityReturned: 1, quantityNotReturnable: 0 },
+    ] as any);
+    prisma.resource.update.mockResolvedValue({} as any);
+    prisma.alert.delete.mockResolvedValue({} as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.resourceAllocation.findMany).toHaveBeenCalledWith({
+      where: { alertId: 'a1', status: { notIn: ['RETURNED', 'CANCELLED'] }, resourceId: { not: null } },
+      select: { resourceId: true, quantity: true, quantityReturned: true, quantityNotReturnable: true },
+    });
+    expect(prisma.resource.update).toHaveBeenCalledWith({
+      where: { id: 'res-1' },
+      data: { reservedQuantity: { decrement: 5 } },
+    });
+    expect(prisma.resource.update).toHaveBeenCalledWith({
+      where: { id: 'res-2' },
+      data: { reservedQuantity: { decrement: 2 } },
+    });
+    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
+  });
+
+  it('skips a fully-accounted-for allocation (nothing outstanding to release)', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([
+      { resourceId: 'res-1', quantity: 4, quantityReturned: 4, quantityNotReturnable: 0 },
+    ] as any);
+    prisma.alert.delete.mockResolvedValue({} as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.resource.update).not.toHaveBeenCalled();
+    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
+  });
+
+  it('returns 500 and does not swallow a failed delete', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([] as any);
+    prisma.alert.delete.mockRejectedValue(new Error('db down'));
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(500);
   });
 });

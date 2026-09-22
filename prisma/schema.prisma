@@ -109,6 +109,19 @@ enum AllocationStatus {
   CANCELLED
 }
 
+// Fixed tag shown on a root AlertMessage ("wpis") in the alert's operational
+// journal/forum (R12, docs/resource_management_plan.md Крок 50) — mirrors the
+// colored category chips from the prototype ("Komunikat sztabowy",
+// "Logistyka i Transport", ...). Reply messages under a root entry leave this
+// unset — see AlertMessage.type below.
+enum AlertMessageType {
+  STAFF_COMMUNIQUE
+  SITUATION_UPDATE
+  LOGISTICS_TRANSPORT
+  UNIT_SUPPORT
+  OTHER
+}
+
 enum AuditAction {
   USER_CREATE
   USER_UPDATE
@@ -292,6 +305,7 @@ model Organization {
   resources        Resource[]
   invites          InviteToken[]
   allocationsGiven ResourceAllocation[] @relation("Donor")
+  invites          InviteToken[]
 
   // Scoped to (name, gmina) rather than a global unique name — the same
   // organization name plausibly recurs across different gminas (e.g. a local
@@ -420,6 +434,13 @@ model Alert {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   gminaId        String
   gmina          Gmina         @relation(fields: [gminaId], references: [id])
+  // Declared "Zakres czasowy" (start/end of when the alert/event is active) —
+  // both optional and independent of createdAt (when it was reported/
+  // entered into the system). A null startsAt means "active from creation";
+  // application code (matchesTimeframe in AlertsMapView.tsx) falls back to
+  // createdAt for filtering when it's unset, rather than backfilling it here,
+  // since createdAt already varies per row and a static @default can't copy it.
+  startsAt       DateTime?
   expiresAt      DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -544,21 +565,34 @@ model AllocationMessage {
   @@index([allocationId, createdAt])
 }
 
-// R12 — the broad per-alert forum, not tied to one specific resource
-// allocation (unlike AllocationMessage above): everyone involved with the
-// alert (owner org + all donor orgs, plus ADMIN/COORDINATOR) can post here.
-// Visible from the map/[alertId] subpage.
+// R12 — the alert's operational journal/forum (docs/resource_management_plan.md
+// Фаза 8), not tied to one specific resource allocation (unlike
+// AllocationMessage above). Visible from the map/[alertId] subpage.
+//
+// Two-level structure per the prototype ("Dziennik Operacyjny & Forum
+// Komunikatu"): a root entry ("wpis", parentId = null) carries a fixed
+// `type` tag and a `title` and can only be created by ADMIN/COORDINATOR
+// (Крок 52/53); replies to it (parentId = that root's id) are plain chat
+// messages — no type/title — and can be posted by the alert's owner org, any
+// donor org involved in the alert, or ADMIN/COORDINATOR (Крок 54), the same
+// broad group the original flat-forum design (R12) allowed to write.
 model AlertMessage {
-  id          String   @id @default(cuid())
+  id          String            @id @default(cuid())
   alertId     String
-  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  alert       Alert             @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      AlertMessage?     @relation("AlertMessageReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     AlertMessage[]    @relation("AlertMessageReplies")
+  // Root entries only ("wpis") — null on replies.
+  title       String?
+  type        AlertMessageType?
   authorId    String?
-  author      User?    @relation(fields: [authorId], references: [id])
+  author      User?             @relation(fields: [authorId], references: [id])
   // Snapshot of the author's organization at post time — deliberately not a
   // declared Prisma relation, same pattern as ResourceAllocation.recipientOrgId.
   authorOrgId String?
   body        String
-  createdAt   DateTime @default(now())
+  createdAt   DateTime          @default(now())
 
-  @@index([alertId, createdAt])
+  @@index([alertId, parentId, createdAt])
 }

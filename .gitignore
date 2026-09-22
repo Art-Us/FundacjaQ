@@ -60,4 +60,6 @@ Thumbs.db
 # Vercel
 .vercel
 
-/docs
+# Docs
+/docs/
+

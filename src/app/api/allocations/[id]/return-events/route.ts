@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, isAllocationRecipient } from '@/lib/authz';
 import { sumReturnEvents, recalculateAllocationStatus, resourceCountersAfterReturnEvent } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { describeCheckViolation } from '@/lib/dbErrors';
 
 export const runtime = 'nodejs';
 
@@ -114,7 +115,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       return { returnEvent, allocation };
     });
-  } catch {
+  } catch (err) {
+    // The projectedTotal check above ran on a snapshot — two returns recorded
+    // at once for the same allocation both pass it. The DB CHECK constraint
+    // allocation_returns_within_quantity (Крок 3) catches the loser here.
+    const violation = describeCheckViolation(err);
+    if (violation) {
+      return NextResponse.json({ error: violation.message }, { status: 409 });
+    }
+    console.error('[return-events] create failed:', err);
     return NextResponse.json({ error: 'Nie udało się zarejestrować zwrotu.' }, { status: 500 });
   }
 

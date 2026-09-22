@@ -224,11 +224,19 @@ describe('POST /api/alerts', () => {
     expect(prisma.alert.create).not.toHaveBeenCalled();
   });
 
-  it('returns 500 when the database create call throws', async () => {
+  // An uncaught throw here used to become a 500 with no JSON body, which made
+  // the client's `await res.json()` reject in turn — so the reporter got a
+  // frozen submit button instead of a message. The body matters as much as the
+  // status.
+  it('returns 500 with a JSON error when the database create call throws', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
     prisma.alert.create.mockRejectedValue(new Error('connection lost'));
 
-    await expect(POST(makeRequest(baseBody()))).rejects.toThrow('connection lost');
+    const res = await POST(makeRequest(baseBody()));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe('Nie udało się utworzyć alertu.');
   });
 });

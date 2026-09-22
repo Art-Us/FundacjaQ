@@ -97,6 +97,30 @@ export async function requireGlobalAdmin(): Promise<AuthorizedUser | null> {
  * Nobody can act on their own account, since isActive is re-checked live on
  * every session refresh (src/lib/auth.ts jwt callback) — self-deactivation
  * would kill the actor's own session mid-request with no way to undo it.
+ * Returns the current session user regardless of role, or null if
+ * unauthenticated. Unlike requireAdmin/requireAdminOrCoordinator above, this
+ * imposes no role restriction at all — for endpoints whose access is gated
+ * by something else entirely (e.g. the alert's own visibility/gmina scope),
+ * not by role. Introduced for the alert operational journal/forum (Крок 53,
+ * docs/resource_management_plan.md) — VOLUNTEER can read it, same as it can
+ * see the alert itself on the map, which none of the rest of the resource
+ * module (locked to ADMIN/COORDINATOR) allows.
+ */
+export async function requireUser(): Promise<AuthorizedUser | null> {
+  const session = await getServerSession(authOptions);
+  return session?.user ?? null;
+}
+
+/**
+ * Whether `actor` may activate/deactivate `target`. ADMIN can manage anyone;
+ * COORDINATOR only their own organization's VOLUNTEERs (mirrors the
+ * invite-role restriction in POST /api/admin/invites) — scoped by
+ * organization, not gmina, so a coordinator with no organization of their
+ * own can manage nobody at all, same as scopedOrganizationWhere's fail-closed
+ * contract for list visibility. Nobody can act on their own account, since
+ * isActive is re-checked live on every session refresh (src/lib/auth.ts jwt
+ * callback) — self-deactivation would kill the actor's own session
+ * mid-request with no way to undo it.
  */
 export function canManageUser(
   actor: AuthorizedUser,
@@ -237,3 +261,19 @@ export function canManageAlert(
   if (user.role !== 'COORDINATOR') return false;
   return isAlertOwnerOrg(alert, user) || alert.gminaId === user.gminaId;
 }
+// Resource module authz (docs/are-you-familiar-with-tidy-blum.md, розділ 4)
+// and the alert operational journal/forum authz (docs/resource_management_plan.md
+// Фаза 8, Крок 52): these all live in lib/resourceAuthz.ts instead of here,
+// and are just re-exported below — see that file's header comment for why (a
+// 'use client' component needs them without pulling next-auth/ioredis into
+// the browser bundle).
+export {
+  isAlertOwnerOrg,
+  isAllocationDonor,
+  isAllocationRecipient,
+  canManageAlert,
+  isAlertDonorOrg,
+  canPostAlertJournalEntry,
+  canReplyToAlertForum,
+  canViewAlertJournal,
+} from './resourceAuthz';

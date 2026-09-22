@@ -10,6 +10,11 @@ export async function GET() {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const inbox = await fetchAllocationInbox(user.organizationId);
-  return NextResponse.json(inbox);
+  try {
+    const inbox = await fetchAllocationInbox(user.organizationId);
+    return NextResponse.json(inbox);
+  } catch (err) {
+    console.error('[allocations] inbox failed:', err);
+    return NextResponse.json({ error: 'Nie udało się pobrać listy zwrotów.' }, { status: 500 });
+  }
 }

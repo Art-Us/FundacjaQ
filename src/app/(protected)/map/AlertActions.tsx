@@ -2,37 +2,51 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Ban, CheckCircle2, RotateCcw, Trash2 } from 'lucide-react';
+import { Ban, CheckCircle2, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import CancelWithReturnModal from '@/components/resources/CancelWithReturnModal';
+import { apiSend } from '@/lib/apiClient';
 
 interface AlertActionsProps {
   alertId: string;
+  alertTitle: string;
   status: string;
   kind: string;
   canManage: boolean;
   canDelete: boolean;
+  // R1/R8 — whether the caller's own organization created this alert (as
+  // opposed to canManage being true only because they're ADMIN), and how many
+  // of its resource allocations are still non-terminal. Together they decide
+  // whether "Odwołaj" can PATCH the status directly or must first collect a
+  // return decision for each one (CancelWithReturnModal, Крок 48).
+  isOwnerOrg: boolean;
+  openAllocationCount: number;
 }
 
-export default function AlertActions({ alertId, status, kind, canManage, canDelete }: AlertActionsProps) {
+export default function AlertActions({
+  alertId,
+  alertTitle,
+  status,
+  kind,
+  canManage,
+  canDelete,
+  isOwnerOrg,
+  openAllocationCount,
+}: AlertActionsProps) {
   const isEvent = kind === 'EVENT';
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCancelWithReturn, setShowCancelWithReturn] = useState(false);
 
   async function setStatus(next: string, key: string) {
     setLoading(key);
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
-    });
-
-    const data = await res.json();
+    const result = await apiSend(`/api/alerts/${alertId}`, 'PATCH', { status: next });
     setLoading(null);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
@@ -47,12 +61,11 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
     setLoading('delete');
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}`, { method: 'DELETE' });
-    const data = await res.json();
+    const result = await apiSend(`/api/alerts/${alertId}`, 'DELETE');
     setLoading(null);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
@@ -60,6 +73,12 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
   }
 
   const isActive = status === 'ACTIVE' || status === 'IN_PROGRESS';
+  // Events have no resource allocations at all, so this never applies to
+  // them — only crisis alerts (kind === 'ALERT') go through the resource
+  // module. Doesn't apply to an ADMIN cancelling ANOTHER org's alert either
+  // (нюанс #5) — that stays the plain direct path PATCH /api/alerts/[id]
+  // itself keeps open for that exact case (Крок 29).
+  const needsReturnForm = !isEvent && isOwnerOrg && openAllocationCount > 0;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -77,7 +96,7 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
 
           <button
             type="button"
-            onClick={() => setStatus('CANCELLED', 'cancel')}
+            onClick={() => (needsReturnForm ? setShowCancelWithReturn(true) : setStatus('CANCELLED', 'cancel'))}
             disabled={loading !== null}
             className="flex-1 min-w-[110px] flex items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-2 px-3 shadow-xs tracking-wider uppercase transition transform active:scale-[0.98] disabled:opacity-50"
           >
@@ -85,6 +104,11 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
               <>
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 <span>Odwoływanie...</span>
+              </>
+            ) : needsReturnForm ? (
+              <>
+                <Undo2 className="h-3.5 w-3.5" />
+                <span>Powrót zasobów</span>
               </>
             ) : (
               <>
@@ -131,6 +155,15 @@ export default function AlertActions({ alertId, status, kind, canManage, canDele
       )}
 
       {error && <p className="text-xs text-rose-600 basis-full">{error}</p>}
+
+      {showCancelWithReturn && (
+        <CancelWithReturnModal
+          alertId={alertId}
+          alertTitle={alertTitle}
+          onClose={() => setShowCancelWithReturn(false)}
+          onCancelled={() => setShowCancelWithReturn(false)}
+        />
+      )}
     </div>
   );
 }
