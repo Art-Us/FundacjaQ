@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
@@ -77,6 +77,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const alert = await prisma.alert.findUnique({ where: { id: params.id } });
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
+  }
+  // The alert's own owner organization can't donate to its own need — it
+  // already has whatever it would be offering, so "Przydziel zasoby" here
+  // would just be moving stock within its own inventory dressed up as a
+  // donation from someone else.
+  if (isAlertOwnerOrg(alert, user)) {
+    return NextResponse.json(
+      { error: 'Organizacja właściciela alertu nie może przydzielać zasobów do własnego alertu.' },
+      { status: 403 }
+    );
   }
   // A closed alert (Rozwiązany/Odwołany) is done accepting help — allocating
   // against it would strand reservedQuantity on the donor's resource with no

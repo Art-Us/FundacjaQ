@@ -120,6 +120,20 @@ describe('POST /api/alerts/[id]/allocations', () => {
     expect(res.status).toBe(404);
   });
 
+  // The alert's own owner organization donating to its own need is not a
+  // real donation — it already has whatever it would be "giving".
+  it("rejects the alert owner organization allocating to its own alert", async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+
+    const res = await POST(makeRequest('POST', { needId: 'need1', resourceId: 'r1', quantity: 2 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toContain('właściciela alertu');
+    expect(prisma.alertNeed.findUnique).not.toHaveBeenCalled();
+  });
+
   // Without this guard, a donor whose "Przydziel zasoby" form was already
   // open could still allocate against an alert someone just closed — the
   // reservation then has no path back (cancel-with-return only runs for the

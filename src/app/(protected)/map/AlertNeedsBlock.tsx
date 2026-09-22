@@ -27,6 +27,7 @@ const CLOSED_NEED_STATUSES = new Set(['FULFILLED', 'CLOSED', 'CANCELLED']);
 
 interface AlertNeedsBlockProps {
   alertId: string;
+  alertTitle: string;
   alertLocationLabel: string;
   alertDescription: string;
   // Gates "Przydziel zasoby" alongside each need's own status: a RESOLVED/
@@ -60,6 +61,7 @@ interface AlertNeedsBlockProps {
 // the per-need contributors history (Крок 44).
 export default function AlertNeedsBlock({
   alertId,
+  alertTitle,
   alertLocationLabel,
   alertDescription,
   alertStatus,
@@ -160,6 +162,7 @@ export default function AlertNeedsBlock({
                     currentUserRole={currentUserRole}
                     currentUserOrganizationId={currentUserOrganizationId}
                     alertOrganizationId={alertOrganizationId}
+                    alertTitle={alertTitle}
                   />
                   {isOpen && canAllocate && !alertClosed && (
                     <button

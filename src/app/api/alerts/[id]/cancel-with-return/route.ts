@@ -124,6 +124,33 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     result = await prisma.$transaction(async (tx) => {
       const auditEntries: PendingAudit[] = [];
 
+      // Варіант B (аудит "Проблема 2"): один пакетний запит замість одного
+      // findMany на КОЖНУ алокацію нижче в циклі — раніше кожна ітерація
+      // перечитувала повну історію повернень цієї алокації окремим
+      // round-trip'ом, що при великій кількості донорів на алерті ризикувало
+      // вичерпати дефолтний 5-секундний timeout інтерактивної транзакції
+      // Prisma. Існуючі суми "до цього виклику" підвантажені один раз тут;
+      // щойно створена подія додається до них у пам'яті нижче, без повторного
+      // читання з БД.
+      const returnAllocationIds = parsed.data.returns.map((r) => r.allocationId);
+      const existingReturnSums =
+        returnAllocationIds.length > 0
+          ? await tx.allocationReturnEvent.groupBy({
+              by: ['allocationId'],
+              where: { allocationId: { in: returnAllocationIds } },
+              _sum: { quantityReturned: true, quantityNotReturnable: true },
+            })
+          : [];
+      const existingTotalsByAllocation = new Map(
+        existingReturnSums.map((row) => [
+          row.allocationId,
+          {
+            quantityReturned: row._sum.quantityReturned ?? 0,
+            quantityNotReturnable: row._sum.quantityNotReturnable ?? 0,
+          },
+        ])
+      );
+
       for (const entry of parsed.data.returns) {
         const allocation = deliveredById.get(entry.allocationId)!;
         const returnEvent = await tx.allocationReturnEvent.create({
@@ -138,12 +165,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           },
         });
 
-        const allEvents = await tx.allocationReturnEvent.findMany({
-          where: { allocationId: allocation.id },
-          select: { quantityReturned: true, quantityNotReturnable: true },
-        });
-        const { totalReturned, totalNotReturnable } = sumReturnEvents(allEvents);
-        const nextStatus = recalculateAllocationStatus(allocation.quantity, allEvents, allocation.status);
+        // Той самий підсумок, що дав би findMany + sumReturnEvents над усією
+        // історією — тільки зі згорнутих сум "до цієї події" плюс сама щойно
+        // створена подія, без повторного читання з БД.
+        const existingTotals = existingTotalsByAllocation.get(allocation.id) ?? {
+          quantityReturned: 0,
+          quantityNotReturnable: 0,
+        };
+        const eventsForRecalc = [existingTotals, returnEvent];
+        const { totalReturned, totalNotReturnable } = sumReturnEvents(eventsForRecalc);
+        const nextStatus = recalculateAllocationStatus(allocation.quantity, eventsForRecalc, allocation.status);
         const updated = await tx.resourceAllocation.update({
           where: { id: allocation.id },
           data: { quantityReturned: totalReturned, quantityNotReturnable: totalNotReturnable, status: nextStatus },
@@ -185,11 +216,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       // left to fulfil) except ones the owner already explicitly cancelled
       // (Крок 22) — those stay CANCELLED, not relabeled CLOSED.
       const needs = await tx.alertNeed.findMany({ where: { alertId: alert.id, status: { not: 'CANCELLED' } } });
+      // Варіант B: один пакетний findMany по всіх потребах разом замість
+      // одного на кожну потребу в циклі нижче (той самий прийом, що вище для
+      // return-подій).
+      const needIds = needs.map((n) => n.id);
+      const allNeedAllocations =
+        needIds.length > 0
+          ? await tx.resourceAllocation.findMany({
+              where: { needId: { in: needIds } },
+              select: { needId: true, status: true, quantity: true },
+            })
+          : [];
+      const allocationsByNeed = new Map<string, typeof allNeedAllocations>();
+      for (const a of allNeedAllocations) {
+        if (!a.needId) continue;
+        const list = allocationsByNeed.get(a.needId) ?? [];
+        list.push(a);
+        allocationsByNeed.set(a.needId, list);
+      }
       for (const need of needs) {
-        const needAllocations = await tx.resourceAllocation.findMany({
-          where: { needId: need.id },
-          select: { status: true, quantity: true },
-        });
+        const needAllocations = allocationsByNeed.get(need.id) ?? [];
         const { quantityFulfilled } = recalculateNeedFulfillment(need.quantityNeeded, needAllocations, need.status);
         await tx.alertNeed.update({ where: { id: need.id }, data: { quantityFulfilled, status: 'CLOSED' } });
       }

@@ -149,20 +149,22 @@ describe('PATCH /api/alerts/[id]', () => {
       { id: 'need-fulfilled', quantityNeeded: 10 },
       { id: 'need-untouched', quantityNeeded: 5 },
     ];
-    const allocationsByNeed: Record<string, { status: string; quantity: number }[]> = {
-      'need-partial': [{ status: 'DELIVERY_AGREED', quantity: 20 }],
-      'need-fulfilled': [{ status: 'DELIVERED', quantity: 10 }],
+    // Варіант B (аудит "Проблема 2"): роут тепер робить ОДИН пакетний
+    // findMany по всіх CLOSED-потребах разом (замість одного на кожну потребу
+    // в циклі), тому мок віддає плоский список алокацій, кожна зі своїм
+    // needId, а не мапу, keyed по окремому виклику.
+    const allNeedAllocations = [
+      { needId: 'need-partial', status: 'DELIVERY_AGREED', quantity: 20 },
+      { needId: 'need-fulfilled', status: 'DELIVERED', quantity: 10 },
       // Every allocation was itself cancelled — nothing was ever actually
       // delivered, so this one goes back to OPEN, not "fulfilled with 0".
-      'need-untouched': [{ status: 'CANCELLED', quantity: 5 }],
-    };
+      { needId: 'need-untouched', status: 'CANCELLED', quantity: 5 },
+    ];
 
     beforeEach(() => {
       vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
       prisma.alertNeed.findMany.mockResolvedValue(closedNeeds as any);
-      prisma.resourceAllocation.findMany.mockImplementation(
-        ((args: any) => Promise.resolve(allocationsByNeed[args.where.needId] ?? [])) as any
-      );
+      prisma.resourceAllocation.findMany.mockResolvedValue(allNeedAllocations as any);
       prisma.alertNeed.update.mockResolvedValue({} as any);
       prisma.alert.update.mockResolvedValue({} as any);
     });
@@ -176,6 +178,10 @@ describe('PATCH /api/alerts/[id]', () => {
       expect(prisma.alertNeed.findMany).toHaveBeenCalledWith({
         where: { alertId: 'a1', status: 'CLOSED' },
         select: { id: true, quantityNeeded: true },
+      });
+      expect(prisma.resourceAllocation.findMany).toHaveBeenCalledWith({
+        where: { needId: { in: ['need-partial', 'need-fulfilled', 'need-untouched'] } },
+        select: { needId: true, status: true, quantity: true },
       });
       expect(prisma.alertNeed.update).toHaveBeenCalledWith({
         where: { id: 'need-partial' },

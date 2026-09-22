@@ -112,11 +112,28 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           where: { alertId: alert.id, status: 'CLOSED' },
           select: { id: true, quantityNeeded: true },
         });
+        // Варіант B (аудит "Проблема 2"): один пакетний findMany по всіх
+        // потребах разом замість одного на кожну потребу в циклі нижче — той
+        // самий прийом, що й у cancel-with-return/route.ts, знижує ризик
+        // вичерпати 5-секундний timeout транзакції Prisma при алерті з
+        // великою кількістю CLOSED-потреб.
+        const closedNeedIds = closedNeeds.map((n) => n.id);
+        const allClosedNeedAllocations =
+          closedNeedIds.length > 0
+            ? await tx.resourceAllocation.findMany({
+                where: { needId: { in: closedNeedIds } },
+                select: { needId: true, status: true, quantity: true },
+              })
+            : [];
+        const allocationsByNeed = new Map<string, typeof allClosedNeedAllocations>();
+        for (const a of allClosedNeedAllocations) {
+          if (!a.needId) continue;
+          const list = allocationsByNeed.get(a.needId) ?? [];
+          list.push(a);
+          allocationsByNeed.set(a.needId, list);
+        }
         for (const need of closedNeeds) {
-          const needAllocations = await tx.resourceAllocation.findMany({
-            where: { needId: need.id },
-            select: { status: true, quantity: true },
-          });
+          const needAllocations = allocationsByNeed.get(need.id) ?? [];
           // 'OPEN' here is a placeholder, not the need's real prior status —
           // it exists only to reach recalculateNeedFulfillment's general
           // formula. That function's own early return for a CLOSED/CANCELLED

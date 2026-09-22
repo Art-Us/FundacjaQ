@@ -188,10 +188,14 @@ describe('POST /api/alerts/[id]/cancel-with-return', () => {
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
     prisma.resourceAllocation.findMany
       .mockResolvedValueOnce([deliveredAllocation, undeliveredAllocation] as any) // top-level non-terminal fetch
-      .mockResolvedValueOnce([{ status: 'RETURNED', quantity: 5 }] as any); // needs recompute pass inside tx
-    prisma.allocationReturnEvent.findMany
-      .mockResolvedValueOnce([]) // pre-check for the one entry
-      .mockResolvedValueOnce([{ quantityReturned: 5, quantityNotReturnable: 0 }] as any); // inside tx after create
+      .mockResolvedValueOnce([{ needId: 'need1', status: 'RETURNED', quantity: 5 }] as any); // batched needs recompute pass inside tx (Варіант B)
+    prisma.allocationReturnEvent.findMany.mockResolvedValueOnce([]); // pre-check for the one entry
+    // Варіант B: batched pre-existing-totals lookup inside tx, replaces the
+    // old per-allocation findMany after create — empty means no prior return
+    // events for 'alloc-delivered', same as the old mock's implied history.
+    // Prisma's groupBy has a conditional type too complex for DeepMockProxy
+    // to wrap as a plain mock function — cast the method itself, not just the value.
+    (prisma.allocationReturnEvent.groupBy as any).mockResolvedValue([]);
     prisma.allocationReturnEvent.create.mockResolvedValue({
       id: 'evt1',
       allocationId: 'alloc-delivered',
@@ -238,6 +242,8 @@ describe('POST /api/alerts/[id]/cancel-with-return', () => {
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
     prisma.resourceAllocation.findMany.mockResolvedValueOnce([deliveredAllocation] as any);
     prisma.allocationReturnEvent.findMany.mockResolvedValue([]);
+    // Варіант B: batched pre-existing-totals lookup — cast needed, see comment above.
+    (prisma.allocationReturnEvent.groupBy as any).mockResolvedValue([]);
     prisma.allocationReturnEvent.create.mockResolvedValue({ id: 'evt1', quantityReturned: 5, quantityNotReturnable: 0 } as any);
     prisma.resourceAllocation.update.mockRejectedValue(
       fakeCheckViolation('allocation_returns_within_quantity', 'ResourceAllocation')

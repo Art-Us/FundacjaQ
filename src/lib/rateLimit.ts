@@ -44,17 +44,19 @@ export const inviteCreateLimiter = new RateLimiterRedis({
 // of a scripted/compromised client, so our server IP doesn't get rate-limited
 // or blocked by Nominatim for the whole app.
 //
-// This limiter is keyed per user, but Nominatim's ~1 req/s cap applies to
-// the app as a whole. It's fine at pilot scale (a handful of concurrent
-// ADMIN/COORDINATOR users), but doesn't actually enforce the app-wide limit
-// once there are multiple concurrent users geocoding — each user gets their
-// own 1 req/s budget. If usage grows, switch to a shared key (e.g. a fixed
-// string instead of the user id) or self-host a Nominatim instance to drop
-// the external cap entirely.
+// Keyed by a single fixed string (see consumeLimit call sites in
+// geocode/search and geocode/reverse routes), NOT by user id — Nominatim's
+// ~1 req/s cap applies to the app as a whole, so the budget has to be shared
+// across every concurrent user, not handed out one-per-user (which would let
+// N concurrent users each burn their own 1 req/s and blow past Nominatim's
+// real limit by a factor of N). `points: 2` gives a little slack for a couple
+// of people typing at the same instant without adding a queue on top of the
+// client's own debounce; if usage grows well past pilot scale, self-hosting a
+// Nominatim instance is the real fix, not raising this further.
 export const geocodeLimiter = new RateLimiterRedis({
   storeClient: redis,
   keyPrefix: 'rl:geocode',
-  points: 1,
+  points: 2,
   duration: 1,
   blockDuration: 3,
 });

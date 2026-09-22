@@ -137,4 +137,17 @@ describe('GET /api/geocode/search', () => {
 
     expect(res.status).toBe(502);
   });
+
+  it('returns 504 with a distinct message when the upstream lookup times out', async () => {
+    mockSession('ADMIN');
+    const timeoutError = new Error('The operation was aborted due to timeout');
+    timeoutError.name = 'TimeoutError';
+    vi.mocked(fetchNominatim).mockRejectedValue(timeoutError);
+
+    const res = await GET(makeRequest('?q=Rzeczna'));
+    const body = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(body.error).toContain('trwa zbyt długo');
+  });
 });

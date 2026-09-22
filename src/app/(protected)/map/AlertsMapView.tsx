@@ -177,18 +177,7 @@ const TIME_CHIPS_ARCHIVE = [
   { key: 'custom', label: '📅 Własny zakres' },
 ] as const;
 
-type MapTimeRange = '24h' | '48h' | '72h' | 'all';
 type MapStatusFilter = 'active' | 'archived' | 'all';
-
-// Krótka wersja zakresu czasowego dla filtrów mapy — celowo tylko 4 opcje
-// (bez tygodnia/miesiąca/roku jak w panelach list poniżej), bo mapa służy do
-// szybkiego podglądu "co się dzieje teraz", nie do analizy historycznej.
-const MAP_TIME_RANGES: { key: MapTimeRange; label: string }[] = [
-  { key: '24h', label: '24h' },
-  { key: '48h', label: '48h' },
-  { key: '72h', label: '72h' },
-  { key: 'all', label: 'Wszystkie' },
-];
 
 const MAP_STATUS_OPTIONS: { key: MapStatusFilter; label: string }[] = [
   { key: 'active', label: 'Aktywne' },
@@ -263,11 +252,13 @@ export default function AlertsMapView({
   const [editingAlert, setEditingAlert] = useState<AlertWithGmina | null>(null);
   const mapSectionRef = useRef<HTMLDivElement>(null);
 
-  // Filtry mapy — niezależne od filtrów list "Aktywne"/"Archiwum" poniżej:
-  // te rządzą tym, co pokazują karty, filtry mapy rządzą tylko pinezkami.
-  const [mapSearch, setMapSearch] = useState('');
+  // Jeden wspólny pasek filtrów nad mapą — rządzi TERAZ zarówno pinezkami na
+  // mapie, jak i kartami "Aktywne Komunikaty" poniżej (Archiwum ma nadal
+  // własny, niezależny zestaw filtrów, patrz archive* poniżej). Wyjątek:
+  // `mapStatus` zostaje pojęciem wyłącznie mapy — sekcja "Aktywne" z definicji
+  // pokazuje tylko alerty ACTIVE/IN_PROGRESS niezależnie od tego chipa, więc
+  // nadanie mu znaczenia dla kart byłoby sprzeczne z nagłówkiem tej sekcji.
   const [mapStatus, setMapStatus] = useState<MapStatusFilter>('active');
-  const [mapTimeRange, setMapTimeRange] = useState<MapTimeRange>('all');
   const [mapSeverities, setMapSeverities] = useState<Set<string>>(new Set(SEVERITIES));
   const [mapCategories, setMapCategories] = useState<Set<string>>(new Set(EVENT_CATEGORIES));
 
@@ -296,6 +287,10 @@ export default function AlertsMapView({
   // Alerty i zdarzenia codzienne leżą w jednej tabeli, więc widok wybiera swój
   // podzbiór po `kind` — dopiero potem działają filtry czasu/kategorii/szukania.
   const kindAlerts = useMemo(() => initialAlerts.filter((a) => a.kind === view), [initialAlerts, view]);
+  // Przeniesione tu (z pozycji tuż przed mapAlerts) — activeAlerts poniżej
+  // teraz też go potrzebuje, żeby dopasować chipy krytyczności/typu do
+  // aktualnego widoku (wspólny pasek filtrów, patrz komentarz przy mapStatus).
+  const isEventView = view === 'EVENT';
 
   const activeBase = useMemo(
     () => kindAlerts.filter((a) => a.status === 'ACTIVE' || a.status === 'IN_PROGRESS'),
@@ -319,12 +314,28 @@ export default function AlertsMapView({
     const filtered = activeBase.filter(
       (a) =>
         matchesTimeframe(a, activeTimeframe, activeCustomStart, activeCustomEnd) &&
+        // Wspólny pasek filtrów (patrz komentarz przy mapStatus powyżej) — te
+        // same chipy krytyczności/typu, które zawężają pinezki na mapie,
+        // zawężają teraz też te karty.
+        (isEventView ? mapCategories.has(a.category) : mapSeverities.has(a.severity)) &&
         (activeCategoryFilter === 'all' || a.category === activeCategoryFilter) &&
         (activeOrgFilter === 'all' || a.author?.organization?.name === activeOrgFilter) &&
         matchesSearch(a, activeSearch)
     );
     return sortAlerts(filtered, activeSort);
-  }, [activeBase, activeTimeframe, activeCustomStart, activeCustomEnd, activeCategoryFilter, activeOrgFilter, activeSearch, activeSort]);
+  }, [
+    activeBase,
+    activeTimeframe,
+    activeCustomStart,
+    activeCustomEnd,
+    isEventView,
+    mapCategories,
+    mapSeverities,
+    activeCategoryFilter,
+    activeOrgFilter,
+    activeSearch,
+    activeSort,
+  ]);
 
   const archivedAlerts = useMemo(() => {
     const filtered = archivedBase.filter(
@@ -337,32 +348,50 @@ export default function AlertsMapView({
     return sortAlerts(filtered, archiveSort);
   }, [archivedBase, archiveTimeframe, archiveCustomStart, archiveCustomEnd, archiveCategoryFilter, archiveOrgFilter, archiveSearch, archiveSort]);
 
-  const isEventView = view === 'EVENT';
-
   // Zbiór pinezek widocznych na mapie — osobny od list "Aktywne"/"Archiwum"
   // poniżej, więc zawężenie mapy (np. do 24h) nie chowa nic z list i odwrotnie.
   const mapAlerts = useMemo(() => {
     return kindAlerts.filter((a) => {
       if (mapStatus === 'active' && !(a.status === 'ACTIVE' || a.status === 'IN_PROGRESS')) return false;
       if (mapStatus === 'archived' && !(a.status === 'RESOLVED' || a.status === 'CANCELLED')) return false;
-      if (!matchesTimeframe(a, mapTimeRange === 'all' ? 'wszystkie' : mapTimeRange, '', '')) return false;
+      if (!matchesTimeframe(a, activeTimeframe, activeCustomStart, activeCustomEnd)) return false;
       if (isEventView ? !mapCategories.has(a.category) : !mapSeverities.has(a.severity)) return false;
-      if (!matchesSearch(a, mapSearch)) return false;
+      if (activeCategoryFilter !== 'all' && a.category !== activeCategoryFilter) return false;
+      if (activeOrgFilter !== 'all' && a.author?.organization?.name !== activeOrgFilter) return false;
+      if (!matchesSearch(a, activeSearch)) return false;
       return true;
     });
-  }, [kindAlerts, mapStatus, mapTimeRange, mapSeverities, mapCategories, mapSearch, isEventView]);
+  }, [
+    kindAlerts,
+    mapStatus,
+    activeTimeframe,
+    activeCustomStart,
+    activeCustomEnd,
+    mapSeverities,
+    mapCategories,
+    activeCategoryFilter,
+    activeOrgFilter,
+    activeSearch,
+    isEventView,
+  ]);
 
   const mapFiltersActive =
-    mapSearch.trim() !== '' ||
+    activeSearch.trim() !== '' ||
     mapStatus !== 'active' ||
-    mapTimeRange !== 'all' ||
+    activeTimeframe !== 'wszystkie' ||
+    activeCategoryFilter !== 'all' ||
+    activeOrgFilter !== 'all' ||
     mapSeverities.size !== SEVERITIES.length ||
     mapCategories.size !== EVENT_CATEGORIES.length;
 
   function resetMapFilters() {
-    setMapSearch('');
+    setActiveSearch('');
     setMapStatus('active');
-    setMapTimeRange('all');
+    setActiveTimeframe('wszystkie');
+    setActiveCustomStart('');
+    setActiveCustomEnd('');
+    setActiveCategoryFilter('all');
+    setActiveOrgFilter('all');
     setMapSeverities(new Set(SEVERITIES));
     setMapCategories(new Set(EVENT_CATEGORIES));
   }
@@ -390,9 +419,10 @@ export default function AlertsMapView({
   function switchView(next: AlertKindValue) {
     if (next === view) return;
     setView(next);
-    setActiveCategoryFilter('all');
+    // activeCategoryFilter/activeOrgFilter są teraz częścią wspólnego paska
+    // filtrów i już resetowane w resetMapFilters() poniżej — Archiwum zostaje
+    // niezależne, więc jego pola trzeba zresetować osobno.
     setArchiveCategoryFilter('all');
-    setActiveOrgFilter('all');
     setArchiveOrgFilter('all');
     setFocusedAlertId(null);
     setShowForm(false);
@@ -562,85 +592,93 @@ export default function AlertsMapView({
         </button>
       </div>
 
-      {/* Filtry mapy — zawężają wyłącznie pinezki na mapie poniżej; listy kart
-          "Aktywne"/"Archiwum" dalej na stronie mają własne, niezależne filtry. */}
-      {showMap && (
-        <div className="rounded-3xl bg-white border border-slate-200 shadow-xs p-4 sm:p-5 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              <span>Filtry mapy</span>
-            </div>
-            {mapFiltersActive && (
+      {/* Jeden wspólny pasek filtrów — działa jednocześnie na pinezki na mapie
+          poniżej i na karty "Aktywne Komunikaty" dalej na stronie (Archiwum ma
+          niezależny, własny pasek). Widoczny niezależnie od "Ukryj/Pokaż
+          Mapę", żeby ukrycie mapy nie odbierało możliwości filtrowania listy. */}
+      <div className="rounded-3xl bg-white border border-slate-200 shadow-xs p-4 sm:p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span>Filtry</span>
+          </div>
+          {mapFiltersActive && (
+            <button
+              type="button"
+              onClick={resetMapFilters}
+              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 transition"
+            >
+              <X className="h-3 w-3" />
+              <span>Wyczyść filtry</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              value={activeSearch}
+              onChange={(e) => setActiveSearch(e.target.value)}
+              placeholder={isEventView ? 'Szukaj wydarzeń...' : 'Szukaj alertów...'}
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-9 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none"
+            />
+            {activeSearch && (
               <button
                 type="button"
-                onClick={resetMapFilters}
-                className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 transition"
+                onClick={() => setActiveSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <X className="h-3 w-3" />
-                <span>Wyczyść filtry</span>
+                <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
 
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-            <div className="relative flex-1 min-w-[180px]">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input
-                type="text"
-                value={mapSearch}
-                onChange={(e) => setMapSearch(e.target.value)}
-                placeholder={isEventView ? 'Szukaj wydarzeń na mapie...' : 'Szukaj alertów na mapie...'}
-                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-9 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none"
-              />
-              {mapSearch && (
-                <button
-                  type="button"
-                  onClick={() => setMapSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 shrink-0">
-              {MAP_STATUS_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setMapStatus(opt.key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                    mapStatus === opt.key ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 shrink-0">
-              {MAP_TIME_RANGES.map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setMapTimeRange(opt.key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                    mapTimeRange === opt.key
-                      ? isEventView
-                        ? 'bg-fuchsia-600 text-white shadow-xs'
-                        : 'bg-red-600 text-white shadow-xs'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 shrink-0">
+            {MAP_STATUS_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setMapStatus(opt.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  mapStatus === opt.key ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1 shrink-0">
+        <div className="space-y-2 pt-3 border-t border-slate-100">
+          {/* Krytyczność/Typ dołączone na końcu tego samego wiersza co zakres
+              czasowy (zamiast osobnego wiersza z własnym border-t poniżej) —
+              chipy krytyczności są nieliczne i zostawiały dużo pustego miejsca
+              na swój własny rząd. */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1 shrink-0">
+              <Calendar className={`h-3.5 w-3.5 ${isEventView ? 'text-fuchsia-600' : 'text-red-500'}`} />
+              {isEventView ? 'Zakres Czasowy Wydarzeń:' : 'Zakres Czasowy Aktywnych:'}
+            </span>
+            {TIME_CHIPS_ACTIVE.map((tf) => (
+              <button
+                key={tf.key}
+                type="button"
+                onClick={() => setActiveTimeframe(tf.key)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                  activeTimeframe === tf.key
+                    ? isEventView
+                      ? 'bg-fuchsia-600 text-white shadow-xs'
+                      : 'bg-red-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+              >
+                {tf.label}
+              </button>
+            ))}
+
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 ml-2 shrink-0">
               {isEventView ? 'Typ wydarzenia:' : 'Krytyczność:'}
             </span>
             {(isEventView ? EVENT_CATEGORIES : SEVERITIES).map((key) => {
@@ -666,8 +704,76 @@ export default function AlertsMapView({
               );
             })}
           </div>
+          {activeTimeframe === 'custom' && (
+            <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200">
+              <span className="text-slate-500 font-semibold">Od:</span>
+              <input
+                type="date"
+                value={activeCustomStart}
+                onChange={(e) => setActiveCustomStart(e.target.value)}
+                className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
+              />
+              <span className="text-slate-500 font-semibold">Do:</span>
+              <input
+                type="date"
+                value={activeCustomEnd}
+                onChange={(e) => setActiveCustomEnd(e.target.value)}
+                className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
+              />
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-100">
+          <div className="md:col-span-4">
+            <select
+              value={activeCategoryFilter}
+              onChange={(e) => setActiveCategoryFilter(e.target.value)}
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">Wszystkie typy</option>
+              {categoriesForKind(view).map((c) => (
+                <option key={c} value={c}>
+                  {ALERT_CATEGORY_LABELS[c]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-4">
+            <select
+              value={activeOrgFilter}
+              onChange={(e) => setActiveOrgFilter(e.target.value)}
+              className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">Wszystkie organizacje</option>
+              {availableActiveOrgs.map((org) => (
+                <option key={org} value={org}>
+                  {org}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-4">
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <ArrowUpDown className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+              <select
+                value={activeSort}
+                onChange={(e) => setActiveSort(e.target.value as SortOption)}
+                className="bg-transparent text-xs text-slate-700 font-semibold focus:outline-none w-full cursor-pointer"
+              >
+                <option value="date-desc">Data: Od najnowszych</option>
+                <option value="date-asc">Data: Od najstarszych</option>
+                <option value="severity-desc">🚨 Krytyczność (najwyższa)</option>
+                <option value="severity-asc">🟢 Krytyczność (najniższa)</option>
+                <option value="name-asc">Nazwa: A-Z</option>
+                <option value="name-desc">Nazwa: Z-A</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Mapa */}
       {showMap && (
@@ -755,117 +861,10 @@ export default function AlertsMapView({
             </span>
           )}
         </div>
-
-        <div className="rounded-3xl bg-white p-5 border border-slate-200 shadow-xs space-y-4">
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <Calendar className={`h-3.5 w-3.5 ${isEventView ? 'text-fuchsia-600' : 'text-red-500'}`} />
-              <span>{isEventView ? 'Zakres Czasowy Wydarzeń:' : 'Zakres Czasowy Aktywnych:'}</span>
-            </label>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {TIME_CHIPS_ACTIVE.map((tf) => (
-                <button
-                  key={tf.key}
-                  type="button"
-                  onClick={() => setActiveTimeframe(tf.key)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                    activeTimeframe === tf.key
-                      ? isEventView
-                        ? 'bg-fuchsia-600 text-white shadow-xs'
-                        : 'bg-red-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-500 hover:text-slate-900 hover:bg-slate-200'
-                  }`}
-                >
-                  {tf.label}
-                </button>
-              ))}
-            </div>
-            {activeTimeframe === 'custom' && (
-              <div className="flex items-center gap-3 pt-2 flex-wrap text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200">
-                <span className="text-slate-500 font-semibold">Od:</span>
-                <input
-                  type="date"
-                  value={activeCustomStart}
-                  onChange={(e) => setActiveCustomStart(e.target.value)}
-                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
-                />
-                <span className="text-slate-500 font-semibold">Do:</span>
-                <input
-                  type="date"
-                  value={activeCustomEnd}
-                  onChange={(e) => setActiveCustomEnd(e.target.value)}
-                  className="rounded-lg bg-white border border-slate-200 py-1 px-2.5 text-slate-900 font-semibold"
-                />
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-slate-100">
-            <div className="md:col-span-5 relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input
-                type="text"
-                value={activeSearch}
-                onChange={(e) => setActiveSearch(e.target.value)}
-                placeholder="Szukaj wśród aktywnych po treści, miejscu, autorze, organizacji..."
-                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 pl-10 pr-10 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:border-red-500 focus:outline-none"
-              />
-              {activeSearch && (
-                <button onClick={() => setActiveSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="md:col-span-2">
-              <select
-                value={activeCategoryFilter}
-                onChange={(e) => setActiveCategoryFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-red-500 focus:outline-none"
-              >
-                <option value="all">Wszystkie typy</option>
-                {categoriesForKind(view).map((c) => (
-                  <option key={c} value={c}>
-                    {ALERT_CATEGORY_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-2">
-              <select
-                value={activeOrgFilter}
-                onChange={(e) => setActiveOrgFilter(e.target.value)}
-                className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3 text-xs text-slate-700 font-semibold focus:bg-white focus:border-red-500 focus:outline-none"
-              >
-                <option value="all">Wszystkie organizacje</option>
-                {availableActiveOrgs.map((org) => (
-                  <option key={org} value={org}>
-                    {org}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-3">
-              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <ArrowUpDown className="h-3.5 w-3.5 text-red-500 shrink-0" />
-                <select
-                  value={activeSort}
-                  onChange={(e) => setActiveSort(e.target.value as SortOption)}
-                  className="bg-transparent text-xs text-slate-700 font-semibold focus:outline-none w-full cursor-pointer"
-                >
-                  <option value="date-desc">Data: Od najnowszych</option>
-                  <option value="date-asc">Data: Od najstarszych</option>
-                  <option value="severity-desc">🚨 Krytyczność (najwyższa)</option>
-                  <option value="severity-asc">🟢 Krytyczność (najniższa)</option>
-                  <option value="name-asc">Nazwa: A-Z</option>
-                  <option value="name-desc">Nazwa: Z-A</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Własny pasek filtrów tej sekcji został zwinięty we wspólny pasek
+            nad mapą (patrz komentarz przy jego renderowaniu wyżej) — te same
+            search/timeframe/kategoria/organizacja/sort teraz rządzą i tymi
+            kartami, i pinezkami na mapie. */}
 
         {activeAlerts.length === 0 ? (
           <div className="rounded-3xl bg-white p-8 text-center border border-slate-200 shadow-xs">
@@ -1010,6 +1009,7 @@ export default function AlertsMapView({
 
                     <AlertNeedsBlock
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       alertLocationLabel={alert.location || alert.gmina.name}
                       alertDescription={alert.description}
                       alertStatus={alert.status}
@@ -1017,7 +1017,10 @@ export default function AlertsMapView({
                         ...need,
                         allocations: need.allocations.map((allocation) => ({
                           id: allocation.id,
+                          itemName: allocation.itemName,
                           quantity: allocation.quantity,
+                          quantityReturned: allocation.quantityReturned,
+                          quantityNotReturnable: allocation.quantityNotReturnable,
                           unit: allocation.unit,
                           status: allocation.status,
                           donorOrgId: allocation.donorOrgId,
@@ -1027,7 +1030,7 @@ export default function AlertsMapView({
                         })),
                       }))}
                       canManageNeeds={canManageNeedsForAlert(alert)}
-                      canAllocate={canAllocateResources}
+                      canAllocate={canAllocateResources && !isOwnerOrg}
                       currentUserRole={currentUserRole}
                       currentUserOrganizationId={currentUserOrganizationId}
                       alertOrganizationId={alert.organizationId}
@@ -1298,6 +1301,7 @@ export default function AlertsMapView({
 
                     <AlertNeedsBlock
                       alertId={alert.id}
+                      alertTitle={alert.title}
                       alertLocationLabel={alert.location || alert.gmina.name}
                       alertDescription={alert.description}
                       alertStatus={alert.status}
@@ -1305,7 +1309,10 @@ export default function AlertsMapView({
                         ...need,
                         allocations: need.allocations.map((allocation) => ({
                           id: allocation.id,
+                          itemName: allocation.itemName,
                           quantity: allocation.quantity,
+                          quantityReturned: allocation.quantityReturned,
+                          quantityNotReturnable: allocation.quantityNotReturnable,
                           unit: allocation.unit,
                           status: allocation.status,
                           donorOrgId: allocation.donorOrgId,
@@ -1315,7 +1322,7 @@ export default function AlertsMapView({
                         })),
                       }))}
                       canManageNeeds={canManageNeedsForAlert(alert)}
-                      canAllocate={canAllocateResources}
+                      canAllocate={canAllocateResources && !isOwnerOrg}
                       currentUserRole={currentUserRole}
                       currentUserOrganizationId={currentUserOrganizationId}
                       alertOrganizationId={alert.organizationId}

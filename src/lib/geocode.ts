@@ -63,9 +63,17 @@ export interface ResolvedLocation {
   label: string | null;
 }
 
+// Node's fetch has no default request timeout — if Nominatim starts
+// responding slowly (a common symptom of soft throttling rather than a hard
+// rejection), a request can hang far longer than any user will wait, and
+// search/route.ts chains up to 3 of these sequentially, so one slow call
+// blocks the rest. The thrown DOMException's `name` is 'TimeoutError' — the
+// caller in each geocode route checks that to answer with a 504 instead of
+// letting the request hang or falling through to a generic 502.
 export async function fetchNominatim(url: URL): Promise<unknown> {
   const res = await fetch(url, {
     headers: { 'User-Agent': NOMINATIM_USER_AGENT, 'Accept-Language': 'pl' },
+    signal: AbortSignal.timeout(4000),
   });
   if (!res.ok) throw new Error(`Nominatim responded with ${res.status}`);
   return res.json();

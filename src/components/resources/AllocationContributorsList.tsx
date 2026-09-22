@@ -6,11 +6,15 @@ import { ChevronDown, ChevronUp, Truck, Undo2 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { isAllocationDonor, isAllocationRecipient } from '@/lib/resourceAuthz';
 import AllocationStatusBadge from './AllocationStatusBadge';
+import ReturnResourcesModal from './ReturnResourcesModal';
 import { apiSend } from '@/lib/apiClient';
 
 export interface ContributionRow {
   id: string;
+  itemName: string;
   quantity: number;
+  quantityReturned: number;
+  quantityNotReturnable: number;
   unit: string;
   status: string;
   donorOrgId: string;
@@ -26,6 +30,9 @@ interface AllocationContributorsListProps {
   // The alert's own organization — the recipient side of every allocation
   // under it (isAllocationRecipient just wraps isAlertOwnerOrg against this).
   alertOrganizationId: string | null;
+  // For ReturnResourcesModal's header line — the same "item · alert" context
+  // AllocationInboxPanel already shows for this same modal.
+  alertTitle: string;
 }
 
 // "Pokaż kto przekazał (N)" (Крок 44) — under a single need, a collapsible
@@ -40,15 +47,33 @@ interface AllocationContributorsListProps {
 // since the API was built, but until now nothing in the UI ever called it,
 // which also meant an allocation could never reach RETURN_AGREED, and
 // POST .../return-events (Крок 25/47) requires exactly that status.
+//
+// "Zwróć zasoby" (recording the actual return quantities, RETURN_AGREED/
+// PARTIALLY_RETURNED → RETURNED) lives here too, not only in
+// AllocationInboxPanel on /zasoby — that panel is scoped to the caller's own
+// organizationId and to already-closed alerts (fetchAllocationInbox,
+// lib/allocationInbox.ts), so it never surfaces anything for an ADMIN with no
+// organization of their own (the alert's own owner org, if it's ADMIN-created
+// and orgless) or for an allocation on a still-ACTIVE alert. This is the one
+// place that gate doesn't apply — same isAdmin-aware check as the two
+// transitions above.
 export default function AllocationContributorsList({
   allocations,
   currentUserRole,
   currentUserOrganizationId,
   alertOrganizationId,
+  alertTitle,
 }: AllocationContributorsListProps) {
   const router = useRouter();
   const isAdmin = currentUserRole === 'ADMIN';
   const canAct = isAdmin || currentUserRole === 'COORDINATOR';
+
+  function canReturn(a: ContributionRow): boolean {
+    return (
+      (a.status === 'RETURN_AGREED' || a.status === 'PARTIALLY_RETURNED') &&
+      (isAdmin || isAllocationRecipient({ alert: { organizationId: alertOrganizationId } }, { organizationId: currentUserOrganizationId }))
+    );
+  }
 
   const hasActionable = allocations.some((a) => {
     if (!canAct) return false;
@@ -58,12 +83,13 @@ export default function AllocationContributorsList({
     if (a.status === 'DELIVERED') {
       return isAdmin || isAllocationRecipient({ alert: { organizationId: alertOrganizationId } }, { organizationId: currentUserOrganizationId });
     }
-    return false;
+    return canAct && canReturn(a);
   });
 
   const [expanded, setExpanded] = useState(hasActionable);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; message: string } | null>(null);
+  const [returning, setReturning] = useState<ContributionRow | null>(null);
 
   if (allocations.length === 0) {
     return null;
@@ -108,6 +134,7 @@ export default function AllocationContributorsList({
               canAct &&
               allocation.status === 'DELIVERED' &&
               (isAdmin || isAllocationRecipient({ alert: { organizationId: alertOrganizationId } }, { organizationId: currentUserOrganizationId }));
+            const canRecordReturn = canAct && canReturn(allocation);
             const isUpdating = updatingId === allocation.id;
 
             return (
@@ -130,7 +157,7 @@ export default function AllocationContributorsList({
                   </span>
                 </div>
 
-                {(canConfirmDelivery || canAgreeReturn) && (
+                {(canConfirmDelivery || canAgreeReturn || canRecordReturn) && (
                   <div className="flex items-center gap-2 pt-0.5">
                     {canConfirmDelivery && (
                       <button
@@ -154,6 +181,16 @@ export default function AllocationContributorsList({
                         {isUpdating ? 'Zapisywanie…' : 'Uzgodnij zwrot'}
                       </button>
                     )}
+                    {canRecordReturn && (
+                      <button
+                        type="button"
+                        onClick={() => setReturning(allocation)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold transition"
+                      >
+                        <Undo2 className="h-3 w-3" />
+                        Zwróć zasoby
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -162,6 +199,21 @@ export default function AllocationContributorsList({
             );
           })}
         </ul>
+      )}
+
+      {returning && (
+        <ReturnResourcesModal
+          allocationId={returning.id}
+          itemName={returning.itemName}
+          unit={returning.unit}
+          quantity={returning.quantity}
+          quantityReturned={returning.quantityReturned}
+          quantityNotReturnable={returning.quantityNotReturnable}
+          status={returning.status}
+          alertTitle={alertTitle}
+          onClose={() => setReturning(null)}
+          onReturned={() => setReturning(null)}
+        />
       )}
     </div>
   );

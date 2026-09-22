@@ -60,7 +60,9 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
   // Same rule as AlertsMapView.tsx's canManageNeedsForAlert — owner org (or
   // ADMIN) only, mirrored server-side by PATCH/DELETE /api/needs/[id].
   const canManageNeeds = canManageAlerts && (currentUser.role === 'ADMIN' || isAlertOwnerOrg(alert, currentUser));
-  const canAllocate = canManageAlerts && !!currentUser.organizationId;
+  // Owner org (or its ADMIN acting for it) can't donate to its own alert —
+  // same rule as AlertsMapView.tsx's per-card `canAllocate`.
+  const canAllocate = canManageAlerts && !!currentUser.organizationId && !isAlertOwnerOrg(alert, currentUser);
   const ownedCategoryIds = availableCategoryIds(myResources);
   // Same flattening AlertsMapView.tsx uses for openAllocationCount — every
   // allocation on the alert lives under one of its needs, not directly on
@@ -168,6 +170,7 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
       <div className="rounded-3xl bg-white p-6 shadow-xs border border-slate-200">
         <AlertNeedsBlock
           alertId={alert.id}
+          alertTitle={alert.title}
           alertLocationLabel={alert.location || alert.gmina.name}
           alertDescription={alert.description}
           alertStatus={alert.status}
@@ -175,7 +178,10 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
             ...need,
             allocations: need.allocations.map((allocation) => ({
               id: allocation.id,
+              itemName: allocation.itemName,
               quantity: allocation.quantity,
+              quantityReturned: allocation.quantityReturned,
+              quantityNotReturnable: allocation.quantityNotReturnable,
               unit: allocation.unit,
               status: allocation.status,
               donorOrgId: allocation.donorOrgId,

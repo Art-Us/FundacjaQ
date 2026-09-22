@@ -61,7 +61,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const allowed = await consumeLimit(geocodeLimiter, user.id);
+  // Fixed key, not user.id — Nominatim's ~1 req/s cap is per-app, not
+  // per-user (see geocodeLimiter's own comment in lib/rateLimit.ts).
+  const allowed = await consumeLimit(geocodeLimiter, 'global');
   if (!allowed) {
     return NextResponse.json({ error: 'Zbyt wiele żądań, spróbuj za chwilę.' }, { status: 429 });
   }
@@ -81,6 +83,9 @@ export async function GET(req: NextRequest) {
       }
     }
   } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return NextResponse.json({ error: 'Wyszukiwanie adresu trwa zbyt długo.' }, { status: 504 });
+    }
     console.error('[geocode] forward search failed:', err);
     return NextResponse.json({ error: 'Nie udało się wyszukać adresu.' }, { status: 502 });
   }

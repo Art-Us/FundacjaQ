@@ -129,4 +129,17 @@ describe('GET /api/geocode/reverse', () => {
 
     expect(res.status).toBe(502);
   });
+
+  it('returns 504 with a distinct message when the upstream lookup times out', async () => {
+    mockSession('ADMIN');
+    const timeoutError = new Error('The operation was aborted due to timeout');
+    timeoutError.name = 'TimeoutError';
+    vi.mocked(fetchNominatim).mockRejectedValue(timeoutError);
+
+    const res = await GET(makeRequest('?lat=50&lon=21'));
+    const body = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(body.error).toContain('trwa zbyt długo');
+  });
 });
