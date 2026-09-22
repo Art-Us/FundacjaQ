@@ -50,6 +50,16 @@ export interface AdminEvent {
   // scope changed, go re-fetch your list" signal) since those lists don't
   // have a single entity to filter down to.
   id?: string;
+  // Which gmina this 'alerts'/'resources' change belongs to, when the
+  // publisher can name exactly one — lets a gmina-scoped viewer's
+  // useAppEvents({gminaId}) filter ignore another gmina's activity instead
+  // of refetching a list a gmina-scoped ADMIN/COORDINATOR/VOLUNTEER can't
+  // even see into. Left unset when a single write could plausibly touch
+  // more than one gmina at once (e.g. releasing several allocations' donor
+  // resources on alert delete/cancel, each potentially a different donor
+  // org's gmina) — an unset gminaId always passes every viewer's filter, so
+  // this only ever under-narrows, never drops an event someone needed.
+  gminaId?: string;
 }
 
 /** Best-effort — a dropped event just means an open tab waits for its own next action or a manual reload, exactly like before this existed. */

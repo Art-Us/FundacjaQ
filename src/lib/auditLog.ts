@@ -30,9 +30,13 @@ const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScop
  * trips-per-scope cost would otherwise stack up across every allocation in
  * that one request.
  */
-async function publishScopeEvents(scope: AdminEventScope | AdminEventScope[], action?: AuditAction): Promise<void> {
+async function publishScopeEvents(
+  scope: AdminEventScope | AdminEventScope[],
+  action?: AuditAction,
+  gminaId?: string | null
+): Promise<void> {
   const scopes = Array.isArray(scope) ? scope : [scope];
-  await Promise.all(scopes.map((s) => publishAdminEvent({ scope: s, action })));
+  await Promise.all(scopes.map((s) => publishAdminEvent({ scope: s, action, gminaId: gminaId ?? undefined })));
 }
 
 /** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
@@ -105,7 +109,16 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 
   const entityScope = ENTITY_TYPE_TO_ADMIN_SCOPE[input.entityType];
   if (entityScope) {
-    await Promise.all([publishAdminEvent({ scope: 'logs', action: input.action }), publishScopeEvents(entityScope, input.action)]);
+    // 'logs' stays gmina-unscoped on purpose (out of scope for this pass —
+    // see requireGlobalAdmin's doc comment on why the audit log view itself
+    // is deliberately not gmina-restricted); only the 'alerts'/'resources'
+    // scopes below get input.gminaId, so a gmina-scoped viewer's
+    // useAppEvents({gminaId}) can ignore another gmina's alert/resource
+    // activity.
+    await Promise.all([
+      publishAdminEvent({ scope: 'logs', action: input.action }),
+      publishScopeEvents(entityScope, input.action, input.gminaId),
+    ]);
   }
 }
 

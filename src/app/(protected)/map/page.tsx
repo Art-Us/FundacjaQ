@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
+import { scopedGminaWhere } from '@/lib/gmina';
+import { isGlobalAdmin } from '@/lib/authz';
 import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
 import { AppEventsRefresh } from '@/components/AppEventsRefresh';
@@ -16,10 +17,14 @@ export default async function MapPage() {
   const role = session.user.role as Role;
   const gminaId = session.user.gminaId;
 
-  // Alerts stay ADMIN-unconditional — see scopedGminaWhereAnyAdmin's doc
-  // comment. Must still fail closed for a gmina-scoped role with no gmina.
-  const gminaFilter = scopedGminaWhereAnyAdmin({ role, gminaId });
+  // A gmina-scoped ADMIN sees only their own gmina's alerts, same as
+  // COORDINATOR/VOLUNTEER — a global ADMIN (gminaId === null) still sees
+  // every gmina's. Must still fail closed for a gmina-scoped role with no gmina.
+  const gminaFilter = scopedGminaWhere({ role, gminaId });
   const canManageAlerts = role === 'ADMIN' || role === 'COORDINATOR';
+  // undefined (not gminaId) for a global admin — see AppEventsRefresh's own
+  // doc comment for why that's what "react to every gmina" means there.
+  const eventGminaId = isGlobalAdmin({ role, gminaId }) ? undefined : gminaId;
 
   const [alerts, gminy, myResources] = await Promise.all([
     gminaFilter === null
@@ -56,7 +61,7 @@ export default async function MapPage() {
 
   return (
     <>
-      <AppEventsRefresh scope="alerts" />
+      <AppEventsRefresh scope="alerts" gminaId={eventGminaId} />
       <AlertsMapView
         initialAlerts={alerts}
         gminy={gminy}

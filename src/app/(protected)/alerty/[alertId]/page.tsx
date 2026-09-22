@@ -4,7 +4,7 @@ import { ArrowLeft, Building, Calendar, MapPin, MessageSquare, User } from 'luci
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { alertInclude } from '@/lib/alertInclude';
-import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, isAlertOwnerOrg } from '@/lib/authz';
+import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, isAlertOwnerOrg, isAdminForGmina } from '@/lib/authz';
 import { availableCategoryIds } from '@/lib/resourceMatching';
 import { ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS, SEVERITY_LABELS, getSeverityBadgeInfo } from '@/lib/alertLabels';
 import { formatDate } from '@/lib/utils';
@@ -58,16 +58,20 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
   ]);
 
   const canManageAlerts = currentUser.role === 'ADMIN' || currentUser.role === 'COORDINATOR';
-  // Same rule as AlertsMapView.tsx's canManageNeedsForAlert — owner org (or
-  // ADMIN) only, mirrored server-side by PATCH/DELETE /api/needs/[id].
-  const canManageNeeds = canManageAlerts && (currentUser.role === 'ADMIN' || isAlertOwnerOrg(alert, currentUser));
+  // Same rule as AlertsMapView.tsx's canManageNeedsForAlert — owner org, or
+  // ADMIN empowered for this alert's gmina (isAdminForGmina), mirrored
+  // server-side by PATCH/DELETE /api/needs/[id].
+  const canManageNeeds = canManageAlerts && (isAdminForGmina(currentUser, alert.gminaId) || isAlertOwnerOrg(alert, currentUser));
   const canAllocate = canManageAlerts && !!currentUser.organizationId;
   const ownedCategoryIds = availableCategoryIds(myResources);
   // Same flattening AlertsMapView.tsx uses for openAllocationCount — every
   // allocation on the alert lives under one of its needs, not directly on
   // Alert.allocations in this fetch (Крок 55 never included that relation).
   const allAllocations = alert.needs.flatMap((need) => need.allocations);
-  const canReplyToJournal = canReplyToAlertForum({ organizationId: alert.organizationId, allocations: allAllocations }, currentUser);
+  const canReplyToJournal = canReplyToAlertForum(
+    { gminaId: alert.gminaId, organizationId: alert.organizationId, allocations: allAllocations },
+    currentUser
+  );
   const canPostJournalEntry = canPostAlertJournalEntry(currentUser);
 
   const isEventView = alert.kind === 'EVENT';
@@ -75,7 +79,11 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
-      <AppEventsRefresh scope="alerts" />
+      {/* alert.gminaId, not the viewer's own — canViewAlertJournal above
+          already guarantees anyone rendering this page is either a global
+          admin or shares this alert's gmina, so an event about a DIFFERENT
+          gmina can't be about this alert regardless of who's looking. */}
+      <AppEventsRefresh scope="alerts" gminaId={alert.gminaId} />
       <Link
         href="/map"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"

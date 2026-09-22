@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAdminForGmina } from '@/lib/authz';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
@@ -55,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   // Same gmina-scoping as GET /api/alerts/[id]/needs — visible to any donor
   // in the alert's gmina, not only its owner organization.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
+  if (!isAdminForGmina(user, alert.gminaId) && alert.gminaId !== user.gminaId) {
     return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania przydziałów tego alertu.' }, { status: 403 });
   }
 

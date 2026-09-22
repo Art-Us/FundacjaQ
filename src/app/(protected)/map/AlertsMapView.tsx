@@ -19,7 +19,7 @@ import {
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import type { Role } from '@/types';
-import { canManageAlert as canManageAlertPolicy, isAlertOwnerOrg } from '@/lib/resourceAuthz';
+import { canManageAlert as canManageAlertPolicy, isAlertOwnerOrg, isAdminForGmina } from '@/lib/resourceAuthz';
 import { availableCategoryIds, countMatchingNeeds } from '@/lib/resourceMatching';
 import type { MapDisplayMode } from './AlertMap';
 import AlertForm from './AlertForm';
@@ -442,21 +442,27 @@ export default function AlertsMapView({
     return canManageAlertPolicy(alert, {
       role: currentUserRole,
       organizationId: currentUserOrganizationId,
+      gminaId: currentUserGminaId,
     });
   }
 
-  // Owner org (or ADMIN) only — gates "Edytuj zapotrzebowanie" (Крок 42), the
-  // same rule PATCH/DELETE /api/needs/[id] (Крок 22) enforces server-side.
+  // Owner org, or ADMIN empowered for this alert's gmina (isAdminForGmina)
+  // — gates "Edytuj zapotrzebowanie" (Крок 42), the same rule
+  // PATCH/DELETE /api/needs/[id] (Крок 22) enforces server-side.
   function canManageNeedsForAlert(alert: AlertWithGmina): boolean {
     if (!canManageAlerts) return false;
-    if (currentUserRole === 'ADMIN') return true;
+    if (isAdminForGmina({ role: currentUserRole, gminaId: currentUserGminaId }, alert.gminaId)) return true;
     return isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
   }
 
   const ownedCategoryIds = useMemo(() => availableCategoryIds(myResources), [myResources]);
   const canAllocateResources = canManageAlerts && !!currentUserOrganizationId;
 
-  const canDelete = currentUserRole === 'ADMIN';
+  // Mirrors DELETE /api/alerts/[id]'s own gmina check — a global ADMIN can
+  // hard-delete any alert, a gmina-scoped one only within their own gmina.
+  function canDeleteAlert(alert: AlertWithGmina): boolean {
+    return isAdminForGmina({ role: currentUserRole, gminaId: currentUserGminaId }, alert.gminaId);
+  }
   const alertCount = useMemo(
     () => initialAlerts.filter((a) => a.kind === 'ALERT' && (a.status === 'ACTIVE' || a.status === 'IN_PROGRESS')).length,
     [initialAlerts]
@@ -1065,7 +1071,7 @@ export default function AlertsMapView({
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
-                      canDelete={canDelete}
+                      canDelete={canDeleteAlert(alert)}
                       isOwnerOrg={isOwnerOrg}
                       openAllocationCount={openAllocationCount}
                     />
@@ -1353,7 +1359,7 @@ export default function AlertsMapView({
                       status={alert.status}
                       kind={alert.kind}
                       canManage={canManageAlert(alert)}
-                      canDelete={canDelete}
+                      canDelete={canDeleteAlert(alert)}
                       isOwnerOrg={isOwnerOrg}
                       openAllocationCount={openAllocationCount}
                     />

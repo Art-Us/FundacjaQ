@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAdminForGmina } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import { publishAdminEvent } from '@/lib/adminEvents';
 
@@ -55,8 +55,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // COORDINATOR może tworzyć alerty tylko dla swojej gminy; ADMIN dla dowolnej.
-  if (user.role !== 'ADMIN' && gminaId !== user.gminaId) {
+  // A global ADMIN may create for any gmina; COORDINATOR and a gmina-scoped
+  // ADMIN only for their own (isAdminForGmina).
+  if (!isAdminForGmina(user, gminaId) && gminaId !== user.gminaId) {
     return NextResponse.json({ error: 'Możesz tworzyć alerty tylko dla swojej gminy.' }, { status: 403 });
   }
 
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Nie udało się utworzyć alertu.' }, { status: 500 });
   }
 
-  await publishAdminEvent({ scope: 'alerts' });
+  await publishAdminEvent({ scope: 'alerts', gminaId });
 
   return NextResponse.json({ message: 'Alert utworzony.', alert });
 }

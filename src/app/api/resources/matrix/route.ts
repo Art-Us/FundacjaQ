@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAdminOrCoordinator } from '@/lib/authz';
-import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { computeResourceMatrix, emptyMatrixTiles, MATRIX_GROUPS } from '@/lib/resourceMatrix';
 
 export const runtime = 'nodejs';
@@ -24,9 +24,10 @@ export async function GET(req: NextRequest) {
   const { organizationId, group } = parsed.data;
   const tileGroups = group ? [group] : MATRIX_GROUPS;
 
-  // Resources stay ADMIN-unconditional — see scopedGminaWhereAnyAdmin's doc
-  // comment. Must still fail closed for a gmina-scoped role with no gmina.
-  const gminaFilter = scopedGminaWhereAnyAdmin(user);
+  // A gmina-scoped ADMIN sees only their own gmina's resources — see
+  // scopedGminaWhere's doc comment. Must still fail closed for a
+  // gmina-scoped role with no gmina.
+  const gminaFilter = scopedGminaWhere(user);
   if (gminaFilter === null) {
     return NextResponse.json({ tiles: emptyMatrixTiles(tileGroups), categories: [] });
   }

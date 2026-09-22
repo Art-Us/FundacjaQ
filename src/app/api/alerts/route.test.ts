@@ -173,7 +173,7 @@ describe('POST /api/alerts', () => {
     );
   });
 
-  it('lets ADMIN create an alert for any gmina', async () => {
+  it('lets a global ADMIN (gminaId null) create an alert for any gmina', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-OTHER' } as any);
     prisma.alert.create.mockResolvedValue({ id: 'alert-1' } as any);
@@ -183,6 +183,33 @@ describe('POST /api/alerts', () => {
     expect(res.status).toBe(200);
     expect(prisma.alert.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-OTHER', authorId: 'admin-1' }) })
+    );
+  });
+
+  // isAdminForGmina, lib/resourceAuthz.ts — a gmina-scoped ADMIN (gminaId
+  // set) is restricted exactly like a COORDINATOR now, unlike a global one.
+  it('rejects a gmina-scoped ADMIN creating an alert for a gmina that is not their own (403, no DB call)', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+
+    const res = await POST(makeRequest(baseBody({ gminaId: 'gmina-OTHER' })));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toBe('Możesz tworzyć alerty tylko dla swojej gminy.');
+    expect(prisma.gmina.findUnique).not.toHaveBeenCalled();
+    expect(prisma.alert.create).not.toHaveBeenCalled();
+  });
+
+  it('lets a gmina-scoped ADMIN create an alert for their own gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+    prisma.alert.create.mockResolvedValue({ id: 'alert-1' } as any);
+
+    const res = await POST(makeRequest(baseBody({ gminaId: 'gmina-1' })));
+
+    expect(res.status).toBe(200);
+    expect(prisma.alert.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1', authorId: 'admin-1' }) })
     );
   });
 

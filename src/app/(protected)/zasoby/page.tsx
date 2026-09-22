@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { scopedGminaWhere, scopedGminaWhereAnyAdmin } from '@/lib/gmina';
+import { scopedGminaWhere } from '@/lib/gmina';
+import { isGlobalAdmin } from '@/lib/authz';
 import { computeResourceMatrix, emptyMatrixTiles } from '@/lib/resourceMatrix';
 import { fetchAllocationInbox } from '@/lib/allocationInbox';
 import { RefreshOnMount } from '@/components/RefreshOnMount';
@@ -22,17 +23,19 @@ export default async function ZasobyPage() {
 
   const { role, gminaId, organizationId } = session.user;
 
-  // Resources (the matrix) stay ADMIN-unconditional — see
-  // scopedGminaWhereAnyAdmin's doc comment. The organizations picker is
-  // unrelated to resources scoping and keeps the regular, gmina-scoped
-  // filter. Both must still fail closed for a COORDINATOR with no gmina.
-  const resourceGminaFilter = scopedGminaWhereAnyAdmin({ role, gminaId });
+  // A gmina-scoped ADMIN sees only their own gmina's resource matrix and
+  // organizations picker, same as COORDINATOR — a global ADMIN (gminaId ===
+  // null) still sees every gmina's. Must fail closed for a gmina-scoped
+  // role with no gmina.
   const gminaFilter = scopedGminaWhere({ role, gminaId });
+  // undefined (not gminaId) for a global admin — see AppEventsRefresh's own
+  // doc comment for why that's what "react to every gmina" means there.
+  const eventGminaId = isGlobalAdmin({ role, gminaId }) ? undefined : gminaId;
 
   const [matrix, organizations, inbox] = await Promise.all([
-    resourceGminaFilter === null
+    gminaFilter === null
       ? Promise.resolve({ tiles: emptyMatrixTiles(), categories: [] })
-      : computeResourceMatrix({ gminaFilter: resourceGminaFilter }),
+      : computeResourceMatrix({ gminaFilter }),
     gminaFilter === null
       ? Promise.resolve([])
       : prisma.organization.findMany({ where: gminaFilter, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
@@ -42,7 +45,7 @@ export default async function ZasobyPage() {
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
       <RefreshOnMount />
-      <AppEventsRefresh scope="resources" />
+      <AppEventsRefresh scope="resources" gminaId={eventGminaId} />
 
       <AllocationInboxPanel recipient={inbox.recipient} donor={inbox.donor} />
 
@@ -52,6 +55,7 @@ export default async function ZasobyPage() {
         organizations={organizations}
         currentUserOrganizationId={organizationId ?? null}
         isAdmin={role === 'ADMIN'}
+        viewerGminaId={eventGminaId}
       />
     </main>
   );

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { AllocationStatus, ResourceAllocation } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAllocationDonor, isAllocationRecipient } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAllocationDonor, isAllocationRecipient, isAdminForGmina } from '@/lib/authz';
 import { assertAllocationTransition, AllocationTransitionError, type AllocationActor } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 
@@ -93,9 +93,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   // Then: does THIS caller hold a role that's allowed to make THIS specific
-  // move — ADMIN is exempt (mirrors canManageAlert's ADMIN-always-can rule),
-  // everyone else must actually be the donor or recipient organization.
-  if (user.role !== 'ADMIN') {
+  // move — a global ADMIN is exempt, a gmina-scoped ADMIN only within their
+  // own gmina (isAdminForGmina, mirrors canManageAlert's rule), everyone
+  // else must actually be the donor or recipient organization.
+  if (!isAdminForGmina(user, target.alert.gminaId)) {
     const actors = actorRolesOf(target, user);
     if (actors.length === 0) {
       return NextResponse.json({ error: 'Nie masz uprawnień do zmiany statusu tego przydziału.' }, { status: 403 });

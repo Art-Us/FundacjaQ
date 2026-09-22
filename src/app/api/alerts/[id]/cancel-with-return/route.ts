@@ -231,7 +231,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // recordAudit above already publishes 'alerts'/'resources' per allocation
   // entry, but an alert with no allocations in flight produces none — this
   // covers that case so the alert's own CANCELLED status still propagates.
-  await publishAdminEvent({ scope: 'alerts' });
+  await publishAdminEvent({ scope: 'alerts', gminaId: alert.gminaId });
 
   return NextResponse.json({ message: 'Alert anulowany.', alert: result.updatedAlert });
 }

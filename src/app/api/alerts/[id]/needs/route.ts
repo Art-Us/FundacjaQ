@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg, isAdminForGmina } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { getCachedAlertAccess, setCachedAlertAccess, type CachedAlertAccess } from '@/lib/alertAccessCache';
 
@@ -47,11 +47,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  // Same gmina-scoping as PATCH /api/alerts/[id]: any donor org (ADMIN, or a
-  // COORDINATOR in the same gmina) needs to see what's needed in order to
-  // offer resources — this is deliberately NOT restricted to the alert's own
-  // owner organization, unlike POST below.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
+  // Same gmina-scoping as PATCH /api/alerts/[id]: any donor org (a global
+  // ADMIN, a gmina-scoped ADMIN in the same gmina, or a COORDINATOR in the
+  // same gmina) needs to see what's needed in order to offer resources —
+  // this is deliberately NOT restricted to the alert's own owner
+  // organization, unlike POST below.
+  if (!isAdminForGmina(user, alert.gminaId) && alert.gminaId !== user.gminaId) {
     return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania potrzeb tego alertu.' }, { status: 403 });
   }
 
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
-  if (user.role !== 'ADMIN' && !isAlertOwnerOrg(alert, user)) {
+  if (!isAdminForGmina(user, alert.gminaId) && !isAlertOwnerOrg(alert, user)) {
     return NextResponse.json(
       { error: 'Tylko organizacja właściciela alertu może zgłaszać zapotrzebowanie.' },
       { status: 403 }

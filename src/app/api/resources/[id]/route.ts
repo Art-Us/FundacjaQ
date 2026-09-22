@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma, type Resource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, type AuthorizedUser } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAdminForGmina, type AuthorizedUser } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
 import {
@@ -25,12 +25,14 @@ const updateResourceSchema = z.object({
   location: z.string().trim().max(200).nullable().optional(),
 });
 
-// Own organization or ADMIN — mirrors the "власна організація або ADMIN"
-// guard from docs/resource_management_plan.md Крок 19. A COORDINATOR from a
-// DIFFERENT organization gets the same 403 a VOLUNTEER would from the module
-// guard one level up, even though both pass requireAdminOrCoordinator().
-function canManageResource(resource: Pick<Resource, 'organizationId'>, user: AuthorizedUser): boolean {
-  return user.role === 'ADMIN' || (!!user.organizationId && user.organizationId === resource.organizationId);
+// Own organization, or ADMIN (a global admin unconditionally, a gmina-scoped
+// one only within their own gmina — isAdminForGmina) — mirrors the "власна
+// організація або ADMIN" guard from docs/resource_management_plan.md Крок 19.
+// A COORDINATOR from a DIFFERENT organization gets the same 403 a VOLUNTEER
+// would from the module guard one level up, even though both pass
+// requireAdminOrCoordinator().
+function canManageResource(resource: Pick<Resource, 'organizationId' | 'gminaId'>, user: AuthorizedUser): boolean {
+  return isAdminForGmina(user, resource.gminaId) || (!!user.organizationId && user.organizationId === resource.organizationId);
 }
 
 /**

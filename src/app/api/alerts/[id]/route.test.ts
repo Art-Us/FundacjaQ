@@ -74,6 +74,30 @@ describe('PATCH /api/alerts/[id]', () => {
     expect(prisma.alert.update).not.toHaveBeenCalled();
   });
 
+  // canManageAlert (isAdminForGmina), lib/resourceAuthz.ts — a gmina-scoped
+  // ADMIN (gminaId set) may only manage alerts in their own gmina;
+  // baseAlert is 'g1'. A global ADMIN (gminaId null) is unrestricted.
+  it('rejects a gmina-scoped ADMIN managing an alert from a different gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2', organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+
+    const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.alert.update).not.toHaveBeenCalled();
+  });
+
+  it('lets a gmina-scoped ADMIN manage an alert in their own gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1', organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.alert.update.mockResolvedValue({} as any);
+
+    const res = await PATCH(makeRequest({ title: 'Nowy tytuł' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.alert.update).toHaveBeenCalled();
+  });
+
   it('rejects an empty body', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
@@ -258,6 +282,32 @@ describe('DELETE /api/alerts/[id]', () => {
     const res = await DELETE(makeDeleteRequest(), ctx);
 
     expect(res.status).toBe(404);
+  });
+
+  // isAdminForGmina, lib/resourceAuthz.ts — a gmina-scoped ADMIN (gminaId
+  // set) may only hard-delete alerts in their own gmina; baseAlert is 'g1'.
+  it('rejects a gmina-scoped ADMIN deleting an alert from a different gmina (403, no delete)', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2', organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toBe('Możesz usuwać tylko alerty ze swojej gminy.');
+    expect(prisma.alert.delete).not.toHaveBeenCalled();
+  });
+
+  it('lets a gmina-scoped ADMIN delete an alert in their own gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1', organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([] as any);
+    prisma.alert.delete.mockResolvedValue({} as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
   });
 
   // The bug this guards: Alert -> AlertNeed -> ResourceAllocation cascade on

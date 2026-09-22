@@ -129,10 +129,12 @@ export default function AlertForm({
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const geocodeSeq = useRef(0);
 
-  // COORDINATOR może tworzyć alerty tylko dla swojej gminy — pole i tak jest
-  // wymuszone po stronie API, ale ukrywamy wybór w UI, żeby nie sugerować
-  // czegoś, czego serwer i tak nie pozwoli zrobić.
-  const gminaLocked = currentUserRole !== 'ADMIN';
+  // COORDINATOR i administrator gminy (ADMIN z ustawioną gminaId) mogą
+  // tworzyć alerty tylko dla swojej gminy — pole i tak jest wymuszone po
+  // stronie API (isAdminForGmina, POST /api/alerts), ale ukrywamy wybór w
+  // UI, żeby nie sugerować czegoś, czego serwer i tak nie pozwoli zrobić.
+  // Tylko globalny ADMIN (bez własnej gminy) widzi otwartą listę.
+  const gminaLocked = currentUserRole !== 'ADMIN' || !!currentUserGminaId;
 
   const selectedGmina = gminy.find((g) => g.id === gminaId);
   const pickerCenter: [number, number] =
