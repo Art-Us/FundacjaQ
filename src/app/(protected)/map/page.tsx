@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
-import { scopedGminaWhere } from '@/lib/gmina';
 import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
 import AlertsMapView from './AlertsMapView';

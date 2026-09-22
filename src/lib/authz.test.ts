@@ -175,9 +175,6 @@ describe('isAllocationRecipient', () => {
 describe('canManageAlert', () => {
   const alert = { organizationId: 'org-owner' };
 
-  it('is always true for ADMIN, regardless of organization or gmina', () => {
-    expect(canManageAlert(alert, { role: 'ADMIN', gminaId: null, organizationId: null })).toBe(true);
-    expect(canManageAlert(alert, { role: 'ADMIN', gminaId: 'gmina-2', organizationId: null })).toBe(true);
   it('is always true for ADMIN, regardless of organization', () => {
     expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null })).toBe(true);
   });
