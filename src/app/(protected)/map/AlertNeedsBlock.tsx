@@ -29,6 +29,11 @@ interface AlertNeedsBlockProps {
   alertId: string;
   alertLocationLabel: string;
   alertDescription: string;
+  // Gates "Przydziel zasoby" alongside each need's own status: a RESOLVED/
+  // CANCELLED alert no longer accepts new allocations (POST
+  // /api/alerts/[id]/allocations rejects it with 409 regardless), so the
+  // button shouldn't be offered at all once the alert itself is closed.
+  alertStatus: string;
   needs: AlertNeedRow[];
   // Owner org or ADMIN — gates "Edytuj zapotrzebowanie" (Крок 42/21-22): only
   // the alert's own organization declares/edits what it needs.
@@ -57,6 +62,7 @@ export default function AlertNeedsBlock({
   alertId,
   alertLocationLabel,
   alertDescription,
+  alertStatus,
   needs,
   canManageNeeds,
   canAllocate,
@@ -71,6 +77,8 @@ export default function AlertNeedsBlock({
   if (needs.length === 0 && !canManageNeeds) {
     return null;
   }
+
+  const alertClosed = alertStatus === 'RESOLVED' || alertStatus === 'CANCELLED';
 
   const existingNeeds: ExistingNeed[] = needs.map((need) => ({
     id: need.id,
@@ -153,7 +161,7 @@ export default function AlertNeedsBlock({
                     currentUserOrganizationId={currentUserOrganizationId}
                     alertOrganizationId={alertOrganizationId}
                   />
-                  {isOpen && canAllocate && (
+                  {isOpen && canAllocate && !alertClosed && (
                     <button
                       type="button"
                       onClick={() => setAllocatingNeed(need)}

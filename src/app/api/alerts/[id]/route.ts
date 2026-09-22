@@ -158,7 +158,27 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   }
 
   try {
-    await prisma.alert.delete({ where: { id: alert.id } });
+    // Alert -> AlertNeed -> ResourceAllocation cascade on delete, but nothing
+    // releases the reservation those allocations hold on Resource.reservedQuantity
+    // — without this, a deleted alert permanently strands reservedQuantity on
+    // the donor's resource (wrong "dostępne" in the matrix forever, and
+    // DELETE /api/resources/[id] refuses to ever delete that resource again).
+    await prisma.$transaction(async (tx) => {
+      const active = await tx.resourceAllocation.findMany({
+        where: { alertId: alert.id, status: { notIn: ['RETURNED', 'CANCELLED'] }, resourceId: { not: null } },
+        select: { resourceId: true, quantity: true, quantityReturned: true, quantityNotReturnable: true },
+      });
+      for (const a of active) {
+        const outstanding = a.quantity - a.quantityReturned - a.quantityNotReturnable;
+        if (outstanding > 0) {
+          await tx.resource.update({
+            where: { id: a.resourceId! },
+            data: { reservedQuantity: { decrement: outstanding } },
+          });
+        }
+      }
+      await tx.alert.delete({ where: { id: alert.id } });
+    });
   } catch (err) {
     console.error('[alerts] delete failed:', err);
     return NextResponse.json({ error: 'Nie udało się usunąć alertu.' }, { status: 500 });

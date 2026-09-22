@@ -120,6 +120,34 @@ describe('POST /api/alerts/[id]/allocations', () => {
     expect(res.status).toBe(404);
   });
 
+  // Without this guard, a donor whose "Przydziel zasoby" form was already
+  // open could still allocate against an alert someone just closed — the
+  // reservation then has no path back (cancel-with-return only runs for the
+  // owner's own CANCELLED flow, never for a plain PATCH to RESOLVED).
+  it.each(['RESOLVED', 'CANCELLED'])('rejects allocating against a %s alert', async (status) => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'donor-org' });
+    prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status } as any);
+
+    const res = await POST(makeRequest('POST', { needId: 'need1', resourceId: 'r1', quantity: 2 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('zamknięty');
+    expect(prisma.alertNeed.findUnique).not.toHaveBeenCalled();
+  });
+
+  it.each(['ACTIVE', 'IN_PROGRESS'])('still allows allocating against a %s alert', async (status) => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'donor-org' });
+    prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status } as any);
+    prisma.alertNeed.findUnique.mockResolvedValue({ ...baseNeed, status: 'CLOSED' } as any);
+
+    const res = await POST(makeRequest('POST', { needId: 'need1', resourceId: 'r1', quantity: 2 }), ctx);
+
+    // Falls through to the next guard (need CLOSED) rather than the alert-status one.
+    expect(res.status).toBe(409);
+    expect(prisma.alertNeed.findUnique).toHaveBeenCalled();
+  });
+
   it('rejects a missing resourceId before touching the database', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'donor-org' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);

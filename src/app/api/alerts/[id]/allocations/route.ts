@@ -78,6 +78,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
+  // A closed alert (Rozwiązany/Odwołany) is done accepting help — allocating
+  // against it would strand reservedQuantity on the donor's resource with no
+  // path back (cancel-with-return only runs for the owner's own cancellation,
+  // never for a plain PATCH to RESOLVED, and never after the fact here).
+  if (alert.status === 'RESOLVED' || alert.status === 'CANCELLED') {
+    return NextResponse.json({ error: 'Ten alert jest już zamknięty.' }, { status: 409 });
+  }
 
   const parsed = createAllocationSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
