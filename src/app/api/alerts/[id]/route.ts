@@ -5,6 +5,7 @@ import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert } from '@/li
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
+import { invalidateAlertAccessCache } from '@/lib/alertAccessCache';
 
 export const runtime = 'nodejs';
 
@@ -136,6 +137,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Nie udało się zaktualizować alertu.' }, { status: 500 });
   }
 
+  // Only alert-access-cache-relevant field that can ever change here — see
+  // alertAccessCache.ts's doc comment (gminaId/organizationId are immutable).
+  if (parsed.data.status) {
+    await invalidateAlertAccessCache(alert.id);
+  }
+
   return NextResponse.json({ message: 'Alert zaktualizowany.' });
 }
 
@@ -183,6 +190,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     console.error('[alerts] delete failed:', err);
     return NextResponse.json({ error: 'Nie udało się usunąć alertu.' }, { status: 500 });
   }
+
+  await invalidateAlertAccessCache(alert.id);
 
   return NextResponse.json({ message: 'Alert usunięty.' });
 }

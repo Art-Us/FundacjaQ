@@ -5,8 +5,26 @@ import { requireAdminOrCoordinator } from '@/lib/authz';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
+import { getCachedAlertAccess, setCachedAlertAccess, type CachedAlertAccess } from '@/lib/alertAccessCache';
 
 export const runtime = 'nodejs';
+
+// Redis-fast-path/Postgres-fallback for the alert lookup below — this route
+// only ever needs gminaId/organizationId/status to authorize the request,
+// never the rest of the alert record (see alertAccessCache.ts's doc comment).
+async function findAlertAccess(id: string): Promise<CachedAlertAccess | null> {
+  const cached = await getCachedAlertAccess(id);
+  if (cached) return cached;
+
+  const alert = await prisma.alert.findUnique({
+    where: { id },
+    select: { gminaId: true, organizationId: true, status: true },
+  });
+  if (!alert) return null;
+
+  await setCachedAlertAccess(id, alert);
+  return alert;
+}
 
 const createAllocationSchema = z.object({
   needId: z.string().min(1, 'Zapotrzebowanie jest wymagane.'),
@@ -30,10 +48,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const alert = await prisma.alert.findUnique({
-    where: { id: params.id },
-    select: { id: true, gminaId: true, organizationId: true },
-  });
+  const alert = await findAlertAccess(params.id);
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
@@ -45,7 +60,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
 
   const allocations = await prisma.resourceAllocation.findMany({
-    where: { alertId: alert.id },
+    where: { alertId: params.id },
     include: {
       category: { select: { id: true, name: true, group: true } },
       donorOrg: { select: { id: true, name: true } },
@@ -74,14 +89,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  const alert = await prisma.alert.findUnique({ where: { id: params.id } });
+  // Deliberately bypasses findAlertAccess's Redis cache (unlike GET above) —
+  // this is the one write in the module that reserves a real resource
+  // quantity against the alert, so it goes straight to Postgres for both
+  // existence and status: a donor allocating against a since-closed alert
+  // would strand reservedQuantity with no path back (cancel-with-return only
+  // runs for the owner's own cancellation, never for a plain PATCH to
+  // RESOLVED, and never after the fact here), and that's not a risk worth
+  // taking for the sake of one saved read on an infrequent write path.
+  const alert = await prisma.alert.findUnique({
+    where: { id: params.id },
+    select: { gminaId: true, organizationId: true, status: true },
+  });
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
-  // A closed alert (Rozwiązany/Odwołany) is done accepting help — allocating
-  // against it would strand reservedQuantity on the donor's resource with no
-  // path back (cancel-with-return only runs for the owner's own cancellation,
-  // never for a plain PATCH to RESOLVED, and never after the fact here).
   if (alert.status === 'RESOLVED' || alert.status === 'CANCELLED') {
     return NextResponse.json({ error: 'Ten alert jest już zamknięty.' }, { status: 409 });
   }
@@ -92,7 +114,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const need = await prisma.alertNeed.findUnique({ where: { id: parsed.data.needId } });
-  if (!need || need.alertId !== alert.id) {
+  if (!need || need.alertId !== params.id) {
     return NextResponse.json({ error: 'Zapotrzebowanie nie istnieje dla tego alertu.' }, { status: 404 });
   }
   // OPEN/PARTIALLY_FULFILLED/FULFILLED can all still receive more (fulfilled
@@ -176,7 +198,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const created = await tx.resourceAllocation.create({
         data: {
           needId: need.id,
-          alertId: alert.id,
+          alertId: params.id,
           resourceId: resource.id,
           categoryId: resource.categoryId,
           itemName: resource.name,

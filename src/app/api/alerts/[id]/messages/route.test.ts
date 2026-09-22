@@ -8,6 +8,11 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return { ...actual, requireUser: vi.fn() };
 });
+// Auto-mocked: every export becomes a vi.fn() returning undefined, i.e. an
+// always-miss cache, so these tests exercise the same Postgres-fallback path
+// as before this cache existed — without this, findAlert() would hit the
+// real Redis client and leak state across tests.
+vi.mock('@/lib/alertAccessCache');
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';

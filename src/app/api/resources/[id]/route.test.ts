@@ -8,6 +8,12 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return { ...actual, requireAdminOrCoordinator: vi.fn() };
 });
+// Auto-mocked: every export becomes a vi.fn() returning undefined, i.e. an
+// always-miss cache / no-op set+invalidate, so these tests exercise the same
+// mandatory-Postgres-read path as before this cache existed — without this,
+// rejectEarlyIfDenied() would hit the real Redis client and leak state
+// across tests.
+vi.mock('@/lib/resourceAccessCache');
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';

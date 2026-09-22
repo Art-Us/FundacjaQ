@@ -11,6 +11,7 @@ import {
 } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
+import { invalidateAlertAccessCache } from '@/lib/alertAccessCache';
 
 export const runtime = 'nodejs';
 
@@ -210,6 +211,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error('[cancel-with-return] transaction failed:', err);
     return NextResponse.json({ error: 'Nie udało się anulować alertu.' }, { status: 500 });
   }
+
+  await invalidateAlertAccessCache(alert.id);
 
   const meta = requestMeta(req);
   for (const entry of result.auditEntries) {

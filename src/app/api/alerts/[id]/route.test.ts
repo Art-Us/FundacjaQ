@@ -8,6 +8,11 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return { ...actual, requireAdminOrCoordinator: vi.fn() };
 });
+// Auto-mocked: every export becomes a vi.fn() returning undefined, i.e. an
+// always-miss cache / no-op invalidate, so these tests are unaffected by
+// this cache's existence — without this, invalidateAlertAccessCache() would
+// hit the real Redis client.
+vi.mock('@/lib/alertAccessCache');
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';

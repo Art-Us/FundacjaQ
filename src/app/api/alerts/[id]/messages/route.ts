@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { requireUser, canPostAlertJournalEntry, canViewAlertJournal } from '@/lib/authz';
 import { ALERT_MESSAGE_TYPES } from '@/lib/alertMessageLabels';
+import { getCachedAlertAccess, setCachedAlertAccess, type CachedAlertAccess } from '@/lib/alertAccessCache';
 
 export const runtime = 'nodejs';
 
@@ -12,11 +14,21 @@ const createEntrySchema = z.object({
   body: z.string().trim().min(1, 'Treść wpisu nie może być pusta.').max(4000),
 });
 
-async function findAlert(id: string) {
-  return prisma.alert.findUnique({
+// Redis-fast-path/Postgres-fallback for the alert lookup below — this route
+// only ever needs gminaId to authorize the request (canViewAlertJournal),
+// never the rest of the alert record (see alertAccessCache.ts's doc comment).
+async function findAlert(id: string): Promise<CachedAlertAccess | null> {
+  const cached = await getCachedAlertAccess(id);
+  if (cached) return cached;
+
+  const alert = await prisma.alert.findUnique({
     where: { id },
-    select: { id: true, gminaId: true, organizationId: true },
+    select: { gminaId: true, organizationId: true, status: true },
   });
+  if (!alert) return null;
+
+  await setCachedAlertAccess(id, alert);
+  return alert;
 }
 
 // GET — the list of root journal entries ("wpisy") under an alert. Anyone
@@ -37,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
 
   const entries = await prisma.alertMessage.findMany({
-    where: { alertId: alert.id, parentId: null },
+    where: { alertId: params.id, parentId: null },
     include: {
       author: { select: { id: true, name: true } },
       _count: { select: { replies: true } },
@@ -81,7 +93,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     entry = await prisma.alertMessage.create({
       data: {
-        alertId: alert.id,
+        alertId: params.id,
         authorId: user.id,
         authorOrgId: user.organizationId ?? null,
         type: parsed.data.type,
@@ -90,7 +102,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
       include: { author: { select: { id: true, name: true } } },
     });
-  } catch {
+  } catch (err) {
+    // The alert lookup above can come from the cache (findAlert) and go
+    // stale if the alert was deleted right after its cache entry was last
+    // written — alertId's foreign key is the real, live source of truth, so
+    // that specific failure means "alert doesn't exist" (404), not a generic
+    // server error.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
+    }
     return NextResponse.json({ error: 'Nie udało się dodać wpisu.' }, { status: 500 });
   }
 
