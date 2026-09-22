@@ -11,6 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { fakeCheckViolation } from '@/lib/__mocks__/prismaErrors';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -226,5 +227,28 @@ describe('POST /api/alerts/[id]/cancel-with-return', () => {
     });
     expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { status: 'CANCELLED' } });
     expect(prisma.auditLog.create).toHaveBeenCalledTimes(2);
+  });
+
+  // A concurrent return-event for the same allocation landed between the
+  // projectedTotal check and the transaction; the CHECK constraint rolls
+  // the whole cancel back. Must be a 409 (reload and retry), never a 500,
+  // and no audit rows may be written for a transaction that didn't commit.
+  it('maps a DB CHECK constraint violation inside the transaction to 409 and records no audit', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValueOnce([deliveredAllocation] as any);
+    prisma.allocationReturnEvent.findMany.mockResolvedValue([]);
+    prisma.allocationReturnEvent.create.mockResolvedValue({ id: 'evt1', quantityReturned: 5, quantityNotReturnable: 0 } as any);
+    prisma.resourceAllocation.update.mockRejectedValue(
+      fakeCheckViolation('allocation_returns_within_quantity', 'ResourceAllocation')
+    );
+
+    const res = await POST(makeRequest({ returns: [validEntry] }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('przekroczyłaby ilość tego przydziału');
+    expect(prisma.alert.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

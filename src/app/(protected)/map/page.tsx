@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { scopedGminaWhere } from '@/lib/gmina';
+import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
 import AlertsMapView from './AlertsMapView';
 
@@ -25,26 +26,22 @@ export default async function MapPage() {
       ? Promise.resolve([])
       : prisma.alert.findMany({
           where: gminaFilter,
-          include: {
-            gmina: true,
-            author: { include: { organization: true } },
-            needs: {
-              include: {
-                allocations: {
-                  include: {
-                    donorOrg: { select: { id: true, name: true } },
-                    createdBy: { select: { id: true, name: true } },
-                  },
-                },
-              },
-            },
-          },
+          // Everything fetched here lands in AlertsMapView's props, i.e. in
+          // the RSC payload of this page — alertInclude (lib/alertInclude.ts)
+          // is the allowlist of what's safe to send to the browser.
+          include: alertInclude,
           orderBy: { createdAt: 'desc' },
         }),
     // ADMIN musi móc wybrać gminę przy tworzeniu alertu; COORDINATOR i tak jest
     // ograniczony do własnej gminy po stronie API, ale lista ułatwia mu wybór z
     // dokładną nazwą zamiast wpisywania id ręcznie.
-    prisma.gmina.findMany({ orderBy: { name: 'asc' } }),
+    // Only what the gmina picker/map centring needs (GminaOption) — no
+    // contactEmail/contactPhone, which would otherwise ride along into the
+    // client payload for every visitor of /map.
+    prisma.gmina.findMany({
+      select: { id: true, name: true, latitude: true, longitude: true },
+      orderBy: { name: 'asc' },
+    }),
     // Own organization's resources — feeds the "Masz zasoby (N)" badge (R11,
     // Крок 43): which of an alert's still-open needs fall in a category this
     // org currently has something free to give in (lib/resourceMatching.ts).

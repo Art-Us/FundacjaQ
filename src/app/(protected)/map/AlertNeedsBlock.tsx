@@ -183,9 +183,13 @@ export default function AlertNeedsBlock({
       {allocatingNeed && (
         <AllocateResourcesModal
           alertId={alertId}
+          alertLocationLabel={alertLocationLabel}
           needId={allocatingNeed.id}
           needTitle={allocatingNeed.title}
           needCategoryId={allocatingNeed.categoryId}
+          needQuantityNeeded={allocatingNeed.quantityNeeded}
+          needQuantityFulfilled={allocatingNeed.quantityFulfilled}
+          needUnit={allocatingNeed.unit}
           remainingQuantity={Math.max(0, allocatingNeed.quantityNeeded - allocatingNeed.quantityFulfilled)}
           currentUserOrganizationId={currentUserOrganizationId}
           onClose={() => setAllocatingNeed(null)}

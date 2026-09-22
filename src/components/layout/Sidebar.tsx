@@ -67,8 +67,8 @@ export function Sidebar({
               Q
             </div>
             <div className="flex flex-col">
-              <span className="font-extrabold text-base tracking-tight text-slate-900">QFundation</span>
-              <span className="text-[10px] font-medium text-slate-400">Aplikacja QFundation</span>
+              <span className="font-extrabold text-base tracking-tight text-slate-900">ResQ</span>
+              <span className="text-[10px] font-medium text-slate-400">Aplikacja FundationQ</span>
             </div>
           </div>
 

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { describeCheckViolation } from '@/lib/dbErrors';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +13,16 @@ const createAllocationSchema = z.object({
   resourceId: z.string().min(1, 'Zasób jest wymagany.'),
   quantity: z.number().int().min(1, 'Ilość musi być większa od zera.'),
 });
+
+// Thrown from inside the allocation transaction when one of the atomic
+// guards (see POST below) finds the resource or the need no longer has room
+// — i.e. a concurrent allocation got there first. Surfaced as 409, exactly
+// like the pre-transaction checks it backs up, never as a 500.
+class AllocationConflictError extends Error {}
+
+const RESOURCE_CONFLICT_MESSAGE = 'Zbyt mała dostępna ilość tego zasobu — ktoś właśnie przydzielił jego część.';
+const NEED_CONFLICT_MESSAGE =
+  'Przekracza brakującą ilość zapotrzebowania — ktoś właśnie przydzielił zasoby do tej potrzeby.';
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const user = await requireAdminOrCoordinator();
@@ -84,6 +95,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'To zapotrzebowanie zostało zamknięte.' }, { status: 409 });
   }
 
+  // Hard cap: a single donation can never push the need past what it still
+  // lacks — `quantityFulfilled` is kept in sync with the sum of every
+  // non-cancelled allocation by recalculateNeedFulfillment() below, so this
+  // is the true remaining amount, not a client-supplied figure.
+  const stillNeeded = need.quantityNeeded - need.quantityFulfilled;
+  if (parsed.data.quantity > stillNeeded) {
+    return NextResponse.json(
+      { error: `Przekracza brakującą ilość zapotrzebowania (brakuje ${stillNeeded} ${need.unit}).` },
+      { status: 409 }
+    );
+  }
+
   const resource = await prisma.resource.findUnique({ where: { id: parsed.data.resourceId } });
   if (!resource) {
     return NextResponse.json({ error: 'Zasób nie istnieje.' }, { status: 404 });
@@ -97,9 +120,52 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Zbyt mała dostępna ilość tego zasobu.' }, { status: 409 });
   }
 
+  // The two checks above (and the CLOSED/CANCELLED one) ran on a snapshot
+  // read outside any transaction — two donors allocating the same resource at
+  // the same moment both pass them. So they are only a fast, friendly 409;
+  // the real guard is below, where the check and the write are ONE statement
+  // each: `updateMany` with the remaining-room condition in `where`. Postgres
+  // takes the row lock, re-evaluates the condition against the latest
+  // committed row, and either updates it (count 1) or doesn't (count 0) —
+  // exactly one of two concurrent callers can win. Default READ COMMITTED
+  // isolation is what makes this work without retries: the second caller
+  // simply blocks on the row lock, then sees the winner's increment.
+  //
+  // Lock order is always resource → need → allocation, so two concurrent
+  // allocations can't deadlock each other.
+  const quantity = parsed.data.quantity;
   let allocation;
   try {
     allocation = await prisma.$transaction(async (tx) => {
+      const reserved = await tx.resource.updateMany({
+        where: {
+          id: resource.id,
+          // Ownership is re-checked inside the same atomic statement, not
+          // only on the snapshot above.
+          organizationId: user.organizationId!,
+          // "reservedQuantity + quantity <= resource.quantity", written so the
+          // column stands alone on the left (Prisma can't express column
+          // arithmetic in `where`). resource.quantity is the snapshot value —
+          // the DB CHECK constraint (plan Крок 3) covers a concurrent shrink.
+          reservedQuantity: { lte: resource.quantity - quantity },
+        },
+        data: { reservedQuantity: { increment: quantity } },
+      });
+      if (reserved.count === 0) throw new AllocationConflictError(RESOURCE_CONFLICT_MESSAGE);
+
+      // Same idea for the need: the increment only lands if the need is still
+      // open AND still has at least `quantity` uncovered. This also closes the
+      // gap where the owner org closes the need in the same instant.
+      const needReserved = await tx.alertNeed.updateMany({
+        where: {
+          id: need.id,
+          status: { notIn: ['CLOSED', 'CANCELLED'] },
+          quantityFulfilled: { lte: need.quantityNeeded - quantity },
+        },
+        data: { quantityFulfilled: { increment: quantity } },
+      });
+      if (needReserved.count === 0) throw new AllocationConflictError(NEED_CONFLICT_MESSAGE);
+
       const created = await tx.resourceAllocation.create({
         data: {
           needId: need.id,
@@ -107,7 +173,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           resourceId: resource.id,
           categoryId: resource.categoryId,
           itemName: resource.name,
-          quantity: parsed.data.quantity,
+          quantity,
           unit: resource.unit,
           donorOrgId: user.organizationId!,
           recipientOrgId: alert.organizationId,
@@ -115,11 +181,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         },
       });
 
-      await tx.resource.update({
-        where: { id: resource.id },
-        data: { reservedQuantity: { increment: parsed.data.quantity } },
-      });
-
+      // quantityFulfilled was already bumped atomically above; this recompute
+      // from the actual allocation rows (which, holding the need's row lock,
+      // now include every committed concurrent one) keeps the "derived from
+      // allocations" invariant the rest of the module relies on, and is what
+      // produces the need's PARTIALLY_FULFILLED/FULFILLED status.
       const needAllocations = await tx.resourceAllocation.findMany({
         where: { needId: need.id },
         select: { status: true, quantity: true },
@@ -133,7 +199,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       return created;
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof AllocationConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    // The DB CHECK constraints (Крок 3) are the last line of defence — e.g.
+    // Resource.quantity shrank between our snapshot read and the updateMany
+    // above. That's a conflict with a concurrent edit, not a server fault.
+    const violation = describeCheckViolation(err);
+    if (violation) {
+      return NextResponse.json({ error: violation.message }, { status: 409 });
+    }
+    console.error('[allocations] create failed:', err);
     return NextResponse.json({ error: 'Nie udało się przydzielić zasobu.' }, { status: 500 });
   }
 

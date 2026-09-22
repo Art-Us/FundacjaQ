@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import {
@@ -16,8 +16,12 @@ import {
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { createPinIcon, createEventPinIcon } from './pinIcon';
 import { MapPin, Building, Calendar, Layers, Flame, ArrowRight } from 'lucide-react';
-import 'leaflet/dist/leaflet.css';
-import './leaflet-theme.css';
+// Leaflet's own CSS + our theme overrides are imported once, in the root
+// layout — not here. Both this file and LocationPicker.tsx used to import
+// them independently, and since each is loaded client-only (see
+// src/lib/dynamicClientOnly.tsx), the stylesheet mounted/unmounted along with
+// whichever component happened to be on screen, which could crash an
+// unrelated unmount elsewhere (see the comment in src/app/layout.tsx).
 
 export type MapDisplayMode = 'category' | 'severity';
 
@@ -35,6 +39,8 @@ export interface MapAlert {
   latitude: number | null;
   longitude: number | null;
   createdAt: Date | string;
+  startsAt: Date | string | null;
+  expiresAt: Date | string | null;
   gmina: { name: string };
   author: { name: string | null; organization: { name: string } | null } | null;
   // "Zapotrzebowanie na zasoby" (R11) shown right in the marker popup — same
@@ -90,7 +96,15 @@ function formatDate(value: Date | string) {
 // pozwoliłby użyć hooków bezpośrednio w komponencie strony — te "niewidzialne"
 // komponenty-dzieci istnieją tylko po to, by podpiąć się pod zdarzenia mapy
 // (useMap/useMapEvents działają wyłącznie wewnątrz MapContainer).
-function FocusController({ alerts, focusedAlertId }: { alerts: MapAlert[]; focusedAlertId?: string | null }) {
+function FocusController({
+  alerts,
+  focusedAlertId,
+  markerRefs,
+}: {
+  alerts: MapAlert[];
+  focusedAlertId?: string | null;
+  markerRefs: { current: Map<string, L.Marker> };
+}) {
   const map = useMap();
 
   useEffect(() => {
@@ -99,7 +113,12 @@ function FocusController({ alerts, focusedAlertId }: { alerts: MapAlert[]; focus
     if (alert?.latitude != null && alert?.longitude != null) {
       map.flyTo([alert.latitude, alert.longitude], 14, { duration: 0.75 });
     }
-  }, [focusedAlertId, alerts, map]);
+    // "Na mapie" powinno pokazać SAM alert, nie tylko dolecieć w jego okolicę i
+    // zostawić użytkownika zgadującego, która pinezka (z wielu w tym miejscu)
+    // to ta szukana — otwieramy jej popup od razu; Leaflet aktualizuje jego
+    // pozycję na bieżąco przez cały czas trwania animacji flyTo.
+    markerRefs.current.get(focusedAlertId)?.openPopup();
+  }, [focusedAlertId, alerts, map, markerRefs]);
 
   return null;
 }
@@ -146,6 +165,10 @@ export default function AlertMap({
   // W widoku zdarzeń legenda zawsze pokazuje typy wydarzeń; w widoku alertów
   // zależy od wybranego trybu.
   const legendMode: MapDisplayMode = isEventView ? 'category' : mode;
+  // Współdzielone z FocusController poniżej — mapuje alert.id na żywą
+  // instancję Leaflet Markera, żeby "Na mapie" mogło otworzyć WŁAŚCIWY popup,
+  // a nie tylko dolecieć w okolicę pinezki.
+  const markerRefs = useRef<Map<string, L.Marker>>(new Map());
   const withCoords = useMemo(
     () =>
       alerts.filter(
@@ -160,7 +183,15 @@ export default function AlertMap({
   );
 
   return (
-    <div className="relative w-full rounded-3xl overflow-hidden border border-slate-200 bg-white">
+    // `isolate` (CSS isolation: isolate) gives this its own stacking context —
+    // without it, Leaflet's internal panes/controls (z-index up to 1000, see
+    // leaflet.css) and this component's own z-[1000] overlays (mode switch,
+    // legend below) compete directly with the app's global chrome z-index
+    // (sidebar z-40/z-50, modal backdrops z-50/z-60), and always win. That's
+    // what let the map bleed through the mobile sidebar drawer and through
+    // modal backdrops (AlertEditModal etc.) while scrolled — isolate contains
+    // all of the map's internal z-index values inside this box instead.
+    <div className="relative isolate w-full rounded-3xl overflow-hidden border border-slate-200 bg-white">
       {/* Przełącznik trybu wizualizacji (kategoria / krytyczność) — tylko dla
           komunikatów kryzysowych, bo zdarzenia codzienne nie mają krytyczności. */}
       {!isEventView && (
@@ -197,7 +228,7 @@ export default function AlertMap({
         />
 
         <FitBoundsToMarkers positions={positions} disabled={!!focusedAlertId} />
-        <FocusController alerts={withCoords} focusedAlertId={focusedAlertId} />
+        <FocusController alerts={withCoords} focusedAlertId={focusedAlertId} markerRefs={markerRefs} />
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
 
         {withCoords.map((alert) => {
@@ -207,6 +238,10 @@ export default function AlertMap({
               key={`${alert.id}-${mode}-${kind}`}
               position={[alert.latitude, alert.longitude]}
               icon={isEventView ? createEventPinIcon(color) : createPinIcon(color)}
+              ref={(instance) => {
+                if (instance) markerRefs.current.set(alert.id, instance);
+                else markerRefs.current.delete(alert.id);
+              }}
             >
               <Popup>
                 <div className="min-w-[220px] max-w-xs space-y-2.5">
@@ -307,7 +342,7 @@ export default function AlertMap({
       </MapContainer>
 
       {/* Legenda mapy, zależna od aktywnego trybu wizualizacji */}
-      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-white/90 p-3 shadow-lg backdrop-blur-md border border-slate-200/80 text-[11px] text-slate-600 hidden sm:block max-w-xs">
+      <div className="absolute bottom-3 left-3 z-[1000] rounded-2xl bg-white/90 p-3 shadow-lg backdrop-blur-md border border-slate-200/80 text-[11px] text-slate-600 hidden sm:block">
         <p className="font-bold text-slate-900 mb-1.5">
           {isEventView
             ? `Legenda: Typy wydarzeń (${withCoords.length})`
@@ -315,14 +350,14 @@ export default function AlertMap({
             ? `Legenda: Kategorie (${withCoords.length})`
             : `Legenda: Krytyczność (${withCoords.length})`}
         </p>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex flex-col gap-1">
           {(isEventView ? EVENT_CATEGORIES : legendMode === 'category' ? ALERT_CATEGORIES : SEVERITIES).map((key) => {
             const color = legendMode === 'category' ? CATEGORY_MARKER_COLORS[key] : SEVERITY_MARKER_COLORS[key];
             const label = legendMode === 'category' ? ALERT_CATEGORY_LABELS[key] : SEVERITY_LABELS[key];
             return (
               <div key={key} className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                <span>{label}</span>
+                <span className="whitespace-nowrap">{label}</span>
               </div>
             );
           })}

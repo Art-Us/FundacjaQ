@@ -4,7 +4,7 @@ import { ShieldCheck, UserPlus, BellRing, Building2, Users } from 'lucide-react'
 import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
 import { formatDate } from '@/lib/utils';
-import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
+import { ALERT_STATUS_LABELS, getSeverityBadgeInfo, getStatusBadgeInfo, SEVERITY_LABELS } from '@/lib/alertLabels';
 import { ROLE_LABELS } from '@/lib/roleLabels';
 import type { Role } from '@/types';
 
@@ -78,24 +78,36 @@ export default async function HomePage() {
             </div>
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {data.alerts.map((alert) => (
-                <li
-                  key={alert.id}
-                  className={`rounded-2xl border px-4 py-3 shadow-xs ${SEVERITY_STYLES[alert.severity] ?? SEVERITY_STYLES.LOW}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-bold text-sm">{alert.title}</p>
-                    <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
-                      {ALERT_STATUS_LABELS[alert.status] ?? alert.status}
-                    </span>
-                  </div>
-                  <p className="text-xs opacity-80 mt-1">{alert.description}</p>
-                  <p className="text-[11px] opacity-60 mt-2">
-                    {alert.gmina.name}
-                    {alert.location ? ` · ${alert.location}` : ''} · {formatDate(alert.createdAt)}
-                  </p>
-                </li>
-              ))}
+              {data.alerts.map((alert) => {
+                const severityInfo = getSeverityBadgeInfo(alert.severity);
+                const statusInfo = getStatusBadgeInfo(alert.status);
+                return (
+                  <li
+                    key={alert.id}
+                    className="rounded-2xl bg-white border border-slate-200 px-4 py-3 shadow-xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider ${severityInfo.badgeClass}`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${severityInfo.dotClass}`} />
+                        {SEVERITY_LABELS[alert.severity] ?? alert.severity}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${statusInfo.badgeClass}`}
+                      >
+                        {ALERT_STATUS_LABELS[alert.status] ?? alert.status}
+                      </span>
+                    </div>
+                    <p className="font-bold text-sm text-slate-900">{alert.title}</p>
+                    <p className="text-xs text-slate-600">{alert.description}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {alert.gmina.name}
+                      {alert.location ? ` · ${alert.location}` : ''} · {formatDate(alert.createdAt)}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

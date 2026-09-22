@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X, Undo2 } from 'lucide-react';
 import AllocationStatusBadge from './AllocationStatusBadge';
+import { apiSend } from '@/lib/apiClient';
 
 interface ReturnResourcesModalProps {
   allocationId: string;
@@ -74,23 +75,17 @@ export default function ReturnResourcesModal({
     setSubmitting(true);
     setError(null);
 
-    const res = await fetch(`/api/allocations/${allocationId}/return-events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quantityReturned: returnedNum,
-        quantityNotReturnable: notReturnableNum,
-        notReturnableReason: notReturnableNum > 0 ? notReturnableReason.trim() || undefined : undefined,
-        message: message.trim() || undefined,
-        returnedAt: new Date(returnedAt).toISOString(),
-      }),
+    const result = await apiSend(`/api/allocations/${allocationId}/return-events`, 'POST', {
+      quantityReturned: returnedNum,
+      quantityNotReturnable: notReturnableNum,
+      notReturnableReason: notReturnableNum > 0 ? notReturnableReason.trim() || undefined : undefined,
+      message: message.trim() || undefined,
+      returnedAt: new Date(returnedAt).toISOString(),
     });
-
-    const data = await res.json();
     setSubmitting(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 

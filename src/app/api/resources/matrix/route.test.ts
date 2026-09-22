@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { mockReset, type DeepMockProxy } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 import { NextRequest } from 'next/server';
@@ -14,6 +14,13 @@ import { requireAdminOrCoordinator } from '@/lib/authz';
 import { GET } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
+// resource.groupBy's real Prisma type is a heavily overloaded generic
+// (conditional on `by`/`orderBy`/`_sum`/...) — DeepMockProxy's mapped type
+// can't unify that with a mock function signature, so TS exposes the plain
+// method type instead of one with `mockResolvedValue`. It IS mocked at
+// runtime (mockReset(prisma) resets it like every other method); this is a
+// one-time cast so the tests below don't each need their own `as any`.
+const groupByMock = prisma.resource.groupBy as unknown as Mock;
 
 function makeRequest(query = '') {
   return new NextRequest(`http://localhost/api/resources/matrix${query}`);
@@ -58,7 +65,7 @@ describe('GET /api/resources/matrix', () => {
   it('restricts tiles to a single group when the group filter is set', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.resourceCategory.findMany.mockResolvedValue([]);
-    prisma.resource.groupBy.mockResolvedValue([] as any);
+    groupByMock.mockResolvedValue([]);
 
     const res = await GET(makeRequest('?group=WATER'));
     const body = await res.json();
@@ -66,17 +73,17 @@ describe('GET /api/resources/matrix', () => {
     expect(body.tiles).toEqual([{ group: 'WATER', quantity: 0, reservedQuantity: 0, available: 0, within24h: 0 }]);
   });
 
-  it('builds cumulative horizon columns and per-group tiles', async () => {
+  it('builds exact (non-cumulative) horizon columns and per-group tiles', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.resourceCategory.findMany.mockResolvedValue([
       { id: 'cat-water', name: 'Woda pitna', group: 'WATER' },
       { id: 'cat-eq', name: 'Sprzęt medyczny', group: 'EQUIPMENT' },
     ] as any);
-    prisma.resource.groupBy.mockResolvedValue([
+    groupByMock.mockResolvedValue([
       { categoryId: 'cat-water', horizon: 'H24', _sum: { quantity: 10, reservedQuantity: 4 } },
       { categoryId: 'cat-water', horizon: 'H72', _sum: { quantity: 5, reservedQuantity: 0 } },
       { categoryId: 'cat-eq', horizon: 'WEEK', _sum: { quantity: 3, reservedQuantity: 1 } },
-    ] as any);
+    ]);
 
     const res = await GET(makeRequest());
     const body = await res.json();
@@ -84,17 +91,18 @@ describe('GET /api/resources/matrix', () => {
     const water = body.categories.find((c: any) => c.categoryId === 'cat-water');
     // H24 column: just the H24 row.
     expect(water.horizons.H24).toEqual({ quantity: 10, reservedQuantity: 4, available: 6 });
-    // H48 column: still just H24 (nothing declared at H48 itself), cumulative.
-    expect(water.horizons.H48).toEqual({ quantity: 10, reservedQuantity: 4, available: 6 });
-    // H72 column: H24 + H72 rows combined.
-    expect(water.horizons.H72).toEqual({ quantity: 15, reservedQuantity: 4, available: 11 });
-    // WEEK column: same as H72 (nothing declared at WEEK itself).
-    expect(water.horizons.WEEK).toEqual({ quantity: 15, reservedQuantity: 4, available: 11 });
+    // H48 column: nothing declared at H48 itself — empty, not inherited from H24.
+    expect(water.horizons.H48).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
+    // H72 column: just the H72 row, not combined with H24.
+    expect(water.horizons.H72).toEqual({ quantity: 5, reservedQuantity: 0, available: 5 });
+    // WEEK column: nothing declared at WEEK itself — empty, not inherited from H72.
+    expect(water.horizons.WEEK).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
 
     const eq = body.categories.find((c: any) => c.categoryId === 'cat-eq');
     expect(eq.horizons.H24).toEqual({ quantity: 0, reservedQuantity: 0, available: 0 });
     expect(eq.horizons.WEEK).toEqual({ quantity: 3, reservedQuantity: 1, available: 2 });
 
+    // Tile totals sum across all four (now mutually exclusive) buckets.
     const waterTile = body.tiles.find((t: any) => t.group === 'WATER');
     expect(waterTile).toEqual({ group: 'WATER', quantity: 15, reservedQuantity: 4, available: 11, within24h: 10 });
     const eqTile = body.tiles.find((t: any) => t.group === 'EQUIPMENT');
@@ -104,7 +112,7 @@ describe('GET /api/resources/matrix', () => {
   it('passes organizationId and group filters through to the groupBy query', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1' });
     prisma.resourceCategory.findMany.mockResolvedValue([]);
-    prisma.resource.groupBy.mockResolvedValue([] as any);
+    groupByMock.mockResolvedValue([]);
 
     await GET(makeRequest('?organizationId=o1&group=WATER'));
 

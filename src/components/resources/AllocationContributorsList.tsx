@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, Truck, Undo2 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { isAllocationDonor, isAllocationRecipient } from '@/lib/resourceAuthz';
 import AllocationStatusBadge from './AllocationStatusBadge';
+import { apiSend } from '@/lib/apiClient';
 
 export interface ContributionRow {
   id: string;
@@ -72,17 +73,11 @@ export default function AllocationContributorsList({
     setUpdatingId(allocationId);
     setError(null);
 
-    const res = await fetch(`/api/allocations/${allocationId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-
-    const data = await res.json();
+    const result = await apiSend(`/api/allocations/${allocationId}`, 'PATCH', { status });
     setUpdatingId(null);
 
-    if (!res.ok) {
-      setError({ id: allocationId, message: data.error ?? 'Coś poszło nie tak.' });
+    if (!result.ok) {
+      setError({ id: allocationId, message: result.error });
       return;
     }
 

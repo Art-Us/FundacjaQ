@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
-import type { Prisma } from '@prisma/client';
+import { dynamicClientOnly } from '@/lib/dynamicClientOnly';
+import Link from 'next/link';
+import type { AlertWithRelations } from '@/lib/alertInclude';
 import {
   ALERT_STATUS_LABELS,
   ALERT_CATEGORY_LABELS,
@@ -43,10 +44,10 @@ import {
   Siren,
   SlidersHorizontal,
   PackageCheck,
+  MessageSquare,
 } from 'lucide-react';
 
-const AlertMap = dynamic(() => import('./AlertMap'), {
-  ssr: false,
+const AlertMap = dynamicClientOnly(() => import('./AlertMap'), {
   loading: () => (
     <div className="flex h-full items-center justify-center text-sm text-slate-500">Ładowanie mapy…</div>
   ),
@@ -55,36 +56,56 @@ const AlertMap = dynamic(() => import('./AlertMap'), {
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 
-const alertInclude = {
-  gmina: true,
-  author: { include: { organization: true } },
-  needs: {
-    include: {
-      allocations: {
-        include: {
-          donorOrg: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, name: true } },
-        },
-      },
-    },
-  },
-} satisfies Prisma.AlertInclude;
-type AlertWithGmina = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
+// The exact shape of each alert is defined once in lib/alertInclude.ts (shared
+// with the /map server page that fetches them) — see the comment there for why
+// author/gmina are a narrow `select` and must never become `include: true`.
+type AlertWithGmina = AlertWithRelations;
 
 type Timeframe = '24h' | '48h' | '72h' | 'tydzien' | 'miesiac' | 'rok' | 'wszystkie' | 'custom';
 type SortOption = 'date-desc' | 'date-asc' | 'severity-desc' | 'severity-asc' | 'name-asc' | 'name-desc';
 
 const TIME_MS = { hour: 3600_000, day: 86_400_000 };
 
-function matchesTimeframe(date: Date, timeframe: Timeframe, customStart: string, customEnd: string): boolean {
+const CLOSED_ALERT_STATUSES = new Set(['RESOLVED', 'CANCELLED']);
+
+interface TimeframeAlert {
+  createdAt: Date;
+  updatedAt: Date;
+  startsAt: Date | null;
+  expiresAt: Date | null;
+  status: string;
+}
+
+// An alert's own active period is [początek, koniec]: początek is startsAt if
+// the reporter declared one (e.g. a festival entered today but scheduled to
+// run next week), else createdAt (the common "reported now, active now"
+// case); koniec is expiresAt if the reporter set one, else updatedAt once the
+// alert is closed (RESOLVED/CANCELLED — that status change is what actually
+// ended its active period), else null ("still ongoing", no upper bound) for
+// an alert that's still ACTIVE/IN_PROGRESS with no declared end. Shared by
+// the time filter below and by the "Trwa od"/"Okres zdarzenia" labels on the
+// cards, so they never disagree about what an alert's period actually is.
+function getAlertPeriod(alert: TimeframeAlert): { start: Date; end: Date | null } {
+  const start = alert.startsAt ?? alert.createdAt;
+  const end = alert.expiresAt ?? (CLOSED_ALERT_STATUSES.has(alert.status) ? alert.updatedAt : null);
+  return { start, end };
+}
+
+// A "zakres czasu" filter answers "was this alert/event active at any point
+// during the selected window" — not just "when was it reported". Without
+// this, a days-old but still-active alert would vanish from "Ostatnie 24h"
+// even though it's active right now.
+function matchesTimeframe(alert: TimeframeAlert, timeframe: Timeframe, customStart: string, customEnd: string): boolean {
   if (timeframe === 'wszystkie') return true;
-  const now = Date.now();
-  const t = date.getTime();
+
+  const { start, end } = getAlertPeriod(alert);
+  const periodStart = start.getTime();
+  const periodEnd = end ? end.getTime() : Infinity;
 
   if (timeframe === 'custom') {
-    if (customStart && t < new Date(customStart).getTime()) return false;
-    if (customEnd && t > new Date(customEnd).getTime() + TIME_MS.day) return false;
-    return true;
+    const windowStart = customStart ? new Date(customStart).getTime() : -Infinity;
+    const windowEnd = customEnd ? new Date(customEnd).getTime() + TIME_MS.day : Infinity;
+    return periodStart <= windowEnd && periodEnd >= windowStart;
   }
 
   const spanDays: Record<Exclude<Timeframe, 'wszystkie' | 'custom'>, number> = {
@@ -95,7 +116,8 @@ function matchesTimeframe(date: Date, timeframe: Timeframe, customStart: string,
     miesiac: 30,
     rok: 365,
   };
-  return now - t <= spanDays[timeframe] * TIME_MS.day;
+  const windowStart = Date.now() - spanDays[timeframe] * TIME_MS.day;
+  return periodStart <= Date.now() && periodEnd >= windowStart;
 }
 
 function matchesSearch(alert: AlertWithGmina, query: string): boolean {
@@ -195,6 +217,32 @@ interface AlertsMapViewProps {
   myResources: { categoryId: string; quantity: number; reservedQuantity: number }[];
 }
 
+// "Forum" icon-link (Крок 58) — deliberately its own small component rather
+// than inline JSX in each card block below (active + archived render it
+// identically): links to the alert's detail page (alerty/[alertId], Крок
+// 55) with a badge showing the total journal entries + replies
+// (alert._count.messages, Крок 53/54). Always rendered, for every alert,
+// regardless of role or whether AlertNeedsBlock even renders anything —
+// unlike the rest of the resource module, the journal/forum is visible to
+// everyone who can see the alert at all (розділ 4,
+// docs/are-you-familiar-with-tidy-blum.md).
+function ForumLinkButton({ alertId, count }: { alertId: string; count: number }) {
+  return (
+    <Link
+      href={`/alerty/${alertId}`}
+      title="Dziennik operacyjny i forum komunikatu"
+      className="relative flex items-center justify-center h-9 w-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition shrink-0"
+    >
+      <MessageSquare className="h-4 w-4" />
+      {count > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] font-bold leading-none">
+          {count}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 export default function AlertsMapView({
   initialAlerts,
   gminy,
@@ -270,7 +318,7 @@ export default function AlertsMapView({
   const activeAlerts = useMemo(() => {
     const filtered = activeBase.filter(
       (a) =>
-        matchesTimeframe(a.createdAt, activeTimeframe, activeCustomStart, activeCustomEnd) &&
+        matchesTimeframe(a, activeTimeframe, activeCustomStart, activeCustomEnd) &&
         (activeCategoryFilter === 'all' || a.category === activeCategoryFilter) &&
         (activeOrgFilter === 'all' || a.author?.organization?.name === activeOrgFilter) &&
         matchesSearch(a, activeSearch)
@@ -281,7 +329,7 @@ export default function AlertsMapView({
   const archivedAlerts = useMemo(() => {
     const filtered = archivedBase.filter(
       (a) =>
-        matchesTimeframe(a.createdAt, archiveTimeframe, archiveCustomStart, archiveCustomEnd) &&
+        matchesTimeframe(a, archiveTimeframe, archiveCustomStart, archiveCustomEnd) &&
         (archiveCategoryFilter === 'all' || a.category === archiveCategoryFilter) &&
         (archiveOrgFilter === 'all' || a.author?.organization?.name === archiveOrgFilter) &&
         matchesSearch(a, archiveSearch)
@@ -297,7 +345,7 @@ export default function AlertsMapView({
     return kindAlerts.filter((a) => {
       if (mapStatus === 'active' && !(a.status === 'ACTIVE' || a.status === 'IN_PROGRESS')) return false;
       if (mapStatus === 'archived' && !(a.status === 'RESOLVED' || a.status === 'CANCELLED')) return false;
-      if (!matchesTimeframe(a.createdAt, mapTimeRange === 'all' ? 'wszystkie' : mapTimeRange, '', '')) return false;
+      if (!matchesTimeframe(a, mapTimeRange === 'all' ? 'wszystkie' : mapTimeRange, '', '')) return false;
       if (isEventView ? !mapCategories.has(a.category) : !mapSeverities.has(a.severity)) return false;
       if (!matchesSearch(a, mapSearch)) return false;
       return true;
@@ -642,7 +690,7 @@ export default function AlertsMapView({
           <AlertMap
             alerts={mapAlerts}
             center={center}
-            height="420px"
+            height="504px"
             focusedAlertId={focusedAlertId}
             mode={mapMode}
             onModeChange={setMapMode}
@@ -673,6 +721,7 @@ export default function AlertsMapView({
               initialCoords={null}
               kind={view}
               onDone={() => setShowForm(false)}
+              onCancel={() => setShowForm(false)}
             />
           )}
         </>
@@ -846,7 +895,17 @@ export default function AlertsMapView({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {activeAlerts.map((alert) => {
               const severityInfo = getSeverityBadgeInfo(alert.severity);
-              const liveDurationMs = Date.now() - alert.createdAt.getTime();
+              // Zdarzenia codzienne: "Dodano" zawsze liczy się od createdAt
+              // (kiedy wpis trafił do systemu — osobna informacja od tego,
+              // kiedy się faktycznie odbywa). Alerty: "Trwa od"/"Rozpocznie
+              // się za" liczy się od zadeklarowanego zakresu (startsAt), nie
+              // od createdAt — inaczej alert z przyszłym startsAt mylnie
+              // wyglądałby na już trwający.
+              const { start: effectiveStart } = getAlertPeriod(alert);
+              const startsInFuture = !isEventView && effectiveStart.getTime() > Date.now();
+              const liveDurationMs = isEventView
+                ? Date.now() - alert.createdAt.getTime()
+                : Math.abs(Date.now() - effectiveStart.getTime());
 
               const eventColor = CATEGORY_MARKER_COLORS[alert.category] ?? CATEGORY_MARKER_COLORS.OTHER_EVENT;
               const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
@@ -940,8 +999,11 @@ export default function AlertsMapView({
                       <div className="flex items-center gap-1.5 text-indigo-700 font-mono font-semibold">
                         <Clock className="h-3.5 w-3.5 text-indigo-600" />
                         <span>
-                          {isEventView ? 'Dodano' : 'Trwa od'}: {formatDuration(liveDurationMs)}
-                          {isEventView ? ' temu' : ''}
+                          {isEventView
+                            ? `Dodano: ${formatDuration(liveDurationMs)} temu`
+                            : startsInFuture
+                            ? `Rozpocznie się za: ${formatDuration(liveDurationMs)}`
+                            : `Trwa od: ${formatDuration(liveDurationMs)}`}
                         </span>
                       </div>
                     </div>
@@ -982,6 +1044,8 @@ export default function AlertsMapView({
                       <MapPin className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Na mapie</span>
                     </button>
+
+                    <ForumLinkButton alertId={alert.id} count={alert._count.messages} />
 
                     {canManageAlert(alert) && (
                       <button
@@ -1149,7 +1213,9 @@ export default function AlertsMapView({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {archivedAlerts.map((alert) => {
               const severityInfo = getSeverityBadgeInfo(alert.severity);
-              const durationMs = alert.updatedAt.getTime() - alert.createdAt.getTime();
+              const archivedPeriod = getAlertPeriod(alert);
+              const archivedPeriodEnd = archivedPeriod.end ?? alert.updatedAt;
+              const durationMs = archivedPeriodEnd.getTime() - archivedPeriod.start.getTime();
               const isResolved = alert.status === 'RESOLVED';
               const matchingNeedsCount = countMatchingNeeds(alert.needs, ownedCategoryIds);
               const isOwnerOrg = isAlertOwnerOrg(alert, { organizationId: currentUserOrganizationId });
@@ -1224,7 +1290,7 @@ export default function AlertsMapView({
                       <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-0.5">
                         <span className="text-[10px] text-slate-500 font-sans block">Okres zdarzenia:</span>
                         <span className="text-[11px] font-bold text-slate-600">
-                          {alert.createdAt.toLocaleDateString('pl-PL')} ➔ {alert.updatedAt.toLocaleDateString('pl-PL')}
+                          {archivedPeriod.start.toLocaleDateString('pl-PL')} ➔ {archivedPeriodEnd.toLocaleDateString('pl-PL')}
                         </span>
                       </div>
                     </div>
@@ -1265,6 +1331,8 @@ export default function AlertsMapView({
                       <MapPin className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Na mapie</span>
                     </button>
+
+                    <ForumLinkButton alertId={alert.id} count={alert._count.messages} />
 
                     {canManageAlert(alert) && (
                       <button

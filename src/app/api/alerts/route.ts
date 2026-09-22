@@ -24,7 +24,11 @@ const createAlertSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   gminaId: z.string().min(1, 'Gmina jest wymagana.'),
+  startsAt: z.coerce.date().optional(),
   expiresAt: z.coerce.date().optional(),
+}).refine((data) => !data.startsAt || !data.expiresAt || data.startsAt <= data.expiresAt, {
+  message: 'Data rozpoczęcia nie może być późniejsza niż data zakończenia.',
+  path: ['startsAt'],
 });
 
 export async function POST(req: NextRequest) {
@@ -65,9 +69,15 @@ export async function POST(req: NextRequest) {
   // schema.prisma); a user with no organization (e.g. a site-wide ADMIN)
   // simply produces an ownerless alert, same as this field's backfill
   // migration leaves pre-existing alerts whose author had no organization.
-  const alert = await prisma.alert.create({
-    data: { ...data, gminaId, authorId: user.id, organizationId: user.organizationId ?? null },
-  });
+  let alert;
+  try {
+    alert = await prisma.alert.create({
+      data: { ...data, gminaId, authorId: user.id, organizationId: user.organizationId ?? null },
+    });
+  } catch (err) {
+    console.error('[alerts] create failed:', err);
+    return NextResponse.json({ error: 'Nie udało się utworzyć alertu.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Alert utworzony.', alert });
 }

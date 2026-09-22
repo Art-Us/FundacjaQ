@@ -11,6 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { fakeCheckViolation } from '@/lib/__mocks__/prismaErrors';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -246,5 +247,28 @@ describe('POST /api/allocations/[id]/return-events', () => {
 
     expect(res.status).toBe(201);
     expect(prisma.resource.update).not.toHaveBeenCalled();
+  });
+
+  // Two returns for the same allocation recorded at once: both pass the
+  // snapshot projectedTotal check, the loser hits the DB CHECK constraint
+  // allocation_returns_within_quantity when its update lands.
+  it('maps a DB CHECK constraint violation inside the transaction to 409, not 500', async () => {
+    const user = { id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' };
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue(user as any);
+    prisma.resourceAllocation.findUnique.mockResolvedValue(baseAllocation as any);
+    prisma.allocationReturnEvent.findMany
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([{ quantityReturned: 5, quantityNotReturnable: 0 }, { quantityReturned: 3, quantityNotReturnable: 0 }] as any);
+    prisma.allocationReturnEvent.create.mockResolvedValue({ id: 'evt2', quantityReturned: 3, quantityNotReturnable: 0 } as any);
+    prisma.resourceAllocation.update.mockRejectedValue(
+      fakeCheckViolation('allocation_returns_within_quantity', 'ResourceAllocation')
+    );
+
+    const res = await POST(makeRequest({ quantityReturned: 3, quantityNotReturnable: 0, returnedAt: '2026-09-17T10:00:00.000Z' }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('przekroczyłaby ilość tego przydziału');
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

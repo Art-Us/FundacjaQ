@@ -20,6 +20,7 @@ import { getResourceGroupInfo, getResourceGroupActiveClass, getHorizonInfo, HORI
 import { MATRIX_HORIZONS, type MatrixTile, type MatrixCategoryRow, type MatrixGroup, type MatrixHorizon } from '@/lib/resourceMatrix';
 import ResourceMatrixCellDrawer from './ResourceMatrixCellDrawer';
 import ResourceFormModal from './ResourceFormModal';
+import { apiFetch } from '@/lib/apiClient';
 
 const GROUP_ICON_COMPONENTS: Record<MatrixGroup, typeof Users> = {
   PEOPLE: Users,
@@ -38,6 +39,8 @@ interface ResourceMatrixViewProps {
   initialTiles: MatrixTile[];
   initialCategories: MatrixCategoryRow[];
   organizations: { id: string; name: string }[];
+  currentUserOrganizationId: string | null;
+  isAdmin: boolean;
 }
 
 interface SelectedCell {
@@ -53,7 +56,13 @@ interface SelectedCell {
 // групою решта груп зникли б зі стану аж до наступного оновлення без
 // фільтра; чіпи категорій продовжують фільтрувати вже завантажені дані на
 // клієнті миттєво, незалежно від "Odśwież".
-export default function ResourceMatrixView({ initialTiles, initialCategories, organizations }: ResourceMatrixViewProps) {
+export default function ResourceMatrixView({
+  initialTiles,
+  initialCategories,
+  organizations,
+  currentUserOrganizationId,
+  isAdmin,
+}: ResourceMatrixViewProps) {
   const [tiles, setTiles] = useState(initialTiles);
   const [categories, setCategories] = useState(initialCategories);
   const [selectedGroup, setSelectedGroup] = useState<MatrixGroup | null>(null);
@@ -71,19 +80,30 @@ export default function ResourceMatrixView({ initialTiles, initialCategories, or
   async function refreshMatrix(organizationId: string) {
     setRefreshing(true);
     setRefreshError(null);
-    try {
-      const params = new URLSearchParams();
-      if (organizationId) params.set('organizationId', organizationId);
-      const res = await fetch(`/api/resources/matrix?${params.toString()}`);
-      if (!res.ok) throw new Error('request failed');
-      const data = await res.json();
-      setTiles(data.tiles);
-      setCategories(data.categories);
-    } catch {
-      setRefreshError('Nie udało się odświeżyć danych.');
-    } finally {
-      setRefreshing(false);
+
+    const params = new URLSearchParams();
+    if (organizationId) params.set('organizationId', organizationId);
+    const result = await apiFetch<{ tiles: MatrixTile[]; categories: MatrixCategoryRow[] }>(
+      `/api/resources/matrix?${params.toString()}`
+    );
+    setRefreshing(false);
+
+    if (!result.ok) {
+      setRefreshError(result.error);
+      return;
     }
+
+    setTiles(result.data.tiles);
+    setCategories(result.data.categories);
+    // ResourceMatrixCellDrawer's `category` prop is a snapshot taken when the
+    // cell was clicked — without this, its "Łączna dostępna ilość" header
+    // would keep showing pre-edit numbers after a save inside the drawer
+    // (ResourceEditModal) triggers this same refresh.
+    setSelectedCell((prev) => {
+      if (!prev) return prev;
+      const fresh = result.data.categories.find((c) => c.categoryId === prev.category.categoryId);
+      return fresh ? { category: fresh, horizon: prev.horizon } : prev;
+    });
   }
 
   function handleRefresh() {
@@ -299,6 +319,10 @@ export default function ResourceMatrixView({ initialTiles, initialCategories, or
           category={selectedCell.category}
           horizon={selectedCell.horizon}
           organizationId={selectedOrganizationId}
+          categories={categories}
+          currentUserOrganizationId={currentUserOrganizationId}
+          isAdmin={isAdmin}
+          onChanged={() => refreshMatrix(selectedOrganizationId)}
           onClose={() => setSelectedCell(null)}
         />
       )}

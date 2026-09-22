@@ -11,6 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { fakeCheckViolation } from '@/lib/__mocks__/prismaErrors';
 import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -45,6 +46,23 @@ beforeEach(() => {
 });
 
 describe('PATCH /api/needs/[id]', () => {
+  // Snapshot said quantityFulfilled 0; a donor allocated 4 in the meantime;
+  // the owner shrinks quantityNeeded to 2 — the DB CHECK constraint
+  // need_fulfilled_within_needed has the final say, surfaced as the same 409
+  // the in-route guard gives.
+  it('maps a DB CHECK constraint violation on the shrink to 409', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue(baseNeed as any);
+    prisma.alertNeed.update.mockRejectedValue(fakeCheckViolation('need_fulfilled_within_needed', 'AlertNeed'));
+
+    const res = await PATCH(makeRequest('PATCH', { quantityNeeded: 2 }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('poniżej już przydzielonej');
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it('returns 403 with no DB call when unauthenticated', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
 
@@ -112,6 +130,74 @@ describe('PATCH /api/needs/[id]', () => {
 
     expect(res.status).toBe(400);
     expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+  });
+
+  // The bug this guards: a need whose donors already delivered against
+  // category "cat1" gets re-pointed at "cat2", leaving quantityFulfilled and
+  // the whole contributors list describing a resource nobody donated.
+  it('rejects changing the category once anything has been allocated', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue({ ...baseNeed, quantityFulfilled: 2 } as any);
+    prisma.resourceCategory.findUnique.mockResolvedValue({ id: 'cat2' } as any);
+    prisma.resourceAllocation.count.mockResolvedValue(1);
+
+    const res = await PATCH(makeRequest('PATCH', { categoryId: 'cat2' }), ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toContain('kategorii');
+    expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+    // RETURNED allocations still count toward quantityFulfilled
+    // (recalculateNeedFulfillment), so only CANCELLED ones are excluded here —
+    // unlike DELETE, which only cares about still-active promises.
+    expect(prisma.resourceAllocation.count).toHaveBeenCalledWith({
+      where: { needId: 'need1', status: { not: 'CANCELLED' } },
+    });
+  });
+
+  it('rejects changing the unit once anything has been allocated', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue({ ...baseNeed, quantityFulfilled: 2 } as any);
+    prisma.resourceAllocation.count.mockResolvedValue(1);
+
+    const res = await PATCH(makeRequest('PATCH', { unit: 'litry' }), ctx);
+
+    expect(res.status).toBe(409);
+    expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+  });
+
+  // NeedFormModal always PATCHes the whole row (categoryId, title,
+  // quantityNeeded, unit, urgency), so an unchanged categoryId arriving
+  // alongside a real edit must not trip the guard above.
+  it('allows editing other fields when categoryId and unit are resent unchanged', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue({ ...baseNeed, quantityFulfilled: 2 } as any);
+    prisma.resourceCategory.findUnique.mockResolvedValue({ id: 'cat1' } as any);
+    prisma.alertNeed.update.mockResolvedValue({ ...baseNeed, title: 'Koce zimowe' } as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const res = await PATCH(
+      makeRequest('PATCH', { categoryId: 'cat1', title: 'Koce zimowe', quantityNeeded: 5, unit: 'szt', urgency: 'PILNE' }),
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
+    expect(prisma.alertNeed.update).toHaveBeenCalled();
+  });
+
+  it('allows changing the category while nothing has been allocated yet', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+    prisma.alertNeed.findUnique.mockResolvedValue(baseNeed as any);
+    prisma.resourceCategory.findUnique.mockResolvedValue({ id: 'cat2' } as any);
+    prisma.resourceAllocation.count.mockResolvedValue(0);
+    prisma.alertNeed.update.mockResolvedValue({ ...baseNeed, categoryId: 'cat2' } as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const res = await PATCH(makeRequest('PATCH', { categoryId: 'cat2' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.alertNeed.update).toHaveBeenCalled();
   });
 
   it('allows the owner org to manually close a need and records an audit entry', async () => {

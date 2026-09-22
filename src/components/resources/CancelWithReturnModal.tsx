@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X, AlertTriangle, Ban } from 'lucide-react';
 import AllocationStatusBadge from './AllocationStatusBadge';
+import { apiFetch, apiSend } from '@/lib/apiClient';
 
 interface CancelableAllocation {
   id: string;
@@ -70,17 +71,19 @@ export default function CancelWithReturnModal({ alertId, alertTitle, onClose, on
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/alerts/${alertId}/allocations`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('request failed'))))
-      .then((data) => {
-        const all: CancelableAllocation[] = data.allocations ?? [];
-        const nonTerminal = all.filter((a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED');
-        setAllocations(nonTerminal);
-        setDrafts(
-          Object.fromEntries(nonTerminal.filter((a) => a.status !== 'DELIVERY_AGREED').map((a) => [a.id, emptyDraft()]))
-        );
-      })
-      .catch(() => setLoadError('Nie udało się pobrać przydziałów tego alertu.'));
+    apiFetch<{ allocations?: CancelableAllocation[] }>(`/api/alerts/${alertId}/allocations`).then((result) => {
+      if (!result.ok) {
+        setLoadError(result.error);
+        return;
+      }
+      const nonTerminal = (result.data.allocations ?? []).filter(
+        (a) => a.status !== 'RETURNED' && a.status !== 'CANCELLED'
+      );
+      setAllocations(nonTerminal);
+      setDrafts(
+        Object.fromEntries(nonTerminal.filter((a) => a.status !== 'DELIVERY_AGREED').map((a) => [a.id, emptyDraft()]))
+      );
+    });
   }, [alertId]);
 
   // Never reached the recipient — the API withdraws these on its own, no
@@ -122,30 +125,24 @@ export default function CancelWithReturnModal({ alertId, alertTitle, onClose, on
     setSubmitting(true);
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}/cancel-with-return`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        returns: delivered.map((a) => {
-          const draft = drafts[a.id];
-          const notReturnableNum = Number(draft.quantityNotReturnable) || 0;
-          return {
-            allocationId: a.id,
-            quantityReturned: Number(draft.quantityReturned) || 0,
-            quantityNotReturnable: notReturnableNum,
-            notReturnableReason: notReturnableNum > 0 ? draft.notReturnableReason.trim() || undefined : undefined,
-            message: draft.message.trim() || undefined,
-            returnedAt: new Date(draft.returnedAt).toISOString(),
-          };
-        }),
+    const result = await apiSend(`/api/alerts/${alertId}/cancel-with-return`, 'POST', {
+      returns: delivered.map((a) => {
+        const draft = drafts[a.id];
+        const notReturnableNum = Number(draft.quantityNotReturnable) || 0;
+        return {
+          allocationId: a.id,
+          quantityReturned: Number(draft.quantityReturned) || 0,
+          quantityNotReturnable: notReturnableNum,
+          notReturnableReason: notReturnableNum > 0 ? draft.notReturnableReason.trim() || undefined : undefined,
+          message: draft.message.trim() || undefined,
+          returnedAt: new Date(draft.returnedAt).toISOString(),
+        };
       }),
     });
-
-    const data = await res.json();
     setSubmitting(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
