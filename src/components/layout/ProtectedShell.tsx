@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { AdminEventsBridge } from '@/components/AdminEventsBridge';
+import { AppEventsBridge } from '@/components/AppEventsBridge';
 import { NewUserNotifier } from '@/components/NewUserNotifier';
 import { ApiUnauthorizedRedirect } from '@/components/ApiUnauthorizedRedirect';
 
@@ -40,6 +41,9 @@ export function ProtectedShell({
     <div className="min-h-screen bg-[#f4f7fb] flex">
       <ApiUnauthorizedRedirect />
       {canSeeAdminEvents && <AdminEventsBridge />}
+      {/* Every signed-in role (VOLUNTEER included) can be on /map, so this
+          is unconditional, unlike AdminEventsBridge above. */}
+      <AppEventsBridge />
       {role === 'ADMIN' && <NewUserNotifier />}
       <button
         type="button"

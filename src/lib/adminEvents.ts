@@ -6,9 +6,18 @@ import { redis } from './redis';
 // manual reload. One Redis channel carries every scope — the SSE route and
 // each page filter locally — rather than one channel per scope, since the
 // volume here (admin actions, not chat) never justifies the extra channels.
+//
+// 'alerts'/'resources' ride the same channel but are consumed by a SEPARATE
+// route (api/events/route.ts, gated by requireUser — any signed-in user,
+// not just ADMIN/COORDINATOR) so a VOLUNTEER on /map can get live alert
+// updates without ever touching the admin-only /api/admin/events route. An
+// ADMIN/COORDINATOR tab still gets these same events a second time over its
+// existing admin connection (subscribeToAdminEvents forwards every scope to
+// every listener) — harmless, since AppEventsRefresh's router.refresh() is
+// idempotent either way.
 const CHANNEL = 'admin-events';
 
-export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organizations';
+export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organizations' | 'alerts' | 'resources';
 
 export interface AdminEvent {
   scope: AdminEventScope;
@@ -64,11 +73,30 @@ function getSubscriber(): Redis {
     subscriberInstance.on('message', (_channel, message) => {
       let event: AdminEvent;
       try {
-        event = JSON.parse(message);
+        const parsed: unknown = JSON.parse(message);
+        // Guards the `.scope` access every listener does next — a stray
+        // PUBLISH on this channel from outside this module (a debugging
+        // `redis-cli PUBLISH admin-events null`, a future bug, a shared Redis
+        // instance) must not reach listener code with a non-object payload.
+        if (typeof parsed !== 'object' || parsed === null || typeof (parsed as AdminEvent).scope !== 'string') {
+          return;
+        }
+        event = parsed as AdminEvent;
       } catch {
         return;
       }
-      listeners.forEach((listener) => listener(event));
+      // Each listener runs in its own try/catch: this fires from inside
+      // ioredis's own 'message' emission, with no Next.js request boundary
+      // around it — one listener throwing here would otherwise be an
+      // uncaught exception that crashes the whole process (every open
+      // connection, not just the one at fault), not just fail one request.
+      listeners.forEach((listener) => {
+        try {
+          listener(event);
+        } catch (err) {
+          console.error('[adminEvents] listener threw (non-fatal):', err);
+        }
+      });
     });
     if (process.env.NODE_ENV !== 'production') globalForAdminEvents.adminEventsSubscriber = subscriberInstance;
   }

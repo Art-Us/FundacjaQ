@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { requireUser, canPostAlertJournalEntry, canViewAlertJournal } from '@/lib/authz';
 import { ALERT_MESSAGE_TYPES } from '@/lib/alertMessageLabels';
 import { getCachedAlertAccess, setCachedAlertAccess, type CachedAlertAccess } from '@/lib/alertAccessCache';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -113,6 +114,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     return NextResponse.json({ error: 'Nie udało się dodać wpisu.' }, { status: 500 });
   }
+
+  await publishAdminEvent({ scope: 'alerts' });
 
   return NextResponse.json({ entry }, { status: 201 });
 }

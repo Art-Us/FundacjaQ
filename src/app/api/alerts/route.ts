@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -78,6 +79,8 @@ export async function POST(req: NextRequest) {
     console.error('[alerts] create failed:', err);
     return NextResponse.json({ error: 'Nie udało się utworzyć alertu.' }, { status: 500 });
   }
+
+  await publishAdminEvent({ scope: 'alerts' });
 
   return NextResponse.json({ message: 'Alert utworzony.', alert });
 }

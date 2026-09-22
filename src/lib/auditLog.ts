@@ -6,18 +6,34 @@ import { parseClientIp } from '@/lib/clientIp';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { publishAdminEvent, type AdminEventScope } from '@/lib/adminEvents';
 
-// Which entity types have a live-updating admin page today — RESOURCE/
-// ALERT_NEED/RESOURCE_ALLOCATION/ORGANIZATION audit entries still get
-// written as usual, just without a matching page to push them to yet
-// (see the SSE plan for alerts/resources/chat). Extending coverage later
-// is exactly one new entry here — recordAudit and revertAuditLog both key
-// off this single map, nothing else needs to change.
-const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScope>> = {
+// Which entity types have a live-updating page today. RESOURCE_ALLOCATION
+// maps to BOTH scopes: an allocation change moves a need's fulfilment (the
+// /map alert detail page) AND a resource's reserved/available quantity (the
+// /zasoby matrix) at once.
+const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScope | AdminEventScope[]>> = {
   USER: 'users',
   GMINA: 'gminas',
   INVITE_TOKEN: 'invites',
   ORGANIZATION: 'organizations',
+  RESOURCE: 'resources',
+  ALERT_NEED: 'alerts',
+  RESOURCE_ALLOCATION: ['alerts', 'resources'],
 };
+
+/**
+ * Publishes to one or several AdminEventScopes — RESOURCE_ALLOCATION's entry
+ * above is the one case with more than one. Concurrent, not sequential:
+ * publishAdminEvent never rejects (it catches its own errors), so there's
+ * nothing an await-in-series here would protect against, only latency it
+ * would add — recordAudit's cancel-with-return caller (Крок 28) already runs
+ * this once per allocation being cancelled, so a sequential two-Redis-round-
+ * trips-per-scope cost would otherwise stack up across every allocation in
+ * that one request.
+ */
+async function publishScopeEvents(scope: AdminEventScope | AdminEventScope[], action?: AuditAction): Promise<void> {
+  const scopes = Array.isArray(scope) ? scope : [scope];
+  await Promise.all(scopes.map((s) => publishAdminEvent({ scope: s, action })));
+}
 
 /** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
 export function requestMeta(req: Request): RequestMeta {
@@ -89,8 +105,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 
   const entityScope = ENTITY_TYPE_TO_ADMIN_SCOPE[input.entityType];
   if (entityScope) {
-    await publishAdminEvent({ scope: 'logs', action: input.action });
-    await publishAdminEvent({ scope: entityScope, action: input.action });
+    await Promise.all([publishAdminEvent({ scope: 'logs', action: input.action }), publishScopeEvents(entityScope, input.action)]);
   }
 }
 
@@ -496,7 +511,7 @@ export async function revertAuditLog(
     await publishAdminEvent({ scope: 'logs' });
     for (const entityType of Array.from(revertedEntityTypes)) {
       const scope = ENTITY_TYPE_TO_ADMIN_SCOPE[entityType];
-      if (scope) await publishAdminEvent({ scope });
+      if (scope) await publishScopeEvents(scope);
     }
 
     return { ok: true, revertedLogIds };

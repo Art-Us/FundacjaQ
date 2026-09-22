@@ -5,6 +5,7 @@ import { scopedGminaWhere, scopedGminaWhereAnyAdmin } from '@/lib/gmina';
 import { computeResourceMatrix, emptyMatrixTiles } from '@/lib/resourceMatrix';
 import { fetchAllocationInbox } from '@/lib/allocationInbox';
 import { RefreshOnMount } from '@/components/RefreshOnMount';
+import { AppEventsRefresh } from '@/components/AppEventsRefresh';
 import ResourceMatrixView from './ResourceMatrixView';
 import AllocationInboxPanel from './AllocationInboxPanel';
 
@@ -41,6 +42,7 @@ export default async function ZasobyPage() {
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
       <RefreshOnMount />
+      <AppEventsRefresh scope="resources" />
 
       <AllocationInboxPanel recipient={inbox.recipient} donor={inbox.donor} />
 

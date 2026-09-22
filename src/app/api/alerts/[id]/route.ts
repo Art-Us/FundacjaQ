@@ -6,6 +6,7 @@ import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/li
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { invalidateAlertAccessCache } from '@/lib/alertAccessCache';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -143,6 +144,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     await invalidateAlertAccessCache(alert.id);
   }
 
+  await publishAdminEvent({ scope: 'alerts' });
+
   return NextResponse.json({ message: 'Alert zaktualizowany.' });
 }
 
@@ -192,6 +195,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   }
 
   await invalidateAlertAccessCache(alert.id);
+  // Also touches 'resources': the transaction above released every active
+  // allocation's reserved quantity back onto its donor's resource. Run
+  // concurrently — publishAdminEvent never rejects, so there's nothing a
+  // sequential await here would protect against, only latency it'd add.
+  await Promise.all([publishAdminEvent({ scope: 'alerts' }), publishAdminEvent({ scope: 'resources' })]);
 
   return NextResponse.json({ message: 'Alert usunięty.' });
 }

@@ -8,6 +8,7 @@ import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, is
 import { availableCategoryIds } from '@/lib/resourceMatching';
 import { ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS, SEVERITY_LABELS, getSeverityBadgeInfo } from '@/lib/alertLabels';
 import { formatDate } from '@/lib/utils';
+import { AppEventsRefresh } from '@/components/AppEventsRefresh';
 import AlertNeedsBlock from '../../map/AlertNeedsBlock';
 import AlertDetailMap from './AlertDetailMap';
 import AlertOperationalJournal from './AlertOperationalJournal';
@@ -74,6 +75,7 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-6">
+      <AppEventsRefresh scope="alerts" />
       <Link
         href="/map"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"

@@ -180,7 +180,7 @@ az webapp config appsettings set \
   --resource-group "$RESOURCE_GROUP" \
   --name "$APP_NAME" \
   --settings \
-    DATABASE_URL="postgresql://$DB_ADMIN_USER:$DB_ADMIN_PASSWORD@$DB_SERVER_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require" \
+    DATABASE_URL="postgresql://$DB_ADMIN_USER:$DB_ADMIN_PASSWORD@$DB_SERVER_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require&connection_limit=10" \
     REDIS_URL="rediss://:$REDIS_KEY@$REDIS_HOST:$REDIS_PORT" \
     NEXTAUTH_URL="https://$APP_NAME.azurewebsites.net" \
     NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \

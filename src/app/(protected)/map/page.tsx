@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
 import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
+import { AppEventsRefresh } from '@/components/AppEventsRefresh';
 import AlertsMapView from './AlertsMapView';
 
 export default async function MapPage() {
@@ -54,15 +55,18 @@ export default async function MapPage() {
   ]);
 
   return (
-    <AlertsMapView
-      initialAlerts={alerts}
-      gminy={gminy}
-      canManageAlerts={canManageAlerts}
-      currentUserGminaId={gminaId}
-      currentUserRole={role}
-      currentUserId={session.user.id}
-      currentUserOrganizationId={session.user.organizationId}
-      myResources={myResources}
-    />
+    <>
+      <AppEventsRefresh scope="alerts" />
+      <AlertsMapView
+        initialAlerts={alerts}
+        gminy={gminy}
+        canManageAlerts={canManageAlerts}
+        currentUserGminaId={gminaId}
+        currentUserRole={role}
+        currentUserId={session.user.id}
+        currentUserOrganizationId={session.user.organizationId}
+        myResources={myResources}
+      />
+    </>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser, canViewAlertJournal, canReplyToAlertForum } from '@/lib/authz';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -118,6 +119,8 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: 'Nie udało się wysłać wiadomości.' }, { status: 500 });
   }
+
+  await publishAdminEvent({ scope: 'alerts' });
 
   return NextResponse.json({ reply }, { status: 201 });
 }

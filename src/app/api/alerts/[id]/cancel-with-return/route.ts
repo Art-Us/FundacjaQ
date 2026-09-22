@@ -12,6 +12,7 @@ import {
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
 import { invalidateAlertAccessCache } from '@/lib/alertAccessCache';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -227,6 +228,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       meta,
     });
   }
+  // recordAudit above already publishes 'alerts'/'resources' per allocation
+  // entry, but an alert with no allocations in flight produces none — this
+  // covers that case so the alert's own CANCELLED status still propagates.
+  await publishAdminEvent({ scope: 'alerts' });
 
   return NextResponse.json({ message: 'Alert anulowany.', alert: result.updatedAlert });
 }
