@@ -20,13 +20,17 @@ const ROLE_BADGE: Record<string, string> = {
 interface UserCardProps {
   user: UserListItem;
   isAdmin: boolean;
+  /** Only a global admin (gminaId === null) may grant the ADMIN role — see PATCH /api/admin/users/[id]. */
+  canGrantAdmin: boolean;
+  /** Forwarded to the edit form's gmina picker — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   gminas: UserGmina[];
   organizations: OrganizationOption[];
   /** Called after any mutation (edit/activate/deactivate/delete) that should refresh the parent's currently-loaded page. */
   onChanged: () => void;
 }
 
-export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: UserCardProps) {
+export function UserCard({ user, isAdmin, canGrantAdmin, canCreateGmina, gminas, organizations, onChanged }: UserCardProps) {
   const [showEdit, setShowEdit] = useState(false);
   const canDelete = isAdmin && !user.isSelf;
   const isLocked = !!user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now();
@@ -127,6 +131,8 @@ export function UserCard({ user, isAdmin, gminas, organizations, onChanged }: Us
           user={user}
           gminas={gminas}
           organizations={organizations}
+          canGrantAdmin={canGrantAdmin}
+          canCreateGmina={canCreateGmina}
           onClose={() => setShowEdit(false)}
           onSaved={onChanged}
         />

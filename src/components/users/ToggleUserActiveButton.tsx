@@ -15,6 +15,7 @@ export function ToggleUserActiveButton({ userId, isActive, onSuccess }: ToggleUs
   const [error, setError] = useState<string | null>(null);
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [reason, setReason] = useState('');
+  const [showActivateConfirm, setShowActivateConfirm] = useState(false);
 
   async function callToggle(action: 'activate' | 'deactivate', body?: unknown) {
     setLoading(true);
@@ -37,6 +38,7 @@ export function ToggleUserActiveButton({ userId, isActive, onSuccess }: ToggleUs
 
       setShowReasonInput(false);
       setReason('');
+      setShowActivateConfirm(false);
       onSuccess?.();
     } catch (err) {
       console.error('[ToggleUserActiveButton] request failed:', err);
@@ -88,6 +90,36 @@ export function ToggleUserActiveButton({ userId, isActive, onSuccess }: ToggleUs
     );
   }
 
+  if (showActivateConfirm) {
+    return (
+      <div className="w-full basis-full flex flex-col gap-1.5">
+        <p className="text-xs text-slate-500">Na pewno aktywować to konto?</p>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="flex-1"
+            disabled={loading}
+            onClick={() => callToggle('activate')}
+          >
+            {loading ? 'Zapisywanie…' : 'Potwierdź aktywację'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={loading}
+            onClick={() => setShowActivateConfirm(false)}
+          >
+            Anuluj
+          </Button>
+        </div>
+        {error && <p className="text-xs text-rose-500">{error}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-start gap-1">
       <Button
@@ -95,7 +127,7 @@ export function ToggleUserActiveButton({ userId, isActive, onSuccess }: ToggleUs
         variant="secondary"
         size="sm"
         disabled={loading}
-        onClick={() => (isActive ? setShowReasonInput(true) : callToggle('activate'))}
+        onClick={() => (isActive ? setShowReasonInput(true) : setShowActivateConfirm(true))}
       >
         {loading ? 'Zapisywanie…' : isActive ? 'Dezaktywuj' : 'Aktywuj'}
       </Button>

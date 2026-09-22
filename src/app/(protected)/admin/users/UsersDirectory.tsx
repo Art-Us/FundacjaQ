@@ -94,9 +94,13 @@ interface UsersDirectoryProps {
   gminas: UserGmina[];
   organizations: OrganizationOption[];
   isAdmin: boolean;
+  /** Only a global admin (gminaId === null) may grant the ADMIN role — see POST/PATCH /api/admin/users. */
+  canGrantAdmin: boolean;
+  /** Forwarded to the gmina picker in the create/edit forms — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
 }
 
-export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirectoryProps) {
+export function UsersDirectory({ gminas, organizations, isAdmin, canGrantAdmin, canCreateGmina }: UsersDirectoryProps) {
   const [query, setQuery] = useState('');
   // Debounced, and only what's actually sent to the server — search now runs
   // as a DB query (name/email/phone/organization/gmina/role-label/status),
@@ -440,6 +444,8 @@ export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirector
               key={user.id}
               user={user}
               isAdmin={isAdmin}
+              canGrantAdmin={canGrantAdmin}
+              canCreateGmina={canCreateGmina}
               gminas={gminas}
               organizations={organizations}
               onChanged={refetch}
@@ -455,6 +461,8 @@ export function UsersDirectory({ gminas, organizations, isAdmin }: UsersDirector
           mode="create"
           gminas={gminas}
           organizations={organizations}
+          canGrantAdmin={canGrantAdmin}
+          canCreateGmina={canCreateGmina}
           onClose={() => setShowCreate(false)}
           onSaved={refetch}
         />

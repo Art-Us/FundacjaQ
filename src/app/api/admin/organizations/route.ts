@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { createOrganization } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotOrganization } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
@@ -112,6 +112,13 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, gminaId, ...fields } = parsed.data;
+
+  // A gmina-scoped admin can only ever create an organization within their
+  // own gmina — same "never leave your own scope" contract as invites/users.
+  if (isGminaScopedAdmin(admin) && gminaId !== admin.gminaId) {
+    return NextResponse.json({ error: 'Możesz tworzyć organizacje tylko w obrębie własnej gminy.' }, { status: 403 });
+  }
+
   const result = await createOrganization({
     name,
     gminaId,
@@ -161,7 +168,11 @@ export async function GET(req: NextRequest) {
   };
 
   const where: Prisma.OrganizationWhereInput = {
-    ...(gminaId ? { gminaId } : {}),
+    // A gmina-scoped admin only ever sees their own gmina's organizations —
+    // their own gminaId always wins over (or supplies, when absent) the
+    // query param, same as a global admin's gminaId query param is only
+    // ever honored for a global admin elsewhere (GET /api/admin/users).
+    ...(isGminaScopedAdmin(admin) ? { gminaId: admin.gminaId! } : gminaId ? { gminaId } : {}),
     ...(Object.keys(gminaWhere).length > 0 ? { gmina: gminaWhere } : {}),
     ...(q ? { OR: buildSearchOr(q) } : {}),
   };

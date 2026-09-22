@@ -36,9 +36,12 @@ describe('requiresGmina', () => {
 // that pattern and must fail closed (return null, meaning "show nothing")
 // in exactly that case.
 describe('scopedGminaWhere', () => {
-  it('returns an unfiltered {} for ADMIN regardless of gminaId', () => {
+  it('returns an unfiltered {} only for a global ADMIN (gminaId === null)', () => {
     expect(scopedGminaWhere({ role: 'ADMIN', gminaId: null })).toEqual({});
-    expect(scopedGminaWhere({ role: 'ADMIN', gminaId: 'gmina-1' })).toEqual({});
+  });
+
+  it('scopes a gmina-scoped ADMIN to their own gmina, same as COORDINATOR/VOLUNTEER', () => {
+    expect(scopedGminaWhere({ role: 'ADMIN', gminaId: 'gmina-1' })).toEqual({ gminaId: 'gmina-1' });
   });
 
   it('scopes COORDINATOR/VOLUNTEER to their own gmina when they have one', () => {

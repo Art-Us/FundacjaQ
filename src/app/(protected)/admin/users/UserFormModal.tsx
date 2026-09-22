@@ -25,16 +25,38 @@ interface UserFormModalProps {
   user?: UserListItem;
   gminas: UserGmina[];
   organizations: OrganizationOption[];
+  /** Only a global admin (gminaId === null) may grant the ADMIN role — see POST/PATCH /api/admin/users. */
+  canGrantAdmin: boolean;
+  /** Forwarded to the gmina picker (and its nested organization-create modal) — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   onClose: () => void;
   /** Called after a successful create/edit, before onClose — lets the caller refetch its own list instead of relying on router.refresh(). */
   onSaved?: () => void;
 }
 
-export function UserFormModal({ mode, user, gminas, organizations, onClose, onSaved }: UserFormModalProps) {
+export function UserFormModal({
+  mode,
+  user,
+  gminas,
+  organizations,
+  canGrantAdmin,
+  canCreateGmina,
+  onClose,
+  onSaved,
+}: UserFormModalProps) {
   const [email, setEmail] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState(user?.name ?? '');
   const [role, setRole] = useState<UserRole>(user?.role ?? 'VOLUNTEER');
+  // ADMIN is only offered as a NEW selection to a global admin — but if the
+  // user being edited is already an ADMIN (e.g. a gmina-scoped admin editing
+  // a same-gmina peer admin, which canManageUser does allow), the option
+  // stays so their current role still renders as selected; demoting them to
+  // a non-ADMIN role from here is still allowed, only promoting TO admin isn't.
+  const availableRoles = useMemo(
+    () => (canGrantAdmin || user?.role === 'ADMIN' ? ROLES : ROLES.filter((r) => r.value !== 'ADMIN')),
+    [canGrantAdmin, user?.role]
+  );
   const [organizationId, setOrganizationId] = useState<string | null>(user?.organization?.id ?? null);
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [gmina, setGmina] = useState<GminaSelectValue>({ gminaId: user?.gmina?.id ?? null, newGminaName: null });
@@ -213,7 +235,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
                 onChange={(e) => setRole(e.target.value as UserRole)}
                 className={inputClasses}
               >
-                {ROLES.map((r) => (
+                {availableRoles.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
                   </option>
@@ -231,6 +253,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
               onChange={setGmina}
               required={gminaRequired}
               newGminaMode="modal"
+              canCreateGmina={canCreateGmina}
             />
             </div>
           </div>
@@ -244,6 +267,7 @@ export function UserFormModal({ mode, user, gminas, organizations, onClose, onSa
               organizations={organizationsInGmina}
               gminas={gminas}
               defaultGminaId={gmina.gminaId}
+              canCreateGmina={canCreateGmina}
               value={organizationId}
               onChange={setOrganizationId}
               required={organizationRequired}

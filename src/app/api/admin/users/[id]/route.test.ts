@@ -99,6 +99,44 @@ describe('GET /api/admin/users/[id]', () => {
     expect(res.status).toBe(200);
     expect(body.user.id).toBe('target-1');
   });
+
+  describe('gmina-scoped admin actor', () => {
+    it('can view a user in their own gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+
+      const res = await callGet();
+
+      expect(res.status).toBe(200);
+    });
+
+    it('can view their own profile', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' }) as any);
+
+      const res = await callGet('gadmin-1');
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects (403) viewing a user in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'other-gmina' }) as any);
+
+      const res = await callGet();
+
+      expect(res.status).toBe(403);
+    });
+
+    it('rejects (403) viewing a GLOBAL admin', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'global-admin-1', role: 'ADMIN', gminaId: null }) as any);
+
+      const res = await callGet('global-admin-1');
+
+      expect(res.status).toBe(403);
+    });
+  });
 });
 
 describe('PATCH /api/admin/users/[id]', () => {
@@ -422,6 +460,104 @@ describe('PATCH /api/admin/users/[id]', () => {
       expect.objectContaining({ data: expect.objectContaining({ gminaId: null }) })
     );
   });
+
+  // Gmina-scoped admin: same capabilities as a global admin, but confined to
+  // their own gmina, and never touching a global admin's account.
+  describe('gmina-scoped admin actor', () => {
+    it('can edit a non-admin user in their own gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+      prisma.user.update.mockResolvedValue({} as any);
+
+      const res = await callPatch({ name: 'New Name' });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects (403) editing a user in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-2' }) as any);
+
+      const res = await callPatch({ name: 'New Name' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects (403) editing a GLOBAL admin, even non-sensitive fields', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'global-admin-1', role: 'ADMIN', gminaId: null }) as any);
+
+      const res = await callPatch({ name: 'New Name' }, 'global-admin-1');
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('can edit a peer gmina-scoped admin in the SAME gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-2', role: 'ADMIN', gminaId: 'gmina-1' }) as any);
+      prisma.user.update.mockResolvedValue({} as any);
+
+      const res = await callPatch({ name: 'New Name' }, 'admin-2');
+
+      expect(res.status).toBe(200);
+    });
+
+    it('can still edit their own non-activation fields', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' }) as any);
+      prisma.user.update.mockResolvedValue({} as any);
+
+      const res = await callPatch({ name: 'New Name' }, 'admin-1');
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects (403) promoting a non-admin target to ADMIN', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+
+      const res = await callPatch({ role: 'ADMIN' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    // The escalation this specifically guards against: role stays 'ADMIN'
+    // throughout (so the "promote to ADMIN" check never fires), but clearing
+    // gminaId on an already-ADMIN target — including the actor's OWN account
+    // — would silently turn it into an unrestricted global admin.
+    it('rejects (403) clearing gminaId (null) on an ADMIN target, including their own account', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' }) as any);
+
+      const res = await callPatch({ gminaId: null }, 'admin-1');
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects (403) reassigning a target to a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+
+      const res = await callPatch({ gminaId: 'gmina-2' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects (403) the inline "+ Nowa gmina" flow (newGminaName)', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+
+      const res = await callPatch({ newGminaName: 'Brand New Gmina' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('DELETE /api/admin/users/[id]', () => {
@@ -510,5 +646,50 @@ describe('DELETE /api/admin/users/[id]', () => {
     const res = await callDelete();
 
     expect(res.status).toBe(500);
+  });
+
+  describe('gmina-scoped admin actor', () => {
+    it('can delete a non-admin user in their own gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-1' }) as any);
+      prisma.user.delete.mockResolvedValue({} as any);
+
+      const res = await callDelete();
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects (403) deleting a user in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ role: 'VOLUNTEER', gminaId: 'gmina-2' }) as any);
+
+      const res = await callDelete();
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects (403) deleting a GLOBAL admin', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(baseUser({ id: 'global-admin-1', role: 'ADMIN', gminaId: null }) as any);
+
+      const res = await callDelete('global-admin-1');
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('can delete a peer gmina-scoped admin in the SAME gmina (subject to the last-active-admin guard)', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.user.findUnique.mockResolvedValue(
+        baseUser({ id: 'admin-2', role: 'ADMIN', gminaId: 'gmina-1', isActive: true }) as any
+      );
+      prisma.user.count.mockResolvedValue(2);
+      prisma.user.delete.mockResolvedValue({} as any);
+
+      const res = await callDelete('admin-2');
+
+      expect(res.status).toBe(200);
+    });
   });
 });

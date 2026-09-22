@@ -14,6 +14,10 @@ interface CreateInviteFormProps {
   gminas: GminaOption[];
   organizations: OrganizationOption[];
   isAdmin: boolean;
+  /** Only a global admin (gminaId === null) may grant the ADMIN role — see POST /api/admin/invites. */
+  canGrantAdmin: boolean;
+  /** Forwarded to the gmina picker (and its nested organization-create modal) — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   currentUserOrganizationId: string | null;
   /** Display-only, for the "you're inviting into X" hint shown to a coordinator. */
   currentUserOrganizationName: string | null;
@@ -23,6 +27,8 @@ export function CreateInviteForm({
   gminas,
   organizations,
   isAdmin,
+  canGrantAdmin,
+  canCreateGmina,
   currentUserOrganizationId,
   currentUserOrganizationName,
 }: CreateInviteFormProps) {
@@ -37,6 +43,7 @@ export function CreateInviteForm({
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const availableRoles = useMemo(() => (canGrantAdmin ? ROLES : ROLES.filter((r) => r !== 'ADMIN')), [canGrantAdmin]);
   const gminaRequired = isAdmin && role !== 'ADMIN';
   // Mirrors POST /api/admin/invites: an admin-issued invite now needs an
   // organization up front for any organization-scoped role, same as creating
@@ -142,7 +149,7 @@ export function CreateInviteForm({
               onChange={(e) => setRole(e.target.value as typeof ROLES[number])}
               className="w-full rounded-xl bg-slate-50 border border-slate-200 py-2.5 px-3.5 text-slate-900 font-semibold focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 text-sm transition"
             >
-              {ROLES.map((r) => (
+              {availableRoles.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
@@ -162,6 +169,7 @@ export function CreateInviteForm({
               onChange={setGmina}
               required={gminaRequired}
               newGminaMode="modal"
+              canCreateGmina={canCreateGmina}
             />
           </div>
         )}
@@ -178,6 +186,7 @@ export function CreateInviteForm({
               organizations={organizationsInGmina}
               gminas={gminas}
               defaultGminaId={gmina.gminaId}
+              canCreateGmina={canCreateGmina}
               value={organizationId}
               onChange={setOrganizationId}
               required={organizationRequired}

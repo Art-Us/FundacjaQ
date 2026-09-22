@@ -2,11 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin, requireAdminOrCoordinator, canManageUser } from '@/lib/authz';
+import {
+  requireAdmin,
+  requireAdminOrCoordinator,
+  canManageUser,
+  isGlobalAdmin,
+  isGminaScopedAdmin,
+  scopedAdminManagementWhere,
+} from '@/lib/authz';
 import { hashPassword, isPasswordPwned, passwordSchema } from '@/lib/password';
 import { adminUserSelect, ROLE_LABELS } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
-import { requiresOrganization, scopedOrganizationWhere } from '@/lib/organization';
+import { requiresOrganization } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
 
@@ -117,13 +124,15 @@ export async function GET(req: NextRequest) {
   }
   const { page, pageSize, q, role, status, onlyPending, gminaId, organizationId, sortBy, sortDir } = parsed.data;
 
-  // COORDINATOR visibility is now scoped by organization, not gmina: ADMIN
-  // sees everything ({}), a coordinator sees only their own organization's
-  // users, and a coordinator with NO organization of their own sees nothing
-  // — never silently falls back to "no restriction" (same fail-closed
-  // contract scopedGminaWhere used to provide here; see the 2026-09-10 audit
-  // finding this exact fail-open pattern already caused an IDOR elsewhere).
-  const scopeFilter = scopedOrganizationWhere(actor);
+  // A global admin sees everything ({}); a gmina-scoped admin sees their
+  // whole gmina (via scopedGminaWhere — broader than one organization); a
+  // coordinator sees only their own organization's users (via
+  // scopedOrganizationWhere, unchanged); anyone gmina/organization-scoped
+  // with none of their own sees nothing — never silently falls back to "no
+  // restriction" (same fail-closed contract scopedGminaWhere/
+  // scopedOrganizationWhere provide; see the 2026-09-10 audit finding this
+  // exact fail-open pattern already caused an IDOR elsewhere).
+  const scopeFilter = scopedAdminManagementWhere(actor);
   if (scopeFilter === null) {
     return NextResponse.json({ users: [], total: 0, page, pageSize, totalPages: 0 });
   }
@@ -134,13 +143,13 @@ export async function GET(req: NextRequest) {
     ...(status === 'ACTIVE' ? { isActive: true } : {}),
     ...(status === 'INACTIVE' ? { isActive: false } : {}),
     ...(onlyPending === 'true' ? { lastActivatedAt: null } : {}),
-    // Only ADMIN's explicit gminaId/organizationId query params are honored
-    // here, spread AFTER ...scopeFilter so they can only ever narrow an
-    // ADMIN's unrestricted `{}` — never applied for a COORDINATOR, since
-    // either key would otherwise silently overwrite (and widen) their own
-    // fail-closed organization scope above.
-    ...(actor.role === 'ADMIN' && gminaId ? { gminaId } : {}),
-    ...(actor.role === 'ADMIN' && organizationId ? { organizationId } : {}),
+    // Only a *global* admin's explicit gminaId/organizationId query params
+    // are honored here, spread AFTER ...scopeFilter so they can only ever
+    // narrow a global admin's unrestricted `{}` — never applied for a
+    // gmina-scoped admin or a coordinator, since either key would otherwise
+    // silently overwrite (and widen) their own fail-closed scope above.
+    ...(isGlobalAdmin(actor) && gminaId ? { gminaId } : {}),
+    ...(isGlobalAdmin(actor) && organizationId ? { organizationId } : {}),
     ...(q ? { OR: buildSearchOr(q) } : {}),
   };
 
@@ -185,8 +194,26 @@ export async function POST(req: NextRequest) {
 
   const { email, password, role, gminaId, newGminaName, name, organizationId, phone } = parsed.data;
 
+  // Same "only a global admin creates more admins" rule as POST
+  // /api/admin/invites — a gmina-scoped admin has every other ADMIN
+  // capability within their own gmina, but never this one.
+  if (role === 'ADMIN' && !isGlobalAdmin(admin)) {
+    return NextResponse.json({ error: 'Tylko globalny administrator może nadać rolę administratora.' }, { status: 403 });
+  }
+
   let effectiveGminaId: string | undefined;
-  if (requiresGmina(role) || gminaId || newGminaName) {
+  if (isGminaScopedAdmin(admin)) {
+    // A gmina-scoped admin can only ever create a user within their own
+    // gmina — no inline "+ Nowa gmina" (outside their own scope by
+    // definition), no targeting a different gmina than their own.
+    if (newGminaName) {
+      return NextResponse.json({ error: 'Tylko globalny administrator może utworzyć nową gminę.' }, { status: 403 });
+    }
+    if (gminaId && gminaId !== admin.gminaId) {
+      return NextResponse.json({ error: 'Możesz tworzyć konta tylko w obrębie własnej gminy.' }, { status: 403 });
+    }
+    effectiveGminaId = admin.gminaId ?? undefined;
+  } else if (requiresGmina(role) || gminaId || newGminaName) {
     const resolved = await resolveGminaId({ gminaId, newGminaName });
     if ('error' in resolved) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });

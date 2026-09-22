@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ShieldCheck, UserPlus, BellRing, Building2, Users } from 'lucide-react';
+import { ShieldCheck, UserPlus, BellRing, Building2, Users, MapPin, Building } from 'lucide-react';
 import { getSession } from '@/lib/session';
+import { prisma } from '@/lib/prisma';
 import { getDashboardData } from '@/lib/dashboard';
+import { isGlobalAdmin } from '@/lib/authz';
 import { formatDate } from '@/lib/utils';
 import { ALERT_STATUS_LABELS, getSeverityBadgeInfo, getStatusBadgeInfo, SEVERITY_LABELS } from '@/lib/alertLabels';
 import { ROLE_LABELS } from '@/lib/roleLabels';
@@ -21,8 +23,21 @@ export default async function HomePage() {
     redirect('/login');
   }
 
-  const { role, gminaId } = session.user;
-  const data = await getDashboardData(role as Role, gminaId);
+  const { role, gminaId, organizationId } = session.user;
+  // A global admin (gminaId === null) has no gmina/organization to show —
+  // the header stays exactly as it was before this account/organization line
+  // existed. Everyone else (a gmina-scoped admin, or a
+  // COORDINATOR/VOLUNTEER, who always have one) gets it.
+  const [data, gmina, organization] = await Promise.all([
+    getDashboardData(role as Role, gminaId),
+    gminaId ? prisma.gmina.findUnique({ where: { id: gminaId }, select: { name: true } }) : Promise.resolve(null),
+    organizationId
+      ? prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } })
+      : Promise.resolve(null),
+  ]);
+  // A gmina-scoped ADMIN sees "w gminie"/scoped columns the same as a
+  // COORDINATOR/VOLUNTEER — only a global admin gets the unrestricted view.
+  const isGlobalAdminUser = isGlobalAdmin({ role, gminaId });
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-8">
@@ -36,6 +51,22 @@ export default async function HomePage() {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Panel — {ROLE_LABELS[role as Role] ?? role}
           </h1>
+          {(gmina || organization) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-slate-500">
+              {gmina && (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                  {gmina.name}
+                </span>
+              )}
+              {organization && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Building className="h-3.5 w-3.5 text-slate-400" />
+                  {organization.name}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -43,7 +74,7 @@ export default async function HomePage() {
         <StatCard label="Aktywne alerty" value={data.stats.activeAlerts} icon={<BellRing className="h-4 w-4" />} />
         <StatCard label="Gminy w systemie" value={data.stats.gminyCount} icon={<Building2 className="h-4 w-4" />} />
         <StatCard
-          label={role === 'ADMIN' ? 'Użytkownicy' : 'Użytkownicy w gminie'}
+          label={isGlobalAdminUser ? 'Użytkownicy' : 'Użytkownicy w gminie'}
           value={data.stats.usersCount}
           icon={<Users className="h-4 w-4" />}
         />
@@ -128,7 +159,7 @@ export default async function HomePage() {
                       <th className="py-3 px-4">Kategoria</th>
                       <th className="py-3 px-4">Ilość</th>
                       <th className="py-3 px-4">Status</th>
-                      {role === 'ADMIN' && <th className="py-3 px-4">Gmina</th>}
+                      {isGlobalAdminUser && <th className="py-3 px-4">Gmina</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -140,7 +171,7 @@ export default async function HomePage() {
                           {resource.quantity} {resource.unit}
                         </td>
                         <td className="py-3 px-4 text-slate-600">{RESOURCE_STATUS_LABELS[resource.status] ?? resource.status}</td>
-                        {role === 'ADMIN' && <td className="py-3 px-4 text-slate-600">{resource.gmina.name}</td>}
+                        {isGlobalAdminUser && <td className="py-3 px-4 text-slate-600">{resource.gmina.name}</td>}
                       </tr>
                     ))}
                   </tbody>

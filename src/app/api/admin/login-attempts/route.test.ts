@@ -8,12 +8,12 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return {
     ...actual,
-    requireAdmin: vi.fn(),
+    requireGlobalAdmin: vi.fn(),
   };
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { GET } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -24,12 +24,12 @@ function makeRequest(query = '') {
 
 beforeEach(() => {
   mockReset(prisma);
-  vi.mocked(requireAdmin).mockReset();
+  vi.mocked(requireGlobalAdmin).mockReset();
 });
 
 describe('GET /api/admin/login-attempts', () => {
   it('returns 403 with no DB call when the caller is not an ADMIN', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue(null);
+    vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
 
     const res = await GET(makeRequest());
 
@@ -38,7 +38,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('returns items for an ADMIN session with no filters', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([{ id: 'a1', email: 'x@example.com' }] as any);
 
     const res = await GET(makeRequest());
@@ -50,7 +50,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('queries with the default take+1, no cursor, and desc ordering when no params are given', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest());
@@ -68,7 +68,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('applies cursor pagination with skip:1 when a cursor is given', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest('?cursor=abc123'));
@@ -82,7 +82,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('respects an explicit take, requesting take+1 rows', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest('?take=10'));
@@ -91,7 +91,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('sets nextCursor to the last item on the page and trims the extra lookahead row when hasMore', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([
       { id: 'a1' },
       { id: 'a2' },
@@ -105,7 +105,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('builds an escaped, case-insensitive contains filter on email', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest('?email=jan_kowalski%25'));
@@ -117,7 +117,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('filters by success=true/false', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest('?success=false'));
@@ -126,7 +126,7 @@ describe('GET /api/admin/login-attempts', () => {
   });
 
   it('filters by a from/to createdAt range', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockResolvedValue([]);
 
     await GET(makeRequest('?from=2026-01-01&to=2026-01-31'));
@@ -139,7 +139,7 @@ describe('GET /api/admin/login-attempts', () => {
   it.each(['?success=maybe', '?take=0', '?take=101', '?from=not-a-date'])(
     'rejects an invalid query param (%s) with 400 and no DB call',
     async (query) => {
-      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+      vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
 
       const res = await GET(makeRequest(query));
 
@@ -149,7 +149,7 @@ describe('GET /api/admin/login-attempts', () => {
   );
 
   it('returns 500 when the database call fails', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.loginAttempt.findMany.mockRejectedValue(new Error('connection lost'));
 
     const res = await GET(makeRequest());

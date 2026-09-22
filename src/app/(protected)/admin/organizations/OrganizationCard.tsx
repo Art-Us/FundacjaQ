@@ -19,10 +19,13 @@ function formatAddress(organization: OrganizationListItem): string | null {
 export function OrganizationCard({
   organization,
   gminas,
+  canCreateGmina,
   onChanged,
 }: {
   organization: OrganizationListItem;
   gminas: GminaOption[];
+  /** Forwarded to the edit form's gmina picker — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   onChanged: () => void;
 }) {
   const [showEdit, setShowEdit] = useState(false);
@@ -92,6 +95,7 @@ export function OrganizationCard({
           mode="edit"
           organization={organization}
           gminas={gminas}
+          canCreateGmina={canCreateGmina}
           onClose={() => setShowEdit(false)}
           onSuccess={onChanged}
         />

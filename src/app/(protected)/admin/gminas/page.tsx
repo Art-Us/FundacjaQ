@@ -1,10 +1,14 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
+import { isGlobalAdmin } from '@/lib/authz';
 import { GminasDirectory } from './GminasDirectory';
 
 export default async function AdminGminasPage() {
   const session = await getSession();
-  if (!session?.user || session.user.role !== 'ADMIN') {
+  // Global-admin-only — a gmina-scoped admin has no access to gmina
+  // management at all (see the matching gate in the /api/admin/gminas
+  // routes and the "Gminy" nav link in Sidebar.tsx).
+  if (!session?.user || !isGlobalAdmin(session.user)) {
     redirect('/');
   }
 

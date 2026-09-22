@@ -325,4 +325,75 @@ describe('POST /api/admin/invites', () => {
     expect(res.status).toBe(429);
     expect(prisma.inviteToken.create).not.toHaveBeenCalled();
   });
+
+  // A gmina-scoped admin (gminaId set) has every other ADMIN capability
+  // within their own gmina, but can never grant ADMIN, and is pinned to
+  // their own gmina the same way a COORDINATOR is pinned to their own org.
+  describe('gmina-scoped admin actor', () => {
+    it('blocks granting ADMIN, even though granting COORDINATOR still works', async () => {
+      mockSession('ADMIN', 'gmina-admin-1', 'gmina-1');
+
+      const adminAttempt = await POST(makeRequest({ email: 'x@example.com', role: 'ADMIN' }));
+
+      expect(adminAttempt.status).toBe(403);
+      expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+
+      prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.inviteToken.create.mockResolvedValue({} as any);
+      const coordAttempt = await POST(
+        makeRequest({ email: 'y@example.com', role: 'COORDINATOR', organizationId: 'org-1' })
+      );
+      expect(coordAttempt.status).toBe(200);
+    });
+
+    it('pins the invite to their own gmina, ignoring a different gminaId in the request', async () => {
+      mockSession('ADMIN', 'gmina-admin-1', 'gmina-1');
+
+      const res = await POST(makeRequest({ email: 'x@example.com', role: 'VOLUNTEER', gminaId: 'gmina-2' }));
+
+      expect(res.status).toBe(403);
+      expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts an explicit gminaId that matches their own', async () => {
+      mockSession('ADMIN', 'gmina-admin-1', 'gmina-1');
+      prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.inviteToken.create.mockResolvedValue({} as any);
+
+      const res = await POST(
+        makeRequest({ email: 'x@example.com', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+      );
+
+      expect(res.status).toBe(200);
+      expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      );
+    });
+
+    it('blocks the inline "+ Nowa gmina" flow (newGminaName)', async () => {
+      mockSession('ADMIN', 'gmina-admin-1', 'gmina-1');
+
+      const res = await POST(makeRequest({ email: 'x@example.com', role: 'VOLUNTEER', newGminaName: 'Nowa Gmina' }));
+
+      expect(res.status).toBe(403);
+      expect(prisma.inviteToken.create).not.toHaveBeenCalled();
+      expect(prisma.gmina.create).not.toHaveBeenCalled();
+    });
+
+    it('omitting gminaId defaults to their own gmina (no explicit param needed)', async () => {
+      mockSession('ADMIN', 'gmina-admin-1', 'gmina-1');
+      prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.inviteToken.create.mockResolvedValue({} as any);
+
+      const res = await POST(makeRequest({ email: 'x@example.com', role: 'VOLUNTEER', organizationId: 'org-1' }));
+
+      expect(res.status).toBe(200);
+      expect(prisma.inviteToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      );
+    });
+  });
 });

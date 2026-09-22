@@ -4,9 +4,9 @@ import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, INVITE_TOKEN_TTL_MS } from '@/lib/tokens';
 import { sendInviteEmail, isEmailConfigured } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isGlobalAdmin, isGminaScopedAdmin, scopedAdminManagementWhere } from '@/lib/authz';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
-import { requiresOrganization, scopedOrganizationWhere } from '@/lib/organization';
+import { requiresOrganization } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotInvite, auditInlineGminaCreation } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
@@ -27,12 +27,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  // Same fail-closed organization scoping as GET /api/admin/users — ADMIN
-  // sees everything, a coordinator only invites tied to their own
-  // organization, and one with no organization sees none at all. Invites
-  // created before organizationId existed on this model have it unset, so
-  // they simply won't appear in a coordinator's scoped view going forward.
-  const scopeFilter = scopedOrganizationWhere(user);
+  // Same fail-closed scoping as GET /api/admin/users — a global admin sees
+  // everything, a gmina-scoped admin sees their whole gmina's invites, a
+  // coordinator only invites tied to their own organization, and anyone
+  // scoped with nothing of their own sees none at all. Invites created
+  // before organizationId existed on this model have it unset, so they
+  // simply won't appear in a coordinator's scoped view going forward.
+  const scopeFilter = scopedAdminManagementWhere(user);
   if (scopeFilter === null) {
     return NextResponse.json({ invites: [] });
   }
@@ -73,8 +74,14 @@ export async function POST(req: NextRequest) {
 
   const { email, role, gminaId, newGminaName, organizationId } = parsed.data;
 
-  // Only ADMIN can grant ADMIN or COORDINATOR privileges.
-  if ((role === 'ADMIN' || role === 'COORDINATOR') && user.role !== 'ADMIN') {
+  // Only a *global* admin can grant ADMIN — a gmina-scoped admin has every
+  // other ADMIN capability within their own gmina, but never the power to
+  // create more admins (global or gmina-scoped, anywhere). Any ADMIN
+  // (global or gmina-scoped) can still grant COORDINATOR, unchanged.
+  if (role === 'ADMIN' && !isGlobalAdmin(user)) {
+    return NextResponse.json({ error: 'Tylko globalny administrator może nadać rolę administratora.' }, { status: 403 });
+  }
+  if (role === 'COORDINATOR' && user.role !== 'ADMIN') {
     return NextResponse.json({ error: 'Nie masz uprawnień do przypisania tej roli.' }, { status: 403 });
   }
 
@@ -118,6 +125,19 @@ export async function POST(req: NextRequest) {
     // gmina its members belong to (see the org/gmina match checks in
     // POST/PATCH /api/admin/users).
     effectiveGminaId = organization.gminaId;
+  } else if (isGminaScopedAdmin(user)) {
+    // Same "can never leave their own scope" contract as the COORDINATOR
+    // branch above, adapted for a gmina-scoped admin: no inline "+ Nowa
+    // gmina" (a brand-new gmina is by definition outside their own scope —
+    // only a global admin may create one), and no targeting a different
+    // gmina than their own, even if the request body claims one.
+    if (newGminaName) {
+      return NextResponse.json({ error: 'Tylko globalny administrator może utworzyć nową gminę.' }, { status: 403 });
+    }
+    if (gminaId && gminaId !== user.gminaId) {
+      return NextResponse.json({ error: 'Możesz zapraszać tylko w obrębie własnej gminy.' }, { status: 403 });
+    }
+    effectiveGminaId = user.gminaId ?? undefined;
   } else if (requiresGmina(role) || gminaId || newGminaName) {
     const resolved = await resolveAndAuditGmina();
     if ('error' in resolved) {

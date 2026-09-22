@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
 import { scopedGminaWhere } from '@/lib/gmina';
 import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
@@ -15,10 +16,9 @@ export default async function MapPage() {
   const role = session.user.role as Role;
   const gminaId = session.user.gminaId;
 
-  // Must fail closed (see scopedGminaWhere's doc comment) — a gmina-scoped
-  // role with no gmina gets nothing, never the unfiltered {} that would hand
-  // them every gmina's alerts.
-  const gminaFilter = scopedGminaWhere({ role, gminaId });
+  // Alerts stay ADMIN-unconditional — see scopedGminaWhereAnyAdmin's doc
+  // comment. Must still fail closed for a gmina-scoped role with no gmina.
+  const gminaFilter = scopedGminaWhereAnyAdmin({ role, gminaId });
   const canManageAlerts = role === 'ADMIN' || role === 'COORDINATOR';
 
   const [alerts, gminy, myResources] = await Promise.all([

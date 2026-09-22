@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { normalizeOrganizationName } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotOrganization } from '@/lib/auditLog';
 
@@ -44,6 +44,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Organizacja nie istnieje.' }, { status: 404 });
   }
 
+  // A gmina-scoped admin may only manage organizations already in their own
+  // gmina, and can never move one in or out of it — reassigning gminaId
+  // stays global-admin-only, same as gmina creation.
+  if (isGminaScopedAdmin(admin) && target.gminaId !== admin.gminaId) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do zarządzania tą organizacją.' }, { status: 403 });
+  }
+
   const parsed = updateOrganizationSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
@@ -62,6 +69,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     contactPhone,
     contactEmail,
   } = parsed.data;
+
+  if (isGminaScopedAdmin(admin) && gminaId !== undefined && gminaId !== admin.gminaId) {
+    return NextResponse.json({ error: 'Nie możesz przenieść organizacji poza własną gminę.' }, { status: 403 });
+  }
+
   const data: Prisma.OrganizationUpdateInput = {};
 
   const effectiveGminaId = gminaId ?? target.gminaId;
@@ -204,6 +216,11 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   }
   if (!target) {
     return NextResponse.json({ error: 'Organizacja nie istnieje.' }, { status: 404 });
+  }
+
+  // Same own-gmina-only scope as PATCH.
+  if (isGminaScopedAdmin(admin) && target.gminaId !== admin.gminaId) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do zarządzania tą organizacją.' }, { status: 403 });
   }
 
   try {

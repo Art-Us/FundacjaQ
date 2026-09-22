@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
+import { isGlobalAdmin } from '@/lib/authz';
 import { countActionableAllocations } from '@/lib/allocationInbox';
 import { ProtectedShell } from '@/components/layout/ProtectedShell';
 
@@ -25,6 +26,10 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 
   const { role, organizationId } = session.user;
   const canManageInvites = role === 'ADMIN' || role === 'COORDINATOR';
+  // Gmina management stays global-admin-only (see api/admin/gminas/route.ts)
+  // — a gmina-scoped admin has `role === 'ADMIN'` too, so this can't reuse
+  // the plain role check the way canManageInvites/canManageResources do.
+  const canManageGminas = isGlobalAdmin(session.user);
   // Same ADMIN/COORDINATOR gate as the /zasoby page itself (Крок 31) — kept
   // as its own flag rather than reusing canManageInvites, since the two
   // happen to share a condition today but gate unrelated features.
@@ -37,6 +42,7 @@ export default async function ProtectedLayout({ children }: { children: React.Re
       role={role}
       canManageInvites={canManageInvites}
       canManageResources={canManageResources}
+      canManageGminas={canManageGminas}
       resourceInboxCount={resourceInboxCount}
     >
       {children}
