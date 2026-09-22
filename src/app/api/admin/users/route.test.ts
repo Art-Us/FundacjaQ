@@ -736,4 +736,65 @@ describe('POST /api/admin/users', () => {
       expect.objectContaining({ data: expect.objectContaining({ action: 'GMINA_CREATE' }) })
     );
   });
+
+  describe('gmina-scoped admin actor', () => {
+    it('blocks creating an ADMIN account', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gmina-admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+
+      const res = await POST(makeRequest({ email: 'x@example.com', password: STRONG_PASSWORD, role: 'ADMIN' }));
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('pins a new user to their own gmina, ignoring a different gminaId in the request', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gmina-admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+
+      const res = await POST(
+        makeRequest({
+          email: 'x@example.com',
+          password: STRONG_PASSWORD,
+          role: 'VOLUNTEER',
+          gminaId: 'gmina-2',
+          organizationId: 'org-1',
+        })
+      );
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks the inline "+ Nowa gmina" flow (newGminaName)', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gmina-admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+
+      const res = await POST(
+        makeRequest({ email: 'x@example.com', password: STRONG_PASSWORD, role: 'VOLUNTEER', newGminaName: 'Nowa Gmina' })
+      );
+
+      expect(res.status).toBe(403);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.gmina.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a VOLUNTEER in their own gmina without an explicit gminaId', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gmina-admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.organization.findUnique.mockResolvedValue({ id: 'org-1', gminaId: 'gmina-1' } as any);
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: 'new-1', gminaId: 'gmina-1' } as any);
+
+      const res = await POST(
+        makeRequest({
+          email: 'x@example.com',
+          password: STRONG_PASSWORD,
+          role: 'VOLUNTEER',
+          organizationId: 'org-1',
+        })
+      );
+
+      expect(res.status).toBe(201);
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      );
+    });
+  });
 });

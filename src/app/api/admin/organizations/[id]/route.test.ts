@@ -325,7 +325,10 @@ describe('PATCH /api/admin/organizations/[id]', () => {
   });
 
   it('returns a clean 400 when verifying the new gmina (on reassignment) itself fails', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+    // Global admin (gminaId: null) — a gmina-scoped admin is never allowed
+    // to reassign an org's gmina at all (see the "gmina-scoped admin actor"
+    // describe block below), so that's not what this test is exercising.
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
     prisma.gmina.findUnique.mockRejectedValue(new Error('connection lost'));
 
@@ -412,5 +415,47 @@ describe('DELETE /api/admin/organizations/[id]', () => {
     const res = await callDelete();
 
     expect(res.status).toBe(500);
+  });
+
+  describe('gmina-scoped admin actor', () => {
+    it('PATCH: can edit an organization in their own gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+      prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+      prisma.organization.update.mockResolvedValue(baseOrganization({ gminaId: 'g1', city: 'Kraków' }) as any);
+
+      const res = await callPatch({ city: 'Kraków' });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('PATCH: rejects (403) editing an organization in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2' });
+      prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+
+      const res = await callPatch({ city: 'Kraków' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.organization.update).not.toHaveBeenCalled();
+    });
+
+    it('PATCH: rejects (403) reassigning the organization to a different gmina, even their own target', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+      prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+
+      const res = await callPatch({ gminaId: 'g2' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.organization.update).not.toHaveBeenCalled();
+    });
+
+    it('DELETE: rejects (403) deleting an organization in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2' });
+      prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+
+      const res = await callDelete();
+
+      expect(res.status).toBe(403);
+      expect(prisma.organization.delete).not.toHaveBeenCalled();
+    });
   });
 });

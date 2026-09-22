@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin, isLastActiveAdmin, wouldLoseActiveAdminStatus } from '@/lib/authz';
+import {
+  requireAdmin,
+  isLastActiveAdmin,
+  wouldLoseActiveAdminStatus,
+  canManageUser,
+  isGlobalAdmin,
+  isGminaScopedAdmin,
+} from '@/lib/authz';
 import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
@@ -37,6 +44,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Użytkownik nie istnieje.' }, { status: 404 });
   }
 
+  // Previously unscoped — any admin, global or gmina-scoped, could look up
+  // any user's full profile by id regardless of gmina. Same scope (and same
+  // self-exemption) as PATCH/DELETE on this route.
+  if (user.id !== admin.id && !canManageUser(admin, user)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania tego użytkownika.' }, { status: 403 });
+  }
+
   return NextResponse.json({ user });
 }
 
@@ -51,6 +65,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Użytkownik nie istnieje.' }, { status: 404 });
   }
 
+  // Previously this route only checked requireAdmin() (any admin, unscoped)
+  // — now that ADMIN can be gmina-scoped, editing ANOTHER user is gated the
+  // same way activate/deactivate/unlock already are: a global admin can
+  // edit anyone; a gmina-scoped admin only within their own gmina, and
+  // never a global admin's account. Deliberately skipped for self
+  // (target.id === admin.id): canManageUser()'s self-exclusion exists for
+  // activate/deactivate ("can't deactivate your own live session"), not for
+  // general profile edits — an admin editing their own name/email/phone
+  // must still work, same as before this change. Self-deactivation and
+  // self-promotion stay blocked by their own explicit checks below,
+  // independent of this.
+  if (target.id !== admin.id && !canManageUser(admin, target)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do zarządzania tym użytkownikiem.' }, { status: 403 });
+  }
+
   const parsed = updateUserSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Nieprawidłowe dane.' }, { status: 400 });
@@ -60,6 +89,31 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // callback) — self-deactivation would kill the admin's own session mid-request.
   if (target.id === admin.id && parsed.data.isActive === false) {
     return NextResponse.json({ error: 'Nie możesz dezaktywować własnego konta.' }, { status: 403 });
+  }
+
+  // Same "only a global admin creates more admins" rule as POST
+  // /api/admin/users and /api/admin/invites — promoting an existing user to
+  // ADMIN is exactly as sensitive as creating one outright.
+  if (parsed.data.role === 'ADMIN' && target.role !== 'ADMIN' && !isGlobalAdmin(admin)) {
+    return NextResponse.json({ error: 'Tylko globalny administrator może nadać rolę administratora.' }, { status: 403 });
+  }
+
+  // A gmina-scoped admin can never move a user out of their own gmina —
+  // into a different one, OR by clearing it outright (an explicit
+  // `gminaId: null` would otherwise turn an ADMIN target, including the
+  // actor's own account, into an unrestricted GLOBAL admin — every bit as
+  // much a privilege escalation as a role change to ADMIN, just via a
+  // different field). Also no inline "+ Nowa gmina": a brand-new gmina is
+  // outside their own scope by definition, same as POST /api/admin/users
+  // and /api/admin/invites. `gminaId === undefined` (field simply absent
+  // from the request) is fine — that means "leave it as it is".
+  if (isGminaScopedAdmin(admin)) {
+    if (parsed.data.newGminaName) {
+      return NextResponse.json({ error: 'Tylko globalny administrator może utworzyć nową gminę.' }, { status: 403 });
+    }
+    if (parsed.data.gminaId !== undefined && parsed.data.gminaId !== admin.gminaId) {
+      return NextResponse.json({ error: 'Możesz zarządzać użytkownikami tylko w obrębie własnej gminy.' }, { status: 403 });
+    }
   }
 
   // Resolved once, up front: what role/isActive this user will end up with
@@ -210,6 +264,12 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
   const target = await prisma.user.findUnique({ where: { id: params.id } });
   if (!target) {
     return NextResponse.json({ error: 'Użytkownik nie istnieje.' }, { status: 404 });
+  }
+
+  // Same scoping as PATCH above — previously this route only checked
+  // requireAdmin() (any admin, unscoped) and self-delete.
+  if (!canManageUser(admin, target)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do zarządzania tym użytkownikiem.' }, { status: 403 });
   }
 
   if (await isLastActiveAdmin(target)) {

@@ -3,7 +3,8 @@ import { Mail, Send } from 'lucide-react';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { formatDate } from '@/lib/utils';
-import { scopedOrganizationWhere } from '@/lib/organization';
+import { scopedAdminManagementWhere, isGlobalAdmin } from '@/lib/authz';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
 import { CreateInviteForm } from './CreateInviteForm';
 import { ToggleInviteButton, type InviteStatus } from './ToggleInviteButton';
@@ -23,30 +24,45 @@ export default async function AdminInvitesPage() {
 
   const currentUser = session.user;
   const isAdmin = currentUser.role === 'ADMIN';
+  const canGrantAdmin = isGlobalAdmin(currentUser);
   const userId = currentUser.id;
-  // null means "organization-scoped actor with no organization of their
-  // own" — fail closed (see scopedOrganizationWhere's doc comment), never
-  // fall back to an unfiltered {}.
-  const organizationFilter = scopedOrganizationWhere(currentUser);
+  // null means a gmina/organization-scoped actor with none of their own —
+  // fail closed (see scopedAdminManagementWhere/scopedOrganizationWhere's
+  // doc comments), never fall back to an unfiltered {}.
+  const scopeFilter = scopedAdminManagementWhere(currentUser);
+  // A gmina-scoped admin's gmina/organization pickers only ever offer their
+  // own gmina and its organizations — same fail-closed contract as above,
+  // reused rather than re-derived.
+  const gminaFilter = scopedGminaWhere(currentUser);
+  // Gmina itself has no `gminaId` column — its own `id` IS the gmina — so
+  // gminaFilter's `{ gminaId }` shape (built for filtering records that
+  // *reference* a gmina) needs translating to `{ id }` before it can scope
+  // the Gmina table directly.
+  const gminaIdFilter = gminaFilter && 'gminaId' in gminaFilter ? { id: gminaFilter.gminaId } : {};
 
   const [invites, gminas, organizations, currentUserOrganization] = await Promise.all([
     // Invites created before organizationId existed on this model won't
     // match a coordinator's scoped filter — see POST /api/admin/invites.
-    organizationFilter === null
+    scopeFilter === null
       ? Promise.resolve([])
       : prisma.inviteToken.findMany({
-          where: organizationFilter,
+          where: scopeFilter,
           orderBy: { createdAt: 'desc' },
           take: 50,
         }),
     // Only ADMIN picks/creates a gmina and organization when inviting; a
     // coordinator's invite always goes to their own organization, so they
-    // never need either full list.
-    isAdmin
-      ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
+    // never need either list. A gmina-scoped admin gets only their own
+    // gmina (gminaFilter), a global admin gets every gmina ({}).
+    isAdmin && gminaFilter !== null
+      ? prisma.gmina.findMany({ where: gminaIdFilter, orderBy: { name: 'asc' }, select: { id: true, name: true } })
       : Promise.resolve([]),
-    isAdmin
-      ? prisma.organization.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, gminaId: true } })
+    isAdmin && gminaFilter !== null
+      ? prisma.organization.findMany({
+          where: gminaFilter,
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, gminaId: true },
+        })
       : Promise.resolve([]),
     !isAdmin && currentUser.organizationId
       ? prisma.organization.findUnique({ where: { id: currentUser.organizationId }, select: { name: true } })
@@ -73,6 +89,7 @@ export default async function AdminInvitesPage() {
           gminas={gminas}
           organizations={organizations}
           isAdmin={isAdmin}
+          canGrantAdmin={canGrantAdmin}
           currentUserOrganizationId={currentUser.organizationId}
           currentUserOrganizationName={currentUserOrganization?.name ?? null}
         />

@@ -19,6 +19,7 @@ interface SidebarProps {
   role: string;
   canManageInvites: boolean;
   canManageResources: boolean;
+  canManageGminas: boolean;
   resourceInboxCount: number;
 }
 
@@ -35,6 +36,7 @@ export function Sidebar({
   role,
   canManageInvites,
   canManageResources,
+  canManageGminas,
   resourceInboxCount,
 }: SidebarProps) {
   const pathname = usePathname();
@@ -144,7 +146,7 @@ export function Sidebar({
                   </div>
                   <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Link>
-                {role === 'ADMIN' && (
+                {canManageGminas && (
                   <Link href="/admin/gminas" onClick={onCloseMobile} className={linkClasses(pathname === '/admin/gminas')}>
                     <div className="flex items-center gap-3">
                       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100 transition">

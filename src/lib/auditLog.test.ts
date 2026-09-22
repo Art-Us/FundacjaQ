@@ -372,6 +372,38 @@ describe('revertAuditLog — dispatch guards', () => {
 
     expect(result).toEqual({ ok: false, status: 500, error: expect.any(String) });
   });
+
+  // Regression coverage: a gmina-scoped admin (POST /api/admin/logs/[id]/revert)
+  // passes their own gminaId as restrictToGminaId. An entity's history can
+  // span more than one gmina (e.g. a global admin later moved a user from
+  // gmina A to gmina B) — checking only the REQUESTED log's own gminaId
+  // isn't enough, since the cascade can still reach a later entry tagged
+  // with a different gmina. This must be caught for every entry in the
+  // chain, not just the one the caller explicitly asked for.
+  it('rejects with 409 when restrictToGminaId does not match every entry in the cascade chain', async () => {
+    const older = baseLog({ id: 'log-1', gminaId: 'gmina-A', createdAt: new Date('2026-01-01T00:00:00Z') });
+    const newer = baseLog({ id: 'log-2', gminaId: 'gmina-B', createdAt: new Date('2026-01-02T00:00:00Z') });
+    prisma.auditLog.findUnique.mockResolvedValue(older as any);
+    mockChain([older, newer]);
+
+    const result = await revertAuditLog('log-1', ACTOR, undefined, 'gmina-A');
+
+    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
+    expect(prisma.auditLog.update).not.toHaveBeenCalled();
+  });
+
+  it('does not block on the gmina check when restrictToGminaId matches every entry in the chain', async () => {
+    // entityType RESOURCE has no revert branch, so this falls through to the
+    // "unsupported entity type" 400 rather than a 409 — proving the gmina
+    // check itself passed rather than never having run.
+    const log = baseLog({ action: 'USER_UPDATE', entityType: 'RESOURCE', entityId: 'resource-1', gminaId: 'gmina-A' });
+    prisma.auditLog.findUnique.mockResolvedValue(log as any);
+    mockChain([log]);
+
+    const result = await revertAuditLog('log-1', ACTOR, undefined, 'gmina-A');
+
+    expect(result).toEqual({ ok: false, status: 400, error: expect.any(String) });
+  });
 });
 
 describe('revertAuditLog — USER (single step)', () => {

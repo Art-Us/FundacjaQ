@@ -1,11 +1,15 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
+import { isGlobalAdmin } from '@/lib/authz';
 import { LogsTabs } from './LogsTabs';
 
 export default async function AdminLogsPage() {
   const session = await getSession();
-  // ADMIN-only for now — see the note in api/admin/logs/route.ts on why
-  // COORDINATOR isn't given even a gmina-scoped view yet.
+  // ADMIN-only (COORDINATOR is deliberately left out) — a global admin sees
+  // every gmina's audit log AND login attempts; a gmina-scoped admin sees
+  // (and may revert) only their own gmina's audit log, but never login
+  // attempts (see the "Logowania" tab gating below, and GET
+  // /api/admin/login-attempts, which stays global-admin-only).
   if (!session?.user || session.user.role !== 'ADMIN') {
     redirect('/');
   }
@@ -19,7 +23,7 @@ export default async function AdminLogsPage() {
         </p>
       </div>
 
-      <LogsTabs />
+      <LogsTabs canSeeLoginAttempts={isGlobalAdmin(session.user)} />
     </main>
   );
 }

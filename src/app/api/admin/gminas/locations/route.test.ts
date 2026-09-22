@@ -7,24 +7,24 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return {
     ...actual,
-    requireAdmin: vi.fn(),
+    requireGlobalAdmin: vi.fn(),
   };
 });
 
 import { prisma as prismaImport } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { GET } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
 beforeEach(() => {
   mockReset(prisma);
-  vi.mocked(requireAdmin).mockReset();
+  vi.mocked(requireGlobalAdmin).mockReset();
 });
 
 describe('GET /api/admin/gminas/locations', () => {
   it('returns 403 with no DB call when the caller is not an ADMIN', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue(null);
+    vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
 
     const res = await GET();
 
@@ -33,7 +33,7 @@ describe('GET /api/admin/gminas/locations', () => {
   });
 
   it('returns an empty list when no gmina has a voivodeship set', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findMany.mockResolvedValue([]);
 
     const res = await GET();
@@ -47,7 +47,7 @@ describe('GET /api/admin/gminas/locations', () => {
   });
 
   it('groups powiats under every voivodeship they appear in, sorted alphabetically and deduplicated', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     // A powiat present under two voivodeships, a duplicate row, and a
     // voivodeship with no powiat set — the grouping must not crash on the
     // null and must not offer a "powiat" option that doesn't actually exist

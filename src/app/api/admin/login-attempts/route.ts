@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { escapeLikePattern } from '@/lib/utils';
 
 export const runtime = 'nodejs';
@@ -10,9 +10,11 @@ export const runtime = 'nodejs';
 const MAX_TAKE = 100;
 const DEFAULT_TAKE = 50;
 
-// Read-only, ADMIN-only — same reasoning as GET /api/admin/logs: no
-// gmina-scoped view exists yet, and this is a security-relevant trail, so
-// COORDINATOR is deliberately left out until that's built on purpose.
+// Read-only, global-admin-only — same reasoning as GET /api/admin/logs: no
+// gmina-scoped view exists yet (LoginAttempt has no gmina/organization FK
+// at all, so it can't even be structurally scoped without a schema change),
+// and this is a security-relevant trail, so COORDINATOR and a gmina-scoped
+// ADMIN are both deliberately left out until that's built on purpose.
 const querySchema = z.object({
   take: z.coerce.number().int().positive().max(MAX_TAKE).optional(),
   cursor: z.string().optional(),
@@ -23,7 +25,7 @@ const querySchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
-  const admin = await requireAdmin();
+  const admin = await requireGlobalAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }

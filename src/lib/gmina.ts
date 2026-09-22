@@ -8,17 +8,35 @@ export function requiresGmina(role: Role): boolean {
 
 /**
  * Scopes a Prisma `where` filter to `actor`'s own gmina for every gmina-scoped
- * role (anyone but ADMIN). Returns `null` when the actor IS gmina-scoped but
- * has no gmina of their own (stale data from before gmina became required, or
- * an admin cleared it via PATCH /api/admin/users/[id]).
+ * role — anyone but a *global* ADMIN (gminaId === null). A gmina-scoped ADMIN
+ * (gminaId set) is scoped exactly like everyone else here — same as
+ * COORDINATOR/VOLUNTEER — which is what makes them "the same access as ADMIN,
+ * but only in their gmina" (see lib/authz.ts's isGlobalAdmin/isGminaScopedAdmin).
+ * Returns `null` when the actor IS gmina-scoped but has no gmina of their own
+ * (stale data from before gmina became required, or an admin cleared it via
+ * PATCH /api/admin/users/[id]).
  *
  * Callers MUST treat `null` as "return nothing" (fail closed) and never
  * substitute an empty `{}` filter for it — `{}` means "no filter", which
  * would hand a gmina-scoped actor with no gmina the same unrestricted view
- * as an ADMIN. This was exactly the bug found in the 2026-09-10 audit across
- * admin/invites/page.tsx, admin/users/page.tsx and dashboard.ts.
+ * as a global ADMIN. This was exactly the bug found in the 2026-09-10 audit
+ * across admin/invites/page.tsx, admin/users/page.tsx and dashboard.ts.
  */
 export function scopedGminaWhere(actor: { role: Role | string; gminaId: string | null }): { gminaId: string } | Record<string, never> | null {
+  if (actor.role === 'ADMIN' && !actor.gminaId) return {};
+  if (!actor.gminaId) return null;
+  return { gminaId: actor.gminaId };
+}
+
+/**
+ * Same shape as scopedGminaWhere, but for the two areas (alerts, resources —
+ * including allocations/needs) the product owner decided should stay
+ * ADMIN-unconditional regardless of gminaId, unlike everything else
+ * (users/invites/gminas/organizations/audit log) — any ADMIN, global or
+ * gmina-scoped, sees every gmina's alerts and resources. Everyone else
+ * (COORDINATOR/VOLUNTEER) is scoped exactly the same as scopedGminaWhere.
+ */
+export function scopedGminaWhereAnyAdmin(actor: { role: Role | string; gminaId: string | null }): { gminaId: string } | Record<string, never> | null {
   if (actor.role === 'ADMIN') return {};
   if (!actor.gminaId) return null;
   return { gminaId: actor.gminaId };

@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { isGlobalAdmin } from '@/lib/authz';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
 import { UsersDirectory } from './UsersDirectory';
 import { ClearNewUserNotice } from './ClearNewUserNotice';
@@ -12,6 +14,17 @@ export default async function AdminUsersPage() {
   }
 
   const isAdmin = session.user.role === 'ADMIN';
+  const canGrantAdmin = isGlobalAdmin(session.user);
+
+  // A gmina-scoped admin's gmina/organization pickers only ever offer their
+  // own gmina and its organizations — same fail-closed contract used
+  // everywhere else gmina scoping applies (see lib/gmina.ts's doc comment).
+  const gminaFilter = scopedGminaWhere(session.user);
+  // Gmina itself has no `gminaId` column — its own `id` IS the gmina — so
+  // gminaFilter's `{ gminaId }` shape needs translating to `{ id }` before
+  // it can scope the Gmina table directly (Organization DOES have gminaId,
+  // so gminaFilter is used as-is for that one).
+  const gminaIdFilter = gminaFilter && 'gminaId' in gminaFilter ? { id: gminaFilter.gminaId } : {};
 
   // The user LIST itself is no longer fetched here — UsersDirectory loads it
   // (paginated, filtered, searched) from GET /api/admin/users on its own,
@@ -19,11 +32,15 @@ export default async function AdminUsersPage() {
   // small lookup lists (for the create/edit form's dropdowns) stay
   // server-rendered, since only ADMIN can create/reassign users anyway.
   const [gminas, organizations] = await Promise.all([
-    isAdmin
-      ? prisma.gmina.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } })
+    isAdmin && gminaFilter !== null
+      ? prisma.gmina.findMany({ where: gminaIdFilter, orderBy: { name: 'asc' }, select: { id: true, name: true } })
       : Promise.resolve([]),
-    isAdmin
-      ? prisma.organization.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, gminaId: true } })
+    isAdmin && gminaFilter !== null
+      ? prisma.organization.findMany({
+          where: gminaFilter,
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, gminaId: true },
+        })
       : Promise.resolve([]),
   ]);
 
@@ -46,7 +63,7 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UsersDirectory gminas={gminas} organizations={organizations} isAdmin={isAdmin} />
+      <UsersDirectory gminas={gminas} organizations={organizations} isAdmin={isAdmin} canGrantAdmin={canGrantAdmin} />
     </main>
   );
 }

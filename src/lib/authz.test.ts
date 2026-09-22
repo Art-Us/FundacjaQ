@@ -15,8 +15,13 @@ import {
   isAllocationDonor,
   isAllocationRecipient,
   canManageAlert,
+  canManageUser,
+  isGlobalAdmin,
+  isGminaScopedAdmin,
+  scopedAdminManagementWhere,
   requireAdmin,
   requireAdminOrCoordinator,
+  requireGlobalAdmin,
 } from './authz';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -168,6 +173,7 @@ describe('canManageAlert', () => {
 
   it('is always true for ADMIN, regardless of organization or gmina', () => {
     expect(canManageAlert(alert, { role: 'ADMIN', gminaId: null, organizationId: null })).toBe(true);
+    expect(canManageAlert(alert, { role: 'ADMIN', gminaId: 'gmina-2', organizationId: null })).toBe(true);
   });
 
   it('is true for a COORDINATOR whose organization owns the alert, even in a different gmina', () => {
@@ -192,5 +198,126 @@ describe('canManageAlert', () => {
     expect(
       canManageAlert(alert, { role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-owner' })
     ).toBe(false);
+  });
+});
+
+describe('isGlobalAdmin / isGminaScopedAdmin', () => {
+  it('isGlobalAdmin is true only for ADMIN with no gmina', () => {
+    expect(isGlobalAdmin({ role: 'ADMIN', gminaId: null })).toBe(true);
+    expect(isGlobalAdmin({ role: 'ADMIN', gminaId: 'gmina-1' })).toBe(false);
+    expect(isGlobalAdmin({ role: 'COORDINATOR', gminaId: null })).toBe(false);
+  });
+
+  it('isGminaScopedAdmin is true only for ADMIN with a gmina', () => {
+    expect(isGminaScopedAdmin({ role: 'ADMIN', gminaId: 'gmina-1' })).toBe(true);
+    expect(isGminaScopedAdmin({ role: 'ADMIN', gminaId: null })).toBe(false);
+    expect(isGminaScopedAdmin({ role: 'COORDINATOR', gminaId: 'gmina-1' })).toBe(false);
+  });
+});
+
+describe('requireGlobalAdmin', () => {
+  it('returns the session user for a global admin', async () => {
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'u1', role: 'ADMIN', gminaId: null } } as any);
+    expect(await requireGlobalAdmin()).toEqual({ id: 'u1', role: 'ADMIN', gminaId: null });
+  });
+
+  it('returns null for a gmina-scoped admin', async () => {
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: 'u1', role: 'ADMIN', gminaId: 'gmina-1' } } as any);
+    expect(await requireGlobalAdmin()).toBeNull();
+  });
+
+  it('returns null for a non-admin', async () => {
+    mockSession('COORDINATOR');
+    expect(await requireGlobalAdmin()).toBeNull();
+  });
+
+  it('returns null when unauthenticated', async () => {
+    mockSession(null);
+    expect(await requireGlobalAdmin()).toBeNull();
+  });
+});
+
+describe('canManageUser', () => {
+  it('nobody can manage themselves, regardless of role', () => {
+    expect(
+      canManageUser(
+        { id: 'u1', role: 'ADMIN', gminaId: null },
+        { id: 'u1', role: 'ADMIN', gminaId: null, organizationId: null }
+      )
+    ).toBe(false);
+  });
+
+  it('a global admin can manage anyone, including another admin (global or gmina-scoped)', () => {
+    const globalAdmin = { id: 'admin-1', role: 'ADMIN', gminaId: null };
+    expect(
+      canManageUser(globalAdmin, { id: 'u2', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    ).toBe(true);
+    expect(
+      canManageUser(globalAdmin, { id: 'u3', role: 'ADMIN', gminaId: 'gmina-1', organizationId: null })
+    ).toBe(true);
+    expect(canManageUser(globalAdmin, { id: 'u4', role: 'ADMIN', gminaId: null, organizationId: null })).toBe(true);
+  });
+
+  it('a gmina-scoped admin can manage a non-admin in their own gmina', () => {
+    const gminaAdmin = { id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' };
+    expect(
+      canManageUser(gminaAdmin, { id: 'u2', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    ).toBe(true);
+  });
+
+  it('a gmina-scoped admin can NEVER manage a global admin, even nominally "same gmina" comparisons aside', () => {
+    const gminaAdmin = { id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' };
+    expect(canManageUser(gminaAdmin, { id: 'u2', role: 'ADMIN', gminaId: null, organizationId: null })).toBe(false);
+  });
+
+  it('a gmina-scoped admin CAN manage a peer gmina-scoped admin in the SAME gmina (only global admins are protected)', () => {
+    const gminaAdmin = { id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' };
+    expect(
+      canManageUser(gminaAdmin, { id: 'u2', role: 'ADMIN', gminaId: 'gmina-1', organizationId: null })
+    ).toBe(true);
+  });
+
+  it('a gmina-scoped admin cannot manage anyone (admin or not) outside their own gmina', () => {
+    const gminaAdmin = { id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' };
+    expect(
+      canManageUser(gminaAdmin, { id: 'u2', role: 'VOLUNTEER', gminaId: 'gmina-2', organizationId: 'org-1' })
+    ).toBe(false);
+    expect(
+      canManageUser(gminaAdmin, { id: 'u3', role: 'ADMIN', gminaId: 'gmina-2', organizationId: null })
+    ).toBe(false);
+  });
+
+  it('COORDINATOR behavior is unchanged: only their own organization\'s VOLUNTEERs', () => {
+    const coordinator = { id: 'c1', role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: 'org-1' };
+    expect(
+      canManageUser(coordinator, { id: 'v1', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-1' })
+    ).toBe(true);
+    expect(
+      canManageUser(coordinator, { id: 'v2', role: 'VOLUNTEER', gminaId: 'gmina-1', organizationId: 'org-2' })
+    ).toBe(false);
+    expect(
+      canManageUser(coordinator, { id: 'c2', role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: 'org-1' })
+    ).toBe(false);
+  });
+});
+
+describe('scopedAdminManagementWhere', () => {
+  it('returns {} (unrestricted) for a global admin', () => {
+    expect(scopedAdminManagementWhere({ id: 'a1', role: 'ADMIN', gminaId: null })).toEqual({});
+  });
+
+  it('returns { gminaId } for a gmina-scoped admin — gmina-wide, not organization-scoped', () => {
+    expect(scopedAdminManagementWhere({ id: 'a1', role: 'ADMIN', gminaId: 'gmina-1' })).toEqual({
+      gminaId: 'gmina-1',
+    });
+  });
+
+  it('delegates to scopedOrganizationWhere for COORDINATOR (unchanged, organization-scoped)', () => {
+    expect(
+      scopedAdminManagementWhere({ id: 'c1', role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: 'org-1' })
+    ).toEqual({ organizationId: 'org-1' });
+    expect(
+      scopedAdminManagementWhere({ id: 'c2', role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: null })
+    ).toBeNull();
   });
 });

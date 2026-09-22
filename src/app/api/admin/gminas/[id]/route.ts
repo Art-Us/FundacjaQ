@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { normalizeGminaName } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotGmina } from '@/lib/auditLog';
 
@@ -16,8 +16,10 @@ const updateGminaSchema = z.object({
   longitude: z.number().gte(-180).lte(180).nullable().optional(),
 });
 
+// Global-admin-only — a gmina-scoped admin has no access to gmina
+// management at all (see the matching gate in GET/POST /api/admin/gminas).
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin();
+  const admin = await requireGlobalAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
@@ -93,8 +95,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
+// Global-admin-only, same as PATCH.
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const admin = await requireAdmin();
+  const admin = await requireGlobalAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }

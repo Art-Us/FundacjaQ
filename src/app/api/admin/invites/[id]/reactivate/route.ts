@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { generateToken, hashToken, INVITE_TOKEN_TTL_MS } from '@/lib/tokens';
 import { sendInviteEmail, isEmailConfigured } from '@/lib/email';
 import { consumeLimit, inviteCreateLimiter } from '@/lib/rateLimit';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isGlobalAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { recordAudit, requestMeta, snapshotInvite } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
@@ -31,9 +31,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Zaproszenie nie istnieje.' }, { status: 404 });
   }
 
-  // ADMIN can reactivate any invite; COORDINATOR only the ones they sent —
-  // same rule as revoke.
-  if (user.role !== 'ADMIN' && invite.createdById !== user.id) {
+  // Same scoping as POST /api/admin/invites/[id]/revoke: global admin
+  // unrestricted, gmina-scoped admin only their own gmina's invites,
+  // COORDINATOR only the ones they sent.
+  if (isGlobalAdmin(user)) {
+    // unrestricted
+  } else if (isGminaScopedAdmin(user)) {
+    if (invite.gminaId !== user.gminaId) {
+      return NextResponse.json({ error: 'Nie masz uprawnień do wznowienia tego zaproszenia.' }, { status: 403 });
+    }
+  } else if (invite.createdById !== user.id) {
     return NextResponse.json({ error: 'Nie masz uprawnień do wznowienia tego zaproszenia.' }, { status: 403 });
   }
 

@@ -62,9 +62,8 @@ describe('getDashboardData — ADMIN', () => {
 });
 
 describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
-  it('scopes COORDINATOR data to their own gmina', async () => {
+  it('scopes COORDINATOR data to their own gmina, including gminyCount (never the system-wide total)', async () => {
     prisma.alert.count.mockResolvedValue(2);
-    prisma.gmina.count.mockResolvedValue(3);
     prisma.user.count.mockResolvedValue(4);
     prisma.alert.findMany.mockResolvedValue([{ id: 'a1' }] as any);
     prisma.resource.findMany.mockResolvedValue([{ id: 'r1' }] as any);
@@ -73,7 +72,8 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
 
     expect(result.scopeLabel).toBe('Twoja gmina');
     expect(result.canManageInvites).toBe(true);
-    expect(result.stats).toEqual({ activeAlerts: 2, gminyCount: 3, usersCount: 4 });
+    expect(result.stats).toEqual({ activeAlerts: 2, gminyCount: 1, usersCount: 4 });
+    expect(prisma.gmina.count).not.toHaveBeenCalled();
 
     expect(prisma.alert.count).toHaveBeenCalledWith({
       where: { gminaId: 'gmina-1', status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
@@ -108,6 +108,29 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
       where: { gminaId: 'gmina-2', status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
     });
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-2' } });
+  });
+
+  // A gmina-scoped ADMIN (role === 'ADMIN', gminaId set) is scoped like
+  // COORDINATOR/VOLUNTEER for usersCount/gminyCount/scopeLabel — but alerts
+  // and resources deliberately stay ADMIN-unconditional (product decision:
+  // any ADMIN sees every gmina's alerts/resources, unlike users/gminy).
+  it('scopes a gmina-scoped ADMIN\'s usersCount/gminyCount, but keeps alerts/resources unrestricted like a global ADMIN', async () => {
+    prisma.alert.count.mockResolvedValue(2);
+    prisma.user.count.mockResolvedValue(4);
+    prisma.alert.findMany.mockResolvedValue([{ id: 'a1' }] as any);
+    prisma.resource.findMany.mockResolvedValue([{ id: 'r1' }] as any);
+
+    const result = await getDashboardData('ADMIN', 'gmina-1');
+
+    expect(result.scopeLabel).toBe('Twoja gmina');
+    expect(result.stats).toEqual({ activeAlerts: 2, gminyCount: 1, usersCount: 4 });
+    expect(prisma.gmina.count).not.toHaveBeenCalled();
+    expect(prisma.alert.count).toHaveBeenCalledWith({
+      where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
+    });
+    expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-1' } });
+    expect(prisma.alert.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    expect(prisma.resource.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
   });
 });
 

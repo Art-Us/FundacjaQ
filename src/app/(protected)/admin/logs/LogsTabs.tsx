@@ -11,13 +11,19 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key'];
 
-export function LogsTabs() {
+interface LogsTabsProps {
+  /** Only a global admin (gminaId === null) sees login attempts — see GET /api/admin/login-attempts. */
+  canSeeLoginAttempts: boolean;
+}
+
+export function LogsTabs({ canSeeLoginAttempts }: LogsTabsProps) {
   const [tab, setTab] = useState<TabKey>('audit');
+  const visibleTabs = canSeeLoginAttempts ? TABS : TABS.filter((t) => t.key !== 'login');
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.key}
             type="button"

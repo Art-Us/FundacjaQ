@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { ShieldCheck, UserPlus, BellRing, Building2, Users } from 'lucide-react';
 import { getSession } from '@/lib/session';
 import { getDashboardData } from '@/lib/dashboard';
+import { isGlobalAdmin } from '@/lib/authz';
 import { formatDate } from '@/lib/utils';
 import { SEVERITY_STYLES, ALERT_STATUS_LABELS } from '@/lib/alertLabels';
 import { ROLE_LABELS } from '@/lib/roleLabels';
@@ -23,6 +24,9 @@ export default async function HomePage() {
 
   const { role, gminaId } = session.user;
   const data = await getDashboardData(role as Role, gminaId);
+  // A gmina-scoped ADMIN sees "w gminie"/scoped columns the same as a
+  // COORDINATOR/VOLUNTEER — only a global admin gets the unrestricted view.
+  const isGlobalAdminUser = isGlobalAdmin({ role, gminaId });
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-8">
@@ -43,7 +47,7 @@ export default async function HomePage() {
         <StatCard label="Aktywne alerty" value={data.stats.activeAlerts} icon={<BellRing className="h-4 w-4" />} />
         <StatCard label="Gminy w systemie" value={data.stats.gminyCount} icon={<Building2 className="h-4 w-4" />} />
         <StatCard
-          label={role === 'ADMIN' ? 'Użytkownicy' : 'Użytkownicy w gminie'}
+          label={isGlobalAdminUser ? 'Użytkownicy' : 'Użytkownicy w gminie'}
           value={data.stats.usersCount}
           icon={<Users className="h-4 w-4" />}
         />
@@ -116,7 +120,7 @@ export default async function HomePage() {
                       <th className="py-3 px-4">Kategoria</th>
                       <th className="py-3 px-4">Ilość</th>
                       <th className="py-3 px-4">Status</th>
-                      {role === 'ADMIN' && <th className="py-3 px-4">Gmina</th>}
+                      {isGlobalAdminUser && <th className="py-3 px-4">Gmina</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -128,7 +132,7 @@ export default async function HomePage() {
                           {resource.quantity} {resource.unit}
                         </td>
                         <td className="py-3 px-4 text-slate-600">{RESOURCE_STATUS_LABELS[resource.status] ?? resource.status}</td>
-                        {role === 'ADMIN' && <td className="py-3 px-4 text-slate-600">{resource.gmina.name}</td>}
+                        {isGlobalAdminUser && <td className="py-3 px-4 text-slate-600">{resource.gmina.name}</td>}
                       </tr>
                     ))}
                   </tbody>

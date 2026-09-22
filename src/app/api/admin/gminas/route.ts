@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { createGmina } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotGmina } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
@@ -75,7 +75,10 @@ function buildSearchOr(q: string): Prisma.GminaWhereInput[] {
 // dedicated gmina management page — see createGmina() for the single place
 // that decides whether a name is a duplicate.
 export async function POST(req: NextRequest) {
-  const admin = await requireAdmin();
+  // Global-admin-only: a brand-new gmina is by definition outside a
+  // gmina-scoped admin's own scope — they'd gain no rights over it, and it
+  // would appear in the system with no natural "owner".
+  const admin = await requireGlobalAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
@@ -108,8 +111,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ gmina: result.gmina }, { status: 201 });
 }
 
+// Global-admin-only, same as POST — a gmina-scoped admin has no access to
+// gmina management at all (see admin/gminas/page.tsx and Sidebar.tsx for
+// the matching page/nav gating).
 export async function GET(req: NextRequest) {
-  const admin = await requireAdmin();
+  const admin = await requireGlobalAdmin();
   if (!admin) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }

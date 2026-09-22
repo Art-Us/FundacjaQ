@@ -3,9 +3,10 @@ import { mockReset, type DeepMockProxy } from 'vitest-mock-extended';
 import type { PrismaClient } from '@prisma/client';
 
 vi.mock('@/lib/prisma');
-vi.mock('@/lib/authz', () => ({
-  requireAdminOrCoordinator: vi.fn(),
-}));
+vi.mock('@/lib/authz', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
+  return { ...actual, requireAdminOrCoordinator: vi.fn() };
+});
 vi.mock('@/lib/rateLimit', () => ({
   consumeLimit: vi.fn(),
   inviteCreateLimiter: {},
@@ -177,5 +178,29 @@ describe('POST /api/admin/invites/[id]/reactivate', () => {
 
     const updateCall = prisma.inviteToken.update.mock.calls[0][0] as any;
     expect(updateCall.data.tokenHash).not.toBe('old-hash');
+  });
+
+  describe('gmina-scoped admin actor', () => {
+    it('can reactivate an invite in their own gmina, even one created by someone else', async () => {
+      vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.inviteToken.findUnique.mockResolvedValue(baseInvite({ createdById: 'coord-1', gminaId: 'gmina-1' }) as any);
+      prisma.inviteToken.update.mockResolvedValue(baseInvite({ revokedAt: null }) as any);
+
+      const res = await callRoute();
+
+      expect(res.status).toBe(200);
+      expect(prisma.inviteToken.update).toHaveBeenCalled();
+    });
+
+    it('rejects (403) reactivating an invite belonging to a DIFFERENT gmina, never sending the email', async () => {
+      vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.inviteToken.findUnique.mockResolvedValue(baseInvite({ gminaId: 'gmina-2' }) as any);
+
+      const res = await callRoute();
+
+      expect(res.status).toBe(403);
+      expect(prisma.inviteToken.update).not.toHaveBeenCalled();
+      expect(sendInviteEmail).not.toHaveBeenCalled();
+    });
   });
 });

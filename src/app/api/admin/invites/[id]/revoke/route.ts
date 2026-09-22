@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator } from '@/lib/authz';
+import { requireAdminOrCoordinator, isGlobalAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { recordAudit, requestMeta, snapshotInvite } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
@@ -16,8 +16,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Zaproszenie nie istnieje.' }, { status: 404 });
   }
 
-  // ADMIN can revoke any invite; COORDINATOR only the ones they sent.
-  if (user.role !== 'ADMIN' && invite.createdById !== user.id) {
+  // A global admin can revoke any invite; a gmina-scoped admin only one
+  // belonging to their own gmina (this route used to check `user.role !==
+  // 'ADMIN'`, which treated every ADMIN as unconditionally unrestricted —
+  // the exact gap gmina-scoped ADMIN was introduced to close everywhere
+  // else); a COORDINATOR only the ones they sent themselves.
+  if (isGlobalAdmin(user)) {
+    // unrestricted
+  } else if (isGminaScopedAdmin(user)) {
+    if (invite.gminaId !== user.gminaId) {
+      return NextResponse.json({ error: 'Nie masz uprawnień do unieważnienia tego zaproszenia.' }, { status: 403 });
+    }
+  } else if (invite.createdById !== user.id) {
     return NextResponse.json({ error: 'Nie masz uprawnień do unieważnienia tego zaproszenia.' }, { status: 403 });
   }
 

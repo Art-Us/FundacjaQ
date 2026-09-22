@@ -119,7 +119,9 @@ describe('GET /api/admin/logs', () => {
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          action: { in: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'ORGANIZATION_UPDATE'] },
+          action: {
+            in: ['USER_UPDATE', 'GMINA_UPDATE', 'USER_ACTIVATE', 'USER_DEACTIVATE', 'USER_UNLOCK', 'ORGANIZATION_UPDATE'],
+          },
         }),
       })
     );
@@ -294,5 +296,38 @@ describe('GET /api/admin/logs', () => {
 
     expect(body.logs).toHaveLength(2);
     expect(body.nextCursor).toBeNull();
+  });
+
+  describe('gmina-scoped admin actor', () => {
+    it('can access the log (unlike login-attempts, which stays global-admin-only)', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.auditLog.findMany.mockResolvedValue([]);
+
+      const res = await callGet();
+
+      expect(res.status).toBe(200);
+    });
+
+    it('forces the where clause to their own gmina, ignoring any different gminaId query param', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.auditLog.findMany.mockResolvedValue([]);
+
+      await callGet('?gminaId=some-other-gmina');
+
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      );
+    });
+
+    it('still applies its own gmina scope even with no gminaId query param at all', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'gadmin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.auditLog.findMany.mockResolvedValue([]);
+
+      await callGet();
+
+      expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ gminaId: 'gmina-1' }) })
+      );
+    });
   });
 });

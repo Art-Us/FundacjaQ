@@ -358,11 +358,22 @@ class RevertAbort extends Error {
  * expects (see revertUser/revertGmina/revertInvite) so a concurrent edit
  * from outside this chain — by another admin, mid-revert — is detected and
  * aborts the transaction instead of being silently overwritten.
+ *
+ * `restrictToGminaId`, when passed (by POST /api/admin/logs/[id]/revert for
+ * a gmina-scoped admin), requires EVERY entry in the cascade chain — not
+ * just the requested `logId` itself — to belong to that gmina. An entity's
+ * history can span more than one gmina (e.g. a global admin later moved a
+ * user from gmina A to gmina B); without this, a gmina-A admin targeting an
+ * old, gmina-A-tagged entry could cascade through and revert a later,
+ * gmina-B-tagged change too, reaching outside their own scope. The route
+ * itself already checks the target entry up front, but that alone doesn't
+ * cover the rest of the chain.
  */
 export async function revertAuditLog(
   logId: string,
   actor: AuditActor,
-  meta?: RequestMeta
+  meta?: RequestMeta,
+  restrictToGminaId?: string
 ): Promise<RevertResult> {
   try {
     const { revertedLogIds, revertedUserIds, revertedEntityTypes } = await prisma.$transaction(async (tx) => {
@@ -386,6 +397,14 @@ export async function revertAuditLog(
         },
         orderBy: { seq: 'asc' },
       });
+
+      if (restrictToGminaId !== undefined && chain.some((entry) => entry.gminaId !== restrictToGminaId)) {
+        throw new RevertAbort(
+          conflict(
+            'Nie można cofnąć tej zmiany — historia tego wpisu obejmuje inną gminę niż Twoja.'
+          )
+        );
+      }
 
       const blocker = chain.find((entry) => !REVERTIBLE_ACTIONS.has(entry.action));
       if (blocker) {

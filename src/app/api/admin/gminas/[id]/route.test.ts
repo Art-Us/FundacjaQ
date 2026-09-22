@@ -8,7 +8,7 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return {
     ...actual,
-    requireAdmin: vi.fn(),
+    requireGlobalAdmin: vi.fn(),
   };
 });
 vi.mock('@/lib/adminEvents', () => ({
@@ -16,7 +16,7 @@ vi.mock('@/lib/adminEvents', () => ({
 }));
 
 import { prisma as prismaImport } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireGlobalAdmin } from '@/lib/authz';
 import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -51,12 +51,12 @@ function callDelete(id = 'target-1') {
 
 beforeEach(() => {
   mockReset(prisma);
-  vi.mocked(requireAdmin).mockReset();
+  vi.mocked(requireGlobalAdmin).mockReset();
 });
 
 describe('PATCH /api/admin/gminas/[id]', () => {
   it('rejects with 403 and no DB write when the caller is not an ADMIN', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue(null);
+    vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
 
     const res = await callPatch({ name: 'New Name' });
 
@@ -65,7 +65,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('returns 404 for a nonexistent gmina', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(null);
 
     const res = await callPatch({ name: 'New Name' }, 'missing');
@@ -74,7 +74,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('updates fields for an ADMIN session', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.update.mockResolvedValue({} as any);
 
@@ -88,7 +88,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('allows renaming to a name that only differs from itself by case/whitespace', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina({ name: 'Warszawa' }) as any);
     prisma.gmina.update.mockResolvedValue({} as any);
 
@@ -103,7 +103,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('rejects renaming to a name already used by another gmina (case/whitespace-insensitive)', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina({ name: 'Warszawa' }) as any);
     prisma.gmina.findFirst.mockResolvedValue({ id: 'other-gmina', name: 'Kraków' } as any);
 
@@ -114,7 +114,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('clears powiat/voivodeship/latitude/longitude when explicitly set to null', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(
       baseGmina({ powiat: 'warszawski', voivodeship: 'mazowieckie', latitude: 52.2, longitude: 21.0 }) as any
     );
@@ -130,7 +130,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('updates latitude/longitude within range', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.update.mockResolvedValue({} as any);
 
@@ -149,7 +149,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
     ['longitude', 181],
     ['longitude', -181],
   ])('rejects an out-of-range %s (%d) with 400 and no DB write', async (field, value) => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
 
     const res = await callPatch({ [field]: value });
@@ -159,7 +159,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('performs a no-op update when no fields are given', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.update.mockResolvedValue({} as any);
 
@@ -170,7 +170,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('rejects a blank name', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
 
     const res = await callPatch({ name: '   ' });
@@ -180,7 +180,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
   });
 
   it('returns a clean 400 (not an unhandled crash) when the duplicate-check read itself fails', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina({ name: 'Warszawa' }) as any);
     prisma.gmina.findFirst.mockRejectedValue(new Error('connection lost'));
 
@@ -192,7 +192,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
 
   it('returns 409 (not a generic 400) when a concurrent rename races past the pre-check and hits the unique constraint', async () => {
     const { Prisma } = await import('@prisma/client');
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina({ name: 'Warszawa' }) as any);
     prisma.gmina.findFirst.mockResolvedValue(null);
     prisma.gmina.update.mockRejectedValue(
@@ -212,7 +212,7 @@ describe('PATCH /api/admin/gminas/[id]', () => {
 
 describe('DELETE /api/admin/gminas/[id]', () => {
   it('rejects with 403 and no DB write when the caller is not an ADMIN', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue(null);
+    vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
 
     const res = await callDelete();
 
@@ -221,7 +221,7 @@ describe('DELETE /api/admin/gminas/[id]', () => {
   });
 
   it('returns 404 for a nonexistent gmina', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(null);
 
     const res = await callDelete('missing');
@@ -230,7 +230,7 @@ describe('DELETE /api/admin/gminas/[id]', () => {
   });
 
   it('lets ADMIN delete a gmina with no dependents', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.delete.mockResolvedValue({} as any);
 
@@ -242,7 +242,7 @@ describe('DELETE /api/admin/gminas/[id]', () => {
 
   it('returns 409 when the gmina has related records blocking deletion (P2003)', async () => {
     const { Prisma } = await import('@prisma/client');
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.delete.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
@@ -257,12 +257,37 @@ describe('DELETE /api/admin/gminas/[id]', () => {
   });
 
   it('returns 500 (not a false "has dependents" 409) when delete fails for an unrelated reason', async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    vi.mocked(requireGlobalAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.gmina.findUnique.mockResolvedValue(baseGmina() as any);
     prisma.gmina.delete.mockRejectedValue(new Error('connection lost'));
 
     const res = await callDelete();
 
     expect(res.status).toBe(500);
+  });
+
+  // Gmina management is global-admin-only — a gmina-scoped admin has no
+  // access at all, not even to their own gmina (requireGlobalAdmin() itself
+  // returns null for them, same as it does for a non-admin).
+  describe('gmina-scoped admin actor', () => {
+    it('PATCH: rejects with 403 and no DB write', async () => {
+      vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
+
+      const res = await callPatch({ powiat: 'nowy' });
+
+      expect(res.status).toBe(403);
+      expect(prisma.gmina.findUnique).not.toHaveBeenCalled();
+      expect(prisma.gmina.update).not.toHaveBeenCalled();
+    });
+
+    it('DELETE: rejects with 403 and no DB write', async () => {
+      vi.mocked(requireGlobalAdmin).mockResolvedValue(null);
+
+      const res = await callDelete();
+
+      expect(res.status).toBe(403);
+      expect(prisma.gmina.findUnique).not.toHaveBeenCalled();
+      expect(prisma.gmina.delete).not.toHaveBeenCalled();
+    });
   });
 });

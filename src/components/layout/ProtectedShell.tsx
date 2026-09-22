@@ -13,6 +13,7 @@ interface ProtectedShellProps {
   role: string;
   canManageInvites: boolean;
   canManageResources: boolean;
+  canManageGminas: boolean;
   resourceInboxCount: number;
 }
 
@@ -22,6 +23,7 @@ export function ProtectedShell({
   role,
   canManageInvites,
   canManageResources,
+  canManageGminas,
   resourceInboxCount,
 }: ProtectedShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -55,6 +57,7 @@ export function ProtectedShell({
         role={role}
         canManageInvites={canManageInvites}
         canManageResources={canManageResources}
+        canManageGminas={canManageGminas}
         resourceInboxCount={resourceInboxCount}
       />
 

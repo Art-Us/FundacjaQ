@@ -177,6 +177,18 @@ describe('GET /api/admin/organizations', () => {
 
     expect(res.status).toBe(500);
   });
+
+  it('scopes a gmina-scoped admin to only their own gmina, ignoring a different gminaId query param', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+    prisma.organization.count.mockResolvedValue(0);
+    prisma.organization.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest('?gminaId=gmina-2'));
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { gminaId: 'gmina-1' } })
+    );
+  });
 });
 
 describe('POST /api/admin/organizations', () => {
@@ -266,5 +278,27 @@ describe('POST /api/admin/organizations', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toBe('Wybrana gmina nie istnieje.');
+  });
+
+  describe('gmina-scoped admin actor', () => {
+    it('can create an organization in their own gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+      prisma.gmina.findUnique.mockResolvedValue({ id: 'gmina-1' } as any);
+      prisma.organization.findFirst.mockResolvedValue(null);
+      prisma.organization.create.mockResolvedValue({ id: 'o1', name: 'Caritas', gminaId: 'gmina-1' } as any);
+
+      const res = await POST(makeRequest({ name: 'Caritas', gminaId: 'gmina-1' }));
+
+      expect(res.status).toBe(201);
+    });
+
+    it('rejects (403) creating an organization in a DIFFERENT gmina', async () => {
+      vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'gmina-1' });
+
+      const res = await POST(makeRequest({ name: 'Caritas', gminaId: 'gmina-2' }));
+
+      expect(res.status).toBe(403);
+      expect(prisma.organization.create).not.toHaveBeenCalled();
+    });
   });
 });

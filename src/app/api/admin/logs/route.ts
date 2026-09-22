@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuditEntityType, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/authz';
+import { requireAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { canRevert, ACTION_KINDS, ACTION_KIND_MAP } from '@/lib/auditLog';
 import { escapeLikePattern } from '@/lib/utils';
 
@@ -11,11 +11,13 @@ export const runtime = 'nodejs';
 const MAX_TAKE = 100;
 const DEFAULT_TAKE = 50;
 
-// Logs (and reverts) are ADMIN-only for now — COORDINATOR is deliberately
-// left out. A gmina-scoped view would need the same scopedGminaWhere
-// treatment as everywhere else in lib/gmina.ts, and getting that wrong once
-// already produced a real IDOR (2026-09-10 audit); until that's built and
-// reviewed on purpose, showing the trail to anyone but ADMIN is out of scope.
+// Logs (and reverts) are ADMIN-only — COORDINATOR is deliberately left out.
+// A global admin sees every gmina's entries; a gmina-scoped admin sees (and
+// may revert) only their own gmina's — see the gminaId forcing below and in
+// POST /api/admin/logs/[id]/revert. Login attempts (a separate, sibling
+// endpoint) stay global-admin-only — LoginAttempt has no gmina FK at all,
+// and self-service login attempts aren't scoped to any admin's own gmina in
+// a way that's meaningful to show a gmina-scoped admin.
 const querySchema = z.object({
   take: z.coerce.number().int().positive().max(MAX_TAKE).optional(),
   cursor: z.string().optional(),
@@ -51,12 +53,16 @@ export async function GET(req: NextRequest) {
   }
   const { take, cursor, entityType, actionKind, actorId, entityId, gminaId, from, to, q } = parsed.data;
 
+  // A gmina-scoped admin's own gmina always wins over (or supplies, when
+  // absent) the query param — same "never leave your own scope" contract as
+  // everywhere else gmina scoping applies. A global admin's gminaId query
+  // param is honored as-is (optional free filter across every gmina).
   const where: Prisma.AuditLogWhereInput = {
     ...(entityType ? { entityType } : {}),
     ...(actionKind ? { action: { in: ACTION_KIND_MAP[actionKind] } } : {}),
     ...(actorId ? { actorId } : {}),
     ...(entityId ? { entityId } : {}),
-    ...(gminaId ? { gminaId } : {}),
+    ...(isGminaScopedAdmin(admin) ? { gminaId: admin.gminaId! } : gminaId ? { gminaId } : {}),
     ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
     ...(q
       ? {

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { scopedGminaWhere } from '@/lib/gmina';
+import { scopedGminaWhere, scopedGminaWhereAnyAdmin } from '@/lib/gmina';
 import { computeResourceMatrix, emptyMatrixTiles } from '@/lib/resourceMatrix';
 import { fetchAllocationInbox } from '@/lib/allocationInbox';
 import { RefreshOnMount } from '@/components/RefreshOnMount';
@@ -21,13 +21,17 @@ export default async function ZasobyPage() {
 
   const { role, gminaId, organizationId } = session.user;
 
-  // Must fail closed (see scopedGminaWhere's doc comment) — a COORDINATOR
-  // with no gmina of their own sees an empty matrix/organization list, never
-  // the unfiltered {} that would hand them every gmina's resources.
+  // Resources (the matrix) stay ADMIN-unconditional — see
+  // scopedGminaWhereAnyAdmin's doc comment. The organizations picker is
+  // unrelated to resources scoping and keeps the regular, gmina-scoped
+  // filter. Both must still fail closed for a COORDINATOR with no gmina.
+  const resourceGminaFilter = scopedGminaWhereAnyAdmin({ role, gminaId });
   const gminaFilter = scopedGminaWhere({ role, gminaId });
 
   const [matrix, organizations, inbox] = await Promise.all([
-    gminaFilter === null ? Promise.resolve({ tiles: emptyMatrixTiles(), categories: [] }) : computeResourceMatrix({ gminaFilter }),
+    resourceGminaFilter === null
+      ? Promise.resolve({ tiles: emptyMatrixTiles(), categories: [] })
+      : computeResourceMatrix({ gminaFilter: resourceGminaFilter }),
     gminaFilter === null
       ? Promise.resolve([])
       : prisma.organization.findMany({ where: gminaFilter, orderBy: { name: 'asc' }, select: { id: true, name: true } }),

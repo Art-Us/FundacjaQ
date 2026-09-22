@@ -2,6 +2,8 @@ import { getServerSession } from 'next-auth';
 import type { Prisma } from '@prisma/client';
 import { authOptions } from './auth';
 import { prisma } from './prisma';
+import { scopedGminaWhere } from './gmina';
+import { scopedOrganizationWhere } from './organization';
 
 export interface AuthorizedUser {
   id: string;
@@ -43,25 +45,87 @@ export async function requireAdmin(): Promise<AuthorizedUser | null> {
 }
 
 /**
- * Whether `actor` may activate/deactivate `target`. ADMIN can manage anyone;
- * COORDINATOR only their own organization's VOLUNTEERs (mirrors the
- * invite-role restriction in POST /api/admin/invites) — scoped by
- * organization, not gmina, so a coordinator with no organization of their
- * own can manage nobody at all, same as scopedOrganizationWhere's fail-closed
- * contract for list visibility. Nobody can act on their own account, since
- * isActive is re-checked live on every session refresh (src/lib/auth.ts jwt
- * callback) — self-deactivation would kill the actor's own session
- * mid-request with no way to undo it.
+ * An unrestricted, system-wide ADMIN — gminaId === null. This is every
+ * ADMIN account today (see prisma/seed.ts); the "gmina-scoped admin" variant
+ * below is a new, narrower kind of ADMIN whose gminaId is set.
+ */
+export function isGlobalAdmin(actor: { role: string; gminaId: string | null }): boolean {
+  return actor.role === 'ADMIN' && actor.gminaId === null;
+}
+
+/**
+ * An ADMIN restricted to their own gmina — same role, same set of
+ * capabilities as a global admin, but every one of them scoped to
+ * `actor.gminaId` (see scopedGminaWhere, canManageUser, canManageAlert, and
+ * the per-resource checks in the gminas/organizations/resources/allocations
+ * routes for where this scoping is actually enforced).
+ */
+export function isGminaScopedAdmin(actor: { role: string; gminaId: string | null }): boolean {
+  return actor.role === 'ADMIN' && actor.gminaId !== null;
+}
+
+/**
+ * Returns the current session user only if they're a *global* ADMIN.
+ * Used by the handful of admin-only areas that stay global-admin-exclusive
+ * even after gmina-scoped admins exist — gmina creation (a new gmina is by
+ * definition outside a gmina-scoped admin's own scope), and the audit
+ * log/login-attempts views (gmina-scoping those is deliberately out of
+ * scope — see the comments in their own route files).
+ */
+export async function requireGlobalAdmin(): Promise<AuthorizedUser | null> {
+  const session = await getServerSession(authOptions);
+  const user = session?.user;
+  if (!user || !isGlobalAdmin(user)) {
+    return null;
+  }
+  return user;
+}
+
+/**
+ * Whether `actor` may activate/deactivate/edit/delete `target`. A global
+ * ADMIN can manage anyone, exactly as before. A gmina-scoped ADMIN has the
+ * same power, but restricted to their own gmina — and can NEVER manage a
+ * global admin's account (target.role === 'ADMIN' && target.gminaId ===
+ * null), regardless of gmina match, since a global admin has no gmina to
+ * "match" in the first place. A gmina-scoped admin managing another
+ * gmina-scoped admin in their OWN gmina is allowed — only global admins are
+ * protected. COORDINATOR keeps its existing, unchanged behavior: only their
+ * own organization's VOLUNTEERs (mirrors the invite-role restriction in POST
+ * /api/admin/invites) — scoped by organization, not gmina, so a coordinator
+ * with no organization of their own can manage nobody at all, same as
+ * scopedOrganizationWhere's fail-closed contract for list visibility.
+ * Nobody can act on their own account, since isActive is re-checked live on
+ * every session refresh (src/lib/auth.ts jwt callback) — self-deactivation
+ * would kill the actor's own session mid-request with no way to undo it.
  */
 export function canManageUser(
   actor: AuthorizedUser,
-  target: { id: string; role: string; organizationId: string | null }
+  target: { id: string; role: string; gminaId: string | null; organizationId: string | null }
 ): boolean {
   if (actor.id === target.id) return false;
-  if (actor.role === 'ADMIN') return true;
+  if (actor.role === 'ADMIN') {
+    if (isGlobalAdmin(actor)) return true;
+    if (target.role === 'ADMIN' && target.gminaId === null) return false;
+    return target.gminaId !== null && target.gminaId === actor.gminaId;
+  }
   return (
     target.role === 'VOLUNTEER' && target.organizationId !== null && target.organizationId === (actor.organizationId ?? null)
   );
+}
+
+/**
+ * Visibility scope for the admin-management lists (GET /api/admin/users,
+ * GET /api/admin/invites). Deliberately does NOT reuse scopedOrganizationWhere
+ * for ADMIN — that scopes to one organization, narrower than a gmina-scoped
+ * admin needs (the same "whole gmina" breadth a global admin's `{}` implies,
+ * just restricted to their own gmina). scopedOrganizationWhere's own ADMIN
+ * branch (`{}`) and its entire COORDINATOR branch are untouched by this —
+ * this is a new, separate composition over both, not a change to either.
+ */
+export function scopedAdminManagementWhere(
+  actor: AuthorizedUser
+): { gminaId: string } | { organizationId: string } | Record<string, never> | null {
+  return actor.role === 'ADMIN' ? scopedGminaWhere(actor) : scopedOrganizationWhere(actor);
 }
 
 /**
@@ -156,7 +220,9 @@ export function isAllocationRecipient(
  * Whether `user` may manage (edit/cancel/etc.) `alert` — replaces the old
  * gmina-only check inline in AlertsMapView.tsx (`alert.gminaId ===
  * currentUserGminaId`), which had no concept of organizations at all. ADMIN
- * always can; VOLUNTEER never can (mirrors every other admin-style action in
+ * always can (alerts stay ADMIN-unconditional regardless of gmina — a
+ * deliberate product decision, unlike users/invites/gminas/organizations/
+ * audit log); VOLUNTEER never can (mirrors every other admin-style action in
  * this codebase — nothing here grants a volunteer alert-management rights
  * just because their organization happens to own the alert). A COORDINATOR
  * can manage it either because their organization owns it (isAlertOwnerOrg —
