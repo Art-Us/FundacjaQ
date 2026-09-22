@@ -11,7 +11,7 @@ vi.mock('@/lib/authz', async () => {
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
-import { PATCH } from './route';
+import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
@@ -220,5 +220,96 @@ describe('PATCH /api/alerts/[id]', () => {
       expect(prisma.alertNeed.findMany).not.toHaveBeenCalled();
       expect(prisma.alertNeed.update).not.toHaveBeenCalled();
     });
+  });
+});
+
+function makeDeleteRequest() {
+  return new NextRequest('http://localhost/api/alerts/a1', { method: 'DELETE' });
+}
+
+describe('DELETE /api/alerts/[id]', () => {
+  it('returns 403 with no DB call when unauthenticated', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue(null);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-ADMIN before touching the DB', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.alert.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the alert does not exist', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(null);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(404);
+  });
+
+  // The bug this guards: Alert -> AlertNeed -> ResourceAllocation cascade on
+  // delete, but nothing released the reservation those allocations held on
+  // Resource.reservedQuantity — deleting an alert permanently stranded it.
+  it('releases the outstanding reservation of every active allocation before deleting the alert', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([
+      { resourceId: 'res-1', quantity: 5, quantityReturned: 0, quantityNotReturnable: 0 },
+      // Partially returned (1 of 3) — only the still-outstanding 2 should be released.
+      { resourceId: 'res-2', quantity: 3, quantityReturned: 1, quantityNotReturnable: 0 },
+    ] as any);
+    prisma.resource.update.mockResolvedValue({} as any);
+    prisma.alert.delete.mockResolvedValue({} as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.resourceAllocation.findMany).toHaveBeenCalledWith({
+      where: { alertId: 'a1', status: { notIn: ['RETURNED', 'CANCELLED'] }, resourceId: { not: null } },
+      select: { resourceId: true, quantity: true, quantityReturned: true, quantityNotReturnable: true },
+    });
+    expect(prisma.resource.update).toHaveBeenCalledWith({
+      where: { id: 'res-1' },
+      data: { reservedQuantity: { decrement: 5 } },
+    });
+    expect(prisma.resource.update).toHaveBeenCalledWith({
+      where: { id: 'res-2' },
+      data: { reservedQuantity: { decrement: 2 } },
+    });
+    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
+  });
+
+  it('skips a fully-accounted-for allocation (nothing outstanding to release)', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([
+      { resourceId: 'res-1', quantity: 4, quantityReturned: 4, quantityNotReturnable: 0 },
+    ] as any);
+    prisma.alert.delete.mockResolvedValue({} as any);
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.resource.update).not.toHaveBeenCalled();
+    expect(prisma.alert.delete).toHaveBeenCalledWith({ where: { id: 'a1' } });
+  });
+
+  it('returns 500 and does not swallow a failed delete', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null, organizationId: null });
+    prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([] as any);
+    prisma.alert.delete.mockRejectedValue(new Error('db down'));
+
+    const res = await DELETE(makeDeleteRequest(), ctx);
+
+    expect(res.status).toBe(500);
   });
 });

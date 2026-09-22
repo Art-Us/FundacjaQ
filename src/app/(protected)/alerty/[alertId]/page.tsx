@@ -170,6 +170,7 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
           alertId={alert.id}
           alertLocationLabel={alert.location || alert.gmina.name}
           alertDescription={alert.description}
+          alertStatus={alert.status}
           needs={alert.needs.map((need) => ({
             ...need,
             allocations: need.allocations.map((allocation) => ({
