@@ -34,11 +34,12 @@ export async function GET() {
         }
       };
 
+      const publicScopes: Set<string> = new Set(['alerts', 'resources', 'alert-messages']);
       unsubscribe = subscribeToAdminEvents((event) => {
         // Never forward admin-only scopes ('users'/'invites'/'logs'/
         // 'gminas'/'organizations') to a connection any signed-in user can
         // open — this route has no ADMIN/COORDINATOR check.
-        if (event.scope !== 'alerts' && event.scope !== 'resources') return;
+        if (!publicScopes.has(event.scope)) return;
         send(`data: ${JSON.stringify(event)}\n\n`);
       });
       heartbeat = setInterval(() => send(': heartbeat\n\n'), HEARTBEAT_MS);

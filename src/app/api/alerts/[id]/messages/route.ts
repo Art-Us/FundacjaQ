@@ -115,7 +115,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Nie udało się dodać wpisu.' }, { status: 500 });
   }
 
-  await publishAdminEvent({ scope: 'alerts' });
+  // Its own scope, not 'alerts' — a chat/journal message is far more
+  // frequent than an alert's own lifecycle and only matters to whoever has
+  // THIS alert's detail page open, so it must not trigger a router.refresh()
+  // on /map or on every other open alert's page (see adminEvents.ts's
+  // AdminEventScope doc comment).
+  await publishAdminEvent({ scope: 'alert-messages', id: params.id, action: 'ALERT_MESSAGE_CREATE' });
 
   return NextResponse.json({ entry }, { status: 201 });
 }

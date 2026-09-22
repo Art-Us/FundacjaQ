@@ -7,6 +7,7 @@ import { getAlertMessageTypeInfo } from '@/lib/alertMessageLabels';
 import { formatDate } from '@/lib/utils';
 import NewJournalEntryModal from './NewJournalEntryModal';
 import { apiFetch, apiSend } from '@/lib/apiClient';
+import { useAppEvents } from '@/hooks/useAppEvents';
 
 interface JournalAuthor {
   id: string;
@@ -60,6 +61,27 @@ export default function AlertOperationalJournal({ alertId, entries, canReply, ca
   const [error, setError] = useState<string | null>(null);
   const [showNewEntryModal, setShowNewEntryModal] = useState(false);
 
+  // `showLoading` is false for the background live-refresh below — that one
+  // silently swaps in fresh replies without flashing "Wczytywanie…" over a
+  // thread the viewer is actively reading; the manual open path (toggleEntry)
+  // still wants the spinner, since there it's the very first load.
+  async function loadReplies(entryId: string, showLoading: boolean) {
+    if (showLoading) setLoadingEntryId(entryId);
+    const result = await apiFetch<{ replies?: JournalReplyRow[] }>(
+      `/api/alerts/${alertId}/messages/${entryId}/replies`
+    );
+    if (showLoading) setLoadingEntryId(null);
+
+    if (!result.ok) {
+      if (showLoading) setError(result.error);
+      return;
+    }
+    // Nothing is written on failure, so the entry stays "not loaded" — which
+    // is what the thread below distinguishes from "loaded and empty", and what
+    // lets a collapse/expand retry the request.
+    setRepliesByEntry((prev) => ({ ...prev, [entryId]: result.data.replies ?? [] }));
+  }
+
   async function toggleEntry(entryId: string) {
     if (openEntryId === entryId) {
       setOpenEntryId(null);
@@ -69,22 +91,21 @@ export default function AlertOperationalJournal({ alertId, entries, canReply, ca
     setError(null);
 
     if (repliesByEntry[entryId]) return;
-
-    setLoadingEntryId(entryId);
-    const result = await apiFetch<{ replies?: JournalReplyRow[] }>(
-      `/api/alerts/${alertId}/messages/${entryId}/replies`
-    );
-    setLoadingEntryId(null);
-
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    // Nothing is written on failure, so the entry stays "not loaded" — which
-    // is what the thread below distinguishes from "loaded and empty", and what
-    // lets a collapse/expand retry the request.
-    setRepliesByEntry((prev) => ({ ...prev, [entryId]: result.data.replies ?? [] }));
+    await loadReplies(entryId, true);
   }
+
+  // Live update for this alert's forum (see POST /api/alerts/[id]/messages's
+  // comment on why 'alert-messages' is its own scope, filtered to `id`, not
+  // the broad 'alerts' one): router.refresh() picks up a new root entry or an
+  // updated reply count (`entries` is a server-rendered prop) exactly the way
+  // this component's own sendReply already does after posting; a currently
+  // expanded thread additionally gets its replies re-fetched directly, since
+  // `repliesByEntry` is local state a plain refresh never touches.
+  useAppEvents('alert-messages', (event) => {
+    if (event.id !== alertId) return;
+    router.refresh();
+    if (openEntryId) void loadReplies(openEntryId, false);
+  });
 
   async function sendReply(entryId: string) {
     const body = (replyDrafts[entryId] ?? '').trim();

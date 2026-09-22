@@ -120,7 +120,9 @@ export async function POST(
     return NextResponse.json({ error: 'Nie udało się wysłać wiadomości.' }, { status: 500 });
   }
 
-  await publishAdminEvent({ scope: 'alerts' });
+  // See POST /api/alerts/[id]/messages's own comment on why this is its own
+  // scope, not 'alerts'.
+  await publishAdminEvent({ scope: 'alert-messages', id: alert.id, action: 'ALERT_MESSAGE_REPLY_CREATE' });
 
   return NextResponse.json({ reply }, { status: 201 });
 }
