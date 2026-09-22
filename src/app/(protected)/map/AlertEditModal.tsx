@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import dynamic from 'next/dynamic';
+import { dynamicClientOnly } from '@/lib/dynamicClientOnly';
 import { useRouter } from 'next/navigation';
 import { X, Pencil, Save } from 'lucide-react';
 import {
@@ -12,11 +12,11 @@ import {
   CATEGORY_MARKER_COLORS,
   categoriesForKind,
 } from '@/lib/alertLabels';
+import { apiSend } from '@/lib/apiClient';
 import type { AlertKindValue } from '@/lib/alertLabels';
 import type { MapAlert } from './AlertMap';
 
-const LocationPicker = dynamic(() => import('./LocationPicker'), {
-  ssr: false,
+const LocationPicker = dynamicClientOnly(() => import('./LocationPicker'), {
   loading: () => (
     <div
       className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"
@@ -83,26 +83,20 @@ export default function AlertEditModal({ alert, onClose }: AlertEditModalProps) 
     setLoading(true);
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alert.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        description,
-        ...(isEvent ? {} : { severity }),
-        category,
-        location: location || undefined,
-        ...(coords ? { latitude: coords.lat, longitude: coords.lng } : {}),
-        startsAt: startsAt ? new Date(startsAt).toISOString() : null,
-        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-      }),
+    const result = await apiSend(`/api/alerts/${alert.id}`, 'PATCH', {
+      title,
+      description,
+      ...(isEvent ? {} : { severity }),
+      category,
+      location: location || undefined,
+      ...(coords ? { latitude: coords.lat, longitude: coords.lng } : {}),
+      startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
     });
-
-    const data = await res.json();
     setLoading(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 

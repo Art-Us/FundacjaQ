@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const entries = await prisma.alertMessage.findMany({
     where: { alertId: alert.id, parentId: null },
     include: {
-      author: { select: { id: true, name: true, email: true } },
+      author: { select: { id: true, name: true } },
       _count: { select: { replies: true } },
     },
     orderBy: { createdAt: 'asc' },
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         title: parsed.data.title,
         body: parsed.data.body,
       },
-      include: { author: { select: { id: true, name: true, email: true } } },
+      include: { author: { select: { id: true, name: true } } },
     });
   } catch {
     return NextResponse.json({ error: 'Nie udało się dodać wpisu.' }, { status: 500 });

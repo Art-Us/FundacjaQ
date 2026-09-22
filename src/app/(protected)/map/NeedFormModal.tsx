@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { MatrixCategoryRow, MatrixGroup } from '@/lib/resourceMatrix';
+import { apiFetch, apiSend } from '@/lib/apiClient';
 
 const NEED_URGENCIES = ['NORMAL', 'PILNE', 'KRYTYCZNY'] as const;
 const URGENCY_LABELS: Record<(typeof NEED_URGENCIES)[number], string> = {
@@ -118,10 +119,13 @@ export default function NeedFormModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/resources/matrix')
-      .then((res) => res.json())
-      .then((data) => setCategories(data.categories ?? []))
-      .catch(() => setLoadError('Nie udało się pobrać listy kategorii.'));
+    apiFetch<{ categories?: MatrixCategoryRow[] }>('/api/resources/matrix').then((result) => {
+      if (!result.ok) {
+        setLoadError(result.error);
+        return;
+      }
+      setCategories(result.data.categories ?? []);
+    });
   }, []);
 
   const defaultCategoryId = categories?.[0]?.categoryId ?? '';
@@ -156,10 +160,9 @@ export default function NeedFormModal({
     const failures: string[] = [];
 
     for (const id of deletedIds) {
-      const res = await fetch(`/api/needs/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        failures.push(data.error ?? 'Nie udało się usunąć pozycji.');
+      const result = await apiSend(`/api/needs/${id}`, 'DELETE');
+      if (!result.ok) {
+        failures.push(result.error);
       }
     }
 
@@ -172,21 +175,12 @@ export default function NeedFormModal({
         urgency: row.urgency,
       };
 
-      const res = row.id
-        ? await fetch(`/api/needs/${row.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        : await fetch(`/api/alerts/${alertId}/needs`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
+      const result = row.id
+        ? await apiSend(`/api/needs/${row.id}`, 'PATCH', payload)
+        : await apiSend(`/api/alerts/${alertId}/needs`, 'POST', payload);
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        failures.push(`„${row.title.trim() || 'Nowa pozycja'}”: ${data.error ?? 'błąd zapisu'}`);
+      if (!result.ok) {
+        failures.push(`„${row.title.trim() || 'Nowa pozycja'}”: ${result.error}`);
       }
     }
 
@@ -252,7 +246,15 @@ export default function NeedFormModal({
             {rows.map((row) => (
               <div
                 key={row.key}
-                className="grid grid-cols-1 sm:grid-cols-[1.2fr_2fr_1fr_1fr_auto] gap-3 items-end rounded-2xl border border-slate-200 p-3"
+                // items-start (not items-end): the "Typ"/"Potrzebna ilość"
+                // columns can grow a helper line below their field
+                // ("nie można zmienić…" / "już przydzielono: N") that
+                // "Nazwa / opis" and "Pilność" never have — bottom-aligning
+                // the columns let that uneven height push their labels/inputs
+                // out of line with each other and left the delete button
+                // floating at an arbitrary height instead of level with the
+                // row's fields.
+                className="grid grid-cols-1 sm:grid-cols-[1.2fr_2fr_1fr_1fr_auto] gap-3 items-start rounded-2xl border border-slate-200 p-3"
               >
                 <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
@@ -262,7 +264,14 @@ export default function NeedFormModal({
                     value={row.categoryId}
                     onChange={(e) => updateRow(row.key, { categoryId: e.target.value })}
                     required
-                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none"
+                    // Donors were offered resources matching THIS category and
+                    // their allocations already count toward quantityFulfilled
+                    // — re-pointing the need at another type would re-label
+                    // what they actually gave. PATCH /api/needs/[id] rejects it
+                    // with 409 regardless; this just stops the coordinator
+                    // finding out only after pressing Save.
+                    disabled={row.quantityFulfilled > 0}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-300 py-2 px-2.5 text-slate-900 text-xs focus:bg-white focus:border-indigo-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   >
                     {!categories && <option value="">Ładowanie…</option>}
                     {categories &&
@@ -280,6 +289,11 @@ export default function NeedFormModal({
                         );
                       })}
                   </select>
+                  {row.quantityFulfilled > 0 && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      nie można zmienić — są już przydzielone zasoby
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -332,14 +346,23 @@ export default function NeedFormModal({
                   </select>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => removeRow(row.key)}
-                  title="Usuń pozycję"
-                  className="justify-self-end sm:justify-self-auto rounded-xl p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="justify-self-end sm:justify-self-auto">
+                  {/* Invisible label matching the other columns' — keeps the
+                      button's top level with the actual inputs now that the
+                      row aligns items-start, instead of sitting right under
+                      the row's top border with nothing above it. */}
+                  <span className="block text-[10px] mb-1 invisible select-none" aria-hidden="true">
+                    Usuń
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.key)}
+                    title="Usuń pozycję"
+                    className="rounded-xl p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

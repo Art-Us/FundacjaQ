@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { X, Send, PackageOpen, AlertTriangle } from 'lucide-react';
 import { getHorizonShortLabel } from '@/lib/resourceLabels';
+import { apiFetch, apiSend } from '@/lib/apiClient';
 
 interface AllocatableResource {
   id: string;
@@ -70,10 +71,16 @@ export default function AllocateResourcesModal({
     }
 
     const params = new URLSearchParams({ organizationId: currentUserOrganizationId, categoryId: needCategoryId });
-    fetch(`/api/resources?${params}`)
-      .then((res) => res.json())
-      .then((data) => setResources(data.resources ?? []))
-      .catch(() => setLoadError('Nie udało się pobrać Twoich zasobów.'));
+    // Checking the status matters here: a 403 used to parse cleanly as JSON and
+    // fall through to `data.resources ?? []`, so a permission failure rendered
+    // as "you own nothing in this category" instead of an error.
+    apiFetch<{ resources?: AllocatableResource[] }>(`/api/resources?${params}`).then((result) => {
+      if (!result.ok) {
+        setLoadError(result.error);
+        return;
+      }
+      setResources(result.data.resources ?? []);
+    });
   }, [currentUserOrganizationId, needCategoryId]);
 
   const selected = resources?.find((r) => r.id === resourceId) ?? null;
@@ -105,17 +112,15 @@ export default function AllocateResourcesModal({
     setSubmitting(true);
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}/allocations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ needId, resourceId: selected.id, quantity: quantityNum }),
+    const result = await apiSend(`/api/alerts/${alertId}/allocations`, 'POST', {
+      needId,
+      resourceId: selected.id,
+      quantity: quantityNum,
     });
-
-    const data = await res.json();
     setSubmitting(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 

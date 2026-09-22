@@ -8,7 +8,7 @@ import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, is
 import { availableCategoryIds } from '@/lib/resourceMatching';
 import { ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS, SEVERITY_LABELS, getSeverityBadgeInfo } from '@/lib/alertLabels';
 import { formatDate } from '@/lib/utils';
-import AlertNeedsBlock from '../AlertNeedsBlock';
+import AlertNeedsBlock from '../../map/AlertNeedsBlock';
 import AlertDetailMap from './AlertDetailMap';
 import AlertOperationalJournal from './AlertOperationalJournal';
 
@@ -43,7 +43,7 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
     prisma.alertMessage.findMany({
       where: { alertId: alert.id, parentId: null },
       include: {
-        author: { select: { id: true, name: true, email: true } },
+        author: { select: { id: true, name: true } },
         _count: { select: { replies: true } },
       },
       orderBy: { createdAt: 'asc' },

@@ -85,6 +85,32 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   }
 
+  // categoryId and unit define WHAT is being asked for, and every allocation
+  // under this need was matched against them when it was created (POST
+  // /api/alerts/[id]/allocations offers the donor only resources in the need's
+  // category, then snapshots that category, item name and unit onto the
+  // allocation row). Changing either afterwards re-labels real contributions
+  // as a different resource: quantityFulfilled sums every non-CANCELLED
+  // allocation (recalculateNeedFulfillment), so the need would go on reading
+  // "2 / 4 szt" of an item nobody ever donated. Same 409 posture as DELETE.
+  const changesWhatIsAskedFor =
+    (categoryId !== undefined && categoryId !== target.categoryId) ||
+    (parsed.data.unit !== undefined && parsed.data.unit !== target.unit);
+  if (changesWhatIsAskedFor) {
+    const committedAllocations = await prisma.resourceAllocation.count({
+      where: { needId: target.id, status: { not: 'CANCELLED' } },
+    });
+    if (committedAllocations > 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Nie można zmienić kategorii ani jednostki zapotrzebowania, na które przydzielono już zasoby. Zamknij to zapotrzebowanie i utwórz nowe.',
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // Mirrors the same "can't shrink below what's already committed" guard as
   // PATCH /api/resources/[id] (Крок 19) — quantityFulfilled only ever grows
   // through real allocations, so a need can never owe less than that.

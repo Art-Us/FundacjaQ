@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
+import { recalculateNeedFulfillment } from '@/lib/allocations';
 
 export const runtime = 'nodejs';
 
@@ -89,7 +90,51 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   }
 
-  await prisma.alert.update({ where: { id: alert.id }, data: parsed.data });
+  // "Wznów komunikat"/"Przywróć wydarzenie" (AlertActions.tsx) brings a
+  // CANCELLED/RESOLVED alert back to ACTIVE through this same plain PATCH —
+  // but cancel-with-return (Крок 28) had permanently set every one of that
+  // alert's needs to CLOSED when it was cancelled. Left alone, a reactivated
+  // alert looks perfectly normal (0/N, 0%) while every one of its needs is
+  // silently unreachable forever: PATCH /api/needs/[id] only allows a manual
+  // status of CLOSED/CANCELLED, never back to OPEN (Крок 22), and "Przydziel
+  // zasoby" only renders for a need whose status isn't FULFILLED/CLOSED/
+  // CANCELLED (AlertNeedsBlock.tsx) — no donor can ever offer anything again.
+  // CLOSED is reachable ONLY through that cancel-with-return sweep today (no
+  // UI path PATCHes a need straight to CLOSED), so every CLOSED need found
+  // here is safe to reopen — there's no other reason one could be in that
+  // state on an alert that's ACTIVE again.
+  const reactivating = parsed.data.status === 'ACTIVE' && alert.status !== 'ACTIVE';
+
+  try {
+    if (reactivating) {
+      await prisma.$transaction(async (tx) => {
+        const closedNeeds = await tx.alertNeed.findMany({
+          where: { alertId: alert.id, status: 'CLOSED' },
+          select: { id: true, quantityNeeded: true },
+        });
+        for (const need of closedNeeds) {
+          const needAllocations = await tx.resourceAllocation.findMany({
+            where: { needId: need.id },
+            select: { status: true, quantity: true },
+          });
+          // 'OPEN' here is a placeholder, not the need's real prior status —
+          // it exists only to reach recalculateNeedFulfillment's general
+          // formula. That function's own early return for a CLOSED/CANCELLED
+          // need protects a deliberate closure from being silently reopened
+          // by an unrelated caller; reopening on reactivation is precisely
+          // the one place that guard needs to be bypassed.
+          const { quantityFulfilled, status } = recalculateNeedFulfillment(need.quantityNeeded, needAllocations, 'OPEN');
+          await tx.alertNeed.update({ where: { id: need.id }, data: { quantityFulfilled, status } });
+        }
+        await tx.alert.update({ where: { id: alert.id }, data: parsed.data });
+      });
+    } else {
+      await prisma.alert.update({ where: { id: alert.id }, data: parsed.data });
+    }
+  } catch (err) {
+    console.error('[alerts] update failed:', err);
+    return NextResponse.json({ error: 'Nie udało się zaktualizować alertu.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Alert zaktualizowany.' });
 }
@@ -112,7 +157,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  await prisma.alert.delete({ where: { id: alert.id } });
+  try {
+    await prisma.alert.delete({ where: { id: alert.id } });
+  } catch (err) {
+    console.error('[alerts] delete failed:', err);
+    return NextResponse.json({ error: 'Nie udało się usunąć alertu.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Alert usunięty.' });
 }

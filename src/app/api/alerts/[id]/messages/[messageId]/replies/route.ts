@@ -62,7 +62,7 @@ export async function GET(
 
   const replies = await prisma.alertMessage.findMany({
     where: { parentId: rootEntry.id },
-    include: { author: { select: { id: true, name: true, email: true } } },
+    include: { author: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'asc' },
   });
 
@@ -113,7 +113,7 @@ export async function POST(
         authorOrgId: user.organizationId ?? null,
         body: parsed.data.body,
       },
-      include: { author: { select: { id: true, name: true, email: true } } },
+      include: { author: { select: { id: true, name: true } } },
     });
   } catch {
     return NextResponse.json({ error: 'Nie udało się wysłać wiadomości.' }, { status: 500 });

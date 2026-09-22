@@ -73,7 +73,7 @@ describe('GET /api/alerts/[id]/messages', () => {
     expect(prisma.alertMessage.findMany).toHaveBeenCalledWith({
       where: { alertId: 'a1', parentId: null },
       include: {
-        author: { select: { id: true, name: true, email: true } },
+        author: { select: { id: true, name: true } },
         _count: { select: { replies: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -152,7 +152,7 @@ describe('POST /api/alerts/[id]/messages', () => {
         title: validEntry.title,
         body: validEntry.body,
       },
-      include: { author: { select: { id: true, name: true, email: true } } },
+      include: { author: { select: { id: true, name: true } } },
     });
   });
 

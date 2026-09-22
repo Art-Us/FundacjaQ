@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { X, Send } from 'lucide-react';
 import { getResourceGroupInfo, getResourceGroupActiveClass, getHorizonInfo, getHorizonActiveClass } from '@/lib/resourceLabels';
 import { MATRIX_GROUPS, MATRIX_HORIZONS, type MatrixCategoryRow, type MatrixGroup, type MatrixHorizon } from '@/lib/resourceMatrix';
+import { apiSend } from '@/lib/apiClient';
 
 interface ResourceFormModalProps {
   // The matrix already loads every ResourceCategory (including ones with no
@@ -71,23 +72,17 @@ export default function ResourceFormModal({ categories, onClose, onCreated }: Re
     setLoading(true);
     setError(null);
 
-    const res = await fetch('/api/resources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name.trim(),
-        categoryId,
-        quantity: Number(quantity),
-        unit: unit.trim() || 'szt',
-        horizon,
-      }),
+    const result = await apiSend('/api/resources', 'POST', {
+      name: name.trim(),
+      categoryId,
+      quantity: Number(quantity),
+      unit: unit.trim() || 'szt',
+      horizon,
     });
-
-    const data = await res.json();
     setLoading(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 

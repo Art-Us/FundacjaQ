@@ -36,6 +36,8 @@ const ctx = { params: { id: 'a1' } };
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdminOrCoordinator).mockReset();
+  prisma.$transaction.mockImplementation(((arg: unknown) =>
+    typeof arg === 'function' ? (arg as (tx: typeof prisma) => unknown)(prisma) : Promise.all(arg as Promise<unknown>[])) as any);
 });
 
 describe('PATCH /api/alerts/[id]', () => {
@@ -134,5 +136,89 @@ describe('PATCH /api/alerts/[id]', () => {
 
     expect(res.status).toBe(200);
     expect(prisma.resourceAllocation.count).not.toHaveBeenCalled();
+  });
+
+  // The bug this guards: cancel-with-return (Крок 28) permanently CLOSEs
+  // every need on an alert it cancels. "Wznów komunikat" only PATCHes the
+  // alert's own status back to ACTIVE — without this, its needs stayed
+  // CLOSED forever (0/N, 0%, no "Przydziel zasoby" button, and no way to
+  // reopen one by hand: PATCH /api/needs/[id] never accepts OPEN).
+  describe('reactivating a cancelled/resolved alert reopens its CLOSED needs', () => {
+    const closedNeeds = [
+      { id: 'need-partial', quantityNeeded: 25 },
+      { id: 'need-fulfilled', quantityNeeded: 10 },
+      { id: 'need-untouched', quantityNeeded: 5 },
+    ];
+    const allocationsByNeed: Record<string, { status: string; quantity: number }[]> = {
+      'need-partial': [{ status: 'DELIVERY_AGREED', quantity: 20 }],
+      'need-fulfilled': [{ status: 'DELIVERED', quantity: 10 }],
+      // Every allocation was itself cancelled — nothing was ever actually
+      // delivered, so this one goes back to OPEN, not "fulfilled with 0".
+      'need-untouched': [{ status: 'CANCELLED', quantity: 5 }],
+    };
+
+    beforeEach(() => {
+      vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'owner-org' });
+      prisma.alertNeed.findMany.mockResolvedValue(closedNeeds as any);
+      prisma.resourceAllocation.findMany.mockImplementation(
+        ((args: any) => Promise.resolve(allocationsByNeed[args.where.needId] ?? [])) as any
+      );
+      prisma.alertNeed.update.mockResolvedValue({} as any);
+      prisma.alert.update.mockResolvedValue({} as any);
+    });
+
+    it('recomputes each CLOSED need from its real allocations before setting the alert ACTIVE', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'CANCELLED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).toHaveBeenCalledWith({
+        where: { alertId: 'a1', status: 'CLOSED' },
+        select: { id: true, quantityNeeded: true },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-partial' },
+        data: { quantityFulfilled: 20, status: 'PARTIALLY_FULFILLED' },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-fulfilled' },
+        data: { quantityFulfilled: 10, status: 'FULFILLED' },
+      });
+      expect(prisma.alertNeed.update).toHaveBeenCalledWith({
+        where: { id: 'need-untouched' },
+        data: { quantityFulfilled: 0, status: 'OPEN' },
+      });
+      expect(prisma.alert.update).toHaveBeenCalledWith({ where: { id: 'a1' }, data: { status: 'ACTIVE' } });
+    });
+
+    it('works the same reactivating from RESOLVED', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'RESOLVED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.update).toHaveBeenCalledTimes(3);
+    });
+
+    it('does nothing extra when the alert was already ACTIVE', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'ACTIVE' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'ACTIVE' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).not.toHaveBeenCalled();
+      expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+    });
+
+    it('does not reopen needs when the alert transitions to a non-ACTIVE status', async () => {
+      prisma.alert.findUnique.mockResolvedValue({ ...baseAlert, status: 'CANCELLED' } as any);
+
+      const res = await PATCH(makeRequest({ status: 'RESOLVED' }), ctx);
+
+      expect(res.status).toBe(200);
+      expect(prisma.alertNeed.findMany).not.toHaveBeenCalled();
+      expect(prisma.alertNeed.update).not.toHaveBeenCalled();
+    });
   });
 });

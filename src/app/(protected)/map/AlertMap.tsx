@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import {
@@ -16,8 +16,12 @@ import {
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { createPinIcon, createEventPinIcon } from './pinIcon';
 import { MapPin, Building, Calendar, Layers, Flame, ArrowRight } from 'lucide-react';
-import 'leaflet/dist/leaflet.css';
-import './leaflet-theme.css';
+// Leaflet's own CSS + our theme overrides are imported once, in the root
+// layout — not here. Both this file and LocationPicker.tsx used to import
+// them independently, and since each is loaded client-only (see
+// src/lib/dynamicClientOnly.tsx), the stylesheet mounted/unmounted along with
+// whichever component happened to be on screen, which could crash an
+// unrelated unmount elsewhere (see the comment in src/app/layout.tsx).
 
 export type MapDisplayMode = 'category' | 'severity';
 
@@ -92,7 +96,15 @@ function formatDate(value: Date | string) {
 // pozwoliłby użyć hooków bezpośrednio w komponencie strony — te "niewidzialne"
 // komponenty-dzieci istnieją tylko po to, by podpiąć się pod zdarzenia mapy
 // (useMap/useMapEvents działają wyłącznie wewnątrz MapContainer).
-function FocusController({ alerts, focusedAlertId }: { alerts: MapAlert[]; focusedAlertId?: string | null }) {
+function FocusController({
+  alerts,
+  focusedAlertId,
+  markerRefs,
+}: {
+  alerts: MapAlert[];
+  focusedAlertId?: string | null;
+  markerRefs: { current: Map<string, L.Marker> };
+}) {
   const map = useMap();
 
   useEffect(() => {
@@ -101,7 +113,12 @@ function FocusController({ alerts, focusedAlertId }: { alerts: MapAlert[]; focus
     if (alert?.latitude != null && alert?.longitude != null) {
       map.flyTo([alert.latitude, alert.longitude], 14, { duration: 0.75 });
     }
-  }, [focusedAlertId, alerts, map]);
+    // "Na mapie" powinno pokazać SAM alert, nie tylko dolecieć w jego okolicę i
+    // zostawić użytkownika zgadującego, która pinezka (z wielu w tym miejscu)
+    // to ta szukana — otwieramy jej popup od razu; Leaflet aktualizuje jego
+    // pozycję na bieżąco przez cały czas trwania animacji flyTo.
+    markerRefs.current.get(focusedAlertId)?.openPopup();
+  }, [focusedAlertId, alerts, map, markerRefs]);
 
   return null;
 }
@@ -148,6 +165,10 @@ export default function AlertMap({
   // W widoku zdarzeń legenda zawsze pokazuje typy wydarzeń; w widoku alertów
   // zależy od wybranego trybu.
   const legendMode: MapDisplayMode = isEventView ? 'category' : mode;
+  // Współdzielone z FocusController poniżej — mapuje alert.id na żywą
+  // instancję Leaflet Markera, żeby "Na mapie" mogło otworzyć WŁAŚCIWY popup,
+  // a nie tylko dolecieć w okolicę pinezki.
+  const markerRefs = useRef<Map<string, L.Marker>>(new Map());
   const withCoords = useMemo(
     () =>
       alerts.filter(
@@ -207,7 +228,7 @@ export default function AlertMap({
         />
 
         <FitBoundsToMarkers positions={positions} disabled={!!focusedAlertId} />
-        <FocusController alerts={withCoords} focusedAlertId={focusedAlertId} />
+        <FocusController alerts={withCoords} focusedAlertId={focusedAlertId} markerRefs={markerRefs} />
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
 
         {withCoords.map((alert) => {
@@ -217,6 +238,10 @@ export default function AlertMap({
               key={`${alert.id}-${mode}-${kind}`}
               position={[alert.latitude, alert.longitude]}
               icon={isEventView ? createEventPinIcon(color) : createPinIcon(color)}
+              ref={(instance) => {
+                if (instance) markerRefs.current.set(alert.id, instance);
+                else markerRefs.current.delete(alert.id);
+              }}
             >
               <Popup>
                 <div className="min-w-[220px] max-w-xs space-y-2.5">

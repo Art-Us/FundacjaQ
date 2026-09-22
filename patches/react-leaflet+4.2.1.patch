@@ -1,0 +1,54 @@
+diff --git a/node_modules/react-leaflet/lib/MapContainer.js b/node_modules/react-leaflet/lib/MapContainer.js
+index 2b21760..089a6d6 100644
+--- a/node_modules/react-leaflet/lib/MapContainer.js
++++ b/node_modules/react-leaflet/lib/MapContainer.js
+@@ -14,7 +14,7 @@ function _extends() {
+ }
+ import { LeafletProvider, createLeafletContext } from '@react-leaflet/core';
+ import { Map as LeafletMap } from 'leaflet';
+-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
++import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+ function MapContainerComponent({ bounds , boundsOptions , center , children , className , id , placeholder , style , whenReady , zoom , ...options }, forwardedRef) {
+     const [props] = useState({
+         className,
+@@ -22,11 +22,19 @@ function MapContainerComponent({ bounds , boundsOptions , center , children , cl
+         style
+     });
+     const [context, setContext] = useState(null);
+-    useImperativeHandle(forwardedRef, ()=>context?.map ?? null, [
++    // Patched (see patches/react-leaflet+*.patch): `mapRef` below has an empty
++    // dependency array, so it keeps the closure from its FIRST call forever —
++    // reading `context` state there always saw `null`, even after a real
++    // unmount/remount, which made this "already initialized?" check always
++    // pass and let Leaflet's OWN guard throw "Map container is already
++    // initialized" instead. A ref mutates in place, so this callback always
++    // sees the current value.
++    const contextRef = useRef(null);
++    useImperativeHandle(forwardedRef, ()=>contextRef.current?.map ?? null, [
+         context
+     ]);
+     const mapRef = useCallback((node)=>{
+-        if (node !== null && context === null) {
++        if (node !== null && contextRef.current === null) {
+             const map = new LeafletMap(node, options);
+             if (center != null && zoom != null) {
+                 map.setView(center, zoom);
+@@ -36,13 +44,16 @@ function MapContainerComponent({ bounds , boundsOptions , center , children , cl
+             if (whenReady != null) {
+                 map.whenReady(whenReady);
+             }
+-            setContext(createLeafletContext(map));
++            const ctx = createLeafletContext(map);
++            contextRef.current = ctx;
++            setContext(ctx);
+         }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, []);
+     useEffect(()=>{
+         return ()=>{
+-            context?.map.remove();
++            contextRef.current?.map.remove();
++            contextRef.current = null;
+         };
+     }, [
+         context

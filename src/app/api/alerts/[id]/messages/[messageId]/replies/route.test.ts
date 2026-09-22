@@ -93,7 +93,7 @@ describe('GET /api/alerts/[id]/messages/[messageId]/replies', () => {
     expect(res.status).toBe(200);
     expect(prisma.alertMessage.findMany).toHaveBeenCalledWith({
       where: { parentId: 'msg1' },
-      include: { author: { select: { id: true, name: true, email: true } } },
+      include: { author: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'asc' },
     });
   });
@@ -146,7 +146,7 @@ describe('POST /api/alerts/[id]/messages/[messageId]/replies', () => {
     expect(responseBody.reply.id).toBe('reply1');
     expect(prisma.alertMessage.create).toHaveBeenCalledWith({
       data: { alertId: 'a1', parentId: 'msg1', authorId: 'v1', authorOrgId: 'owner-org', body: 'Dzięki!' },
-      include: { author: { select: { id: true, name: true, email: true } } },
+      include: { author: { select: { id: true, name: true } } },
     });
   });
 

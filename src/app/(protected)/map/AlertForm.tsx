@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
+import { dynamicClientOnly } from '@/lib/dynamicClientOnly';
 import { useRouter } from 'next/navigation';
 import { BellRing, CalendarDays, LoaderCircle, MapPin, Package, Plus, SearchX, Send, Trash2, X } from 'lucide-react';
 import {
@@ -18,9 +18,9 @@ import type { MatrixCategoryRow, MatrixGroup } from '@/lib/resourceMatrix';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import type { Role } from '@/types';
 import type { GminaOption } from './AlertsMapView';
+import { apiFetch, apiSend } from '@/lib/apiClient';
 
-const LocationPicker = dynamic(() => import('./LocationPicker'), {
-  ssr: false,
+const LocationPicker = dynamicClientOnly(() => import('./LocationPicker'), {
   loading: () => (
     <div
       className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"
@@ -249,10 +249,13 @@ export default function AlertForm({
   // this client form today, so this mirrors the existing convention rather
   // than inventing a new one.
   useEffect(() => {
-    fetch('/api/resources/matrix')
-      .then((res) => res.json())
-      .then((data) => setNeedCategories(data.categories ?? []))
-      .catch(() => setNeedCategoriesError('Nie udało się pobrać listy kategorii zasobów.'));
+    apiFetch<{ categories?: MatrixCategoryRow[] }>('/api/resources/matrix').then((result) => {
+      if (!result.ok) {
+        setNeedCategoriesError(result.error);
+        return;
+      }
+      setNeedCategories(result.data.categories ?? []);
+    });
   }, []);
 
   function addNeedRow() {
@@ -298,52 +301,41 @@ export default function AlertForm({
     setLoading(true);
     setMessage(null);
 
-    const res = await fetch('/api/alerts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        description,
-        kind,
-        // Zdarzenia codzienne nie mają krytyczności — API użyje wartości domyślnej.
-        ...(isEvent ? {} : { severity }),
-        category,
-        location: location || undefined,
-        latitude: coords.lat,
-        longitude: coords.lng,
-        gminaId,
-        ...(startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
-        ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
-      }),
+    const created = await apiSend<{ alert: { id: string } }>('/api/alerts', 'POST', {
+      title,
+      description,
+      kind,
+      // Zdarzenia codzienne nie mają krytyczności — API użyje wartości domyślnej.
+      ...(isEvent ? {} : { severity }),
+      category,
+      location: location || undefined,
+      latitude: coords.lat,
+      longitude: coords.lng,
+      gminaId,
+      ...(startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
+      ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
     });
 
-    const data = await res.json();
-
-    if (!res.ok) {
+    if (!created.ok) {
       setLoading(false);
-      setMessage(data.error ?? 'Coś poszło nie tak.');
+      setMessage(created.error);
       return;
     }
 
-    const newAlertId: string = data.alert.id;
+    const newAlertId = created.data.alert.id;
     setCreatedAlertId(newAlertId);
 
     const needFailures: string[] = [];
     for (const row of filledNeedRows) {
-      const needRes = await fetch(`/api/alerts/${newAlertId}/needs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryId: row.categoryId,
-          title: row.title.trim(),
-          quantityNeeded: Number(row.quantityNeeded),
-          unit: row.unit.trim() || 'szt',
-          urgency: row.urgency,
-        }),
+      const needResult = await apiSend(`/api/alerts/${newAlertId}/needs`, 'POST', {
+        categoryId: row.categoryId,
+        title: row.title.trim(),
+        quantityNeeded: Number(row.quantityNeeded),
+        unit: row.unit.trim() || 'szt',
+        urgency: row.urgency,
       });
-      if (!needRes.ok) {
-        const needData = await needRes.json().catch(() => ({}));
-        needFailures.push(`„${row.title.trim()}”: ${needData.error ?? 'błąd zapisu'}`);
+      if (!needResult.ok) {
+        needFailures.push(`„${row.title.trim()}”: ${needResult.error}`);
       }
     }
 

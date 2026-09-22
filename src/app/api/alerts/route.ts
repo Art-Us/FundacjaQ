@@ -69,9 +69,15 @@ export async function POST(req: NextRequest) {
   // schema.prisma); a user with no organization (e.g. a site-wide ADMIN)
   // simply produces an ownerless alert, same as this field's backfill
   // migration leaves pre-existing alerts whose author had no organization.
-  const alert = await prisma.alert.create({
-    data: { ...data, gminaId, authorId: user.id, organizationId: user.organizationId ?? null },
-  });
+  let alert;
+  try {
+    alert = await prisma.alert.create({
+      data: { ...data, gminaId, authorId: user.id, organizationId: user.organizationId ?? null },
+    });
+  } catch (err) {
+    console.error('[alerts] create failed:', err);
+    return NextResponse.json({ error: 'Nie udało się utworzyć alertu.' }, { status: 500 });
+  }
 
   return NextResponse.json({ message: 'Alert utworzony.', alert });
 }

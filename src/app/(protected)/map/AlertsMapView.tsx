@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
+import { dynamicClientOnly } from '@/lib/dynamicClientOnly';
 import Link from 'next/link';
 import type { AlertWithRelations } from '@/lib/alertInclude';
 import {
@@ -47,8 +47,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 
-const AlertMap = dynamic(() => import('./AlertMap'), {
-  ssr: false,
+const AlertMap = dynamicClientOnly(() => import('./AlertMap'), {
   loading: () => (
     <div className="flex h-full items-center justify-center text-sm text-slate-500">Ładowanie mapy…</div>
   ),
@@ -220,7 +219,7 @@ interface AlertsMapViewProps {
 
 // "Forum" icon-link (Крок 58) — deliberately its own small component rather
 // than inline JSX in each card block below (active + archived render it
-// identically): links to the alert's detail subpage (map/[alertId], Крок
+// identically): links to the alert's detail page (alerty/[alertId], Крок
 // 55) with a badge showing the total journal entries + replies
 // (alert._count.messages, Крок 53/54). Always rendered, for every alert,
 // regardless of role or whether AlertNeedsBlock even renders anything —
@@ -230,7 +229,7 @@ interface AlertsMapViewProps {
 function ForumLinkButton({ alertId, count }: { alertId: string; count: number }) {
   return (
     <Link
-      href={`/map/${alertId}`}
+      href={`/alerty/${alertId}`}
       title="Dziennik operacyjny i forum komunikatu"
       className="relative flex items-center justify-center h-9 w-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition shrink-0"
     >
@@ -691,7 +690,7 @@ export default function AlertsMapView({
           <AlertMap
             alerts={mapAlerts}
             center={center}
-            height="420px"
+            height="504px"
             focusedAlertId={focusedAlertId}
             mode={mapMode}
             onModeChange={setMapMode}

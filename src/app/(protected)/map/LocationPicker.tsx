@@ -3,8 +3,8 @@
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { createPinIcon, createEventPinIcon, createLocationPinIcon } from './pinIcon';
-import 'leaflet/dist/leaflet.css';
-import './leaflet-theme.css';
+// Leaflet's own CSS + our theme overrides are imported once, in the root
+// layout — see the comment in src/app/layout.tsx for why.
 
 interface LocationPickerProps {
   center: [number, number];

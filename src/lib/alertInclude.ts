@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 
 // The single Prisma `include` shape behind every alert the map renders —
 // shared by the /map server page (initial fetch), AlertsMapView (its prop
-// type) and the /map/[alertId] subpage, so the three can never drift apart.
+// type) and the /alerty/[alertId] detail page, so the three can never drift apart.
 //
 // author/gmina use an explicit `select`, never `include: true`/`gmina: true`:
 // `include` returns every scalar on the related row, and for User that means

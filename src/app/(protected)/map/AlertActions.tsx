@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Ban, CheckCircle2, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 import CancelWithReturnModal from '@/components/resources/CancelWithReturnModal';
+import { apiSend } from '@/lib/apiClient';
 
 interface AlertActionsProps {
   alertId: string;
@@ -41,17 +42,11 @@ export default function AlertActions({
     setLoading(key);
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
-    });
-
-    const data = await res.json();
+    const result = await apiSend(`/api/alerts/${alertId}`, 'PATCH', { status: next });
     setLoading(null);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
@@ -66,12 +61,11 @@ export default function AlertActions({
     setLoading('delete');
     setError(null);
 
-    const res = await fetch(`/api/alerts/${alertId}`, { method: 'DELETE' });
-    const data = await res.json();
+    const result = await apiSend(`/api/alerts/${alertId}`, 'DELETE');
     setLoading(null);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 

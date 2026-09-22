@@ -6,6 +6,7 @@ import { AlertTriangle, Layers, Pencil, Trash2, X } from 'lucide-react';
 import { getHorizonInfo, getHorizonShortLabel, HORIZON_SUBTITLES } from '@/lib/resourceLabels';
 import type { MatrixCategoryRow, MatrixHorizon } from '@/lib/resourceMatrix';
 import ResourceEditModal from './ResourceEditModal';
+import { apiFetch, apiSend } from '@/lib/apiClient';
 
 interface ResourceMatrixCellDrawerProps {
   category: MatrixCategoryRow;
@@ -92,14 +93,14 @@ export default function ResourceMatrixCellDrawer({
     const params = new URLSearchParams({ categoryId: category.categoryId });
     if (organizationId) params.set('organizationId', organizationId);
 
-    fetch(`/api/resources?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('request failed'))))
-      .then((data) => {
-        if (!cancelled) setRows(data.resources ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setError('Nie udało się pobrać szczegółów.');
-      });
+    apiFetch<{ resources?: ResourceRow[] }>(`/api/resources?${params.toString()}`).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setRows(result.data.resources ?? []);
+    });
 
     return () => {
       cancelled = true;
@@ -126,12 +127,11 @@ export default function ResourceMatrixCellDrawer({
     setDeleteLoading(true);
     setDeleteError(null);
 
-    const res = await fetch(`/api/resources/${id}`, { method: 'DELETE' });
-    const data = await res.json();
+    const result = await apiSend(`/api/resources/${id}`, 'DELETE');
     setDeleteLoading(false);
 
-    if (!res.ok) {
-      setDeleteError(data.error ?? 'Nie udało się usunąć zasobu.');
+    if (!result.ok) {
+      setDeleteError(result.error);
       return;
     }
 

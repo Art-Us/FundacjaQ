@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save } from 'lucide-react';
+import { apiSend } from '@/lib/apiClient';
 import { getResourceGroupInfo, getResourceGroupActiveClass, getHorizonInfo, getHorizonActiveClass } from '@/lib/resourceLabels';
 import { MATRIX_GROUPS, MATRIX_HORIZONS, type MatrixCategoryRow, type MatrixGroup, type MatrixHorizon } from '@/lib/resourceMatrix';
 
@@ -57,23 +58,17 @@ export default function ResourceEditModal({ resource, categories, initialCategor
     setSaving(true);
     setError(null);
 
-    const res = await fetch(`/api/resources/${resource.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name.trim(),
-        categoryId,
-        quantity: Number(quantity),
-        unit: unit.trim() || 'szt',
-        horizon,
-      }),
+    const result = await apiSend(`/api/resources/${resource.id}`, 'PATCH', {
+      name: name.trim(),
+      categoryId,
+      quantity: Number(quantity),
+      unit: unit.trim() || 'szt',
+      horizon,
     });
-
-    const data = await res.json();
     setSaving(false);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Coś poszło nie tak.');
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
