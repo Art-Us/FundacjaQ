@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { isGlobalAdmin } from '@/lib/authz';
 import { scopedGminaWhere } from '@/lib/gmina';
 import { OrganizationsDirectory } from './OrganizationsDirectory';
 import { AdminEventsRefresh } from '@/components/AdminEventsRefresh';
@@ -10,6 +11,12 @@ export default async function AdminOrganizationsPage() {
   if (!session?.user || session.user.role !== 'ADMIN') {
     redirect('/');
   }
+
+  // Gmina creation (POST /api/admin/gminas) is global-admin-only — a
+  // gmina-scoped admin never gets "+ Nowa gmina…" in this page's create/edit
+  // forms, even though they can otherwise fully manage their own gmina's
+  // organizations.
+  const canCreateGmina = isGlobalAdmin(session.user);
 
   // A gmina-scoped admin's picker/filter cascade only ever offers their own
   // gmina — same fail-closed contract as everywhere else gmina scoping
@@ -43,7 +50,7 @@ export default async function AdminOrganizationsPage() {
         <p className="text-sm text-slate-500 mt-1">Przeglądaj, twórz i zarządzaj organizacjami w systemie.</p>
       </div>
 
-      <OrganizationsDirectory gminas={gminas} />
+      <OrganizationsDirectory gminas={gminas} canCreateGmina={canCreateGmina} />
     </main>
   );
 }

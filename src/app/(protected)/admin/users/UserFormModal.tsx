@@ -27,12 +27,23 @@ interface UserFormModalProps {
   organizations: OrganizationOption[];
   /** Only a global admin (gminaId === null) may grant the ADMIN role — see POST/PATCH /api/admin/users. */
   canGrantAdmin: boolean;
+  /** Forwarded to the gmina picker (and its nested organization-create modal) — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   onClose: () => void;
   /** Called after a successful create/edit, before onClose — lets the caller refetch its own list instead of relying on router.refresh(). */
   onSaved?: () => void;
 }
 
-export function UserFormModal({ mode, user, gminas, organizations, canGrantAdmin, onClose, onSaved }: UserFormModalProps) {
+export function UserFormModal({
+  mode,
+  user,
+  gminas,
+  organizations,
+  canGrantAdmin,
+  canCreateGmina,
+  onClose,
+  onSaved,
+}: UserFormModalProps) {
   const [email, setEmail] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState(user?.name ?? '');
@@ -242,6 +253,7 @@ export function UserFormModal({ mode, user, gminas, organizations, canGrantAdmin
               onChange={setGmina}
               required={gminaRequired}
               newGminaMode="modal"
+              canCreateGmina={canCreateGmina}
             />
             </div>
           </div>
@@ -255,6 +267,7 @@ export function UserFormModal({ mode, user, gminas, organizations, canGrantAdmin
               organizations={organizationsInGmina}
               gminas={gminas}
               defaultGminaId={gmina.gminaId}
+              canCreateGmina={canCreateGmina}
               value={organizationId}
               onChange={setOrganizationId}
               required={organizationRequired}

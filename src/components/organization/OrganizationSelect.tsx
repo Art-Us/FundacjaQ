@@ -22,6 +22,8 @@ interface OrganizationSelectProps {
   gminas: GminaOption[];
   /** Pre-fills (but doesn't lock) the create modal's gmina — typically the caller's own currently-selected gmina, so a brand-new org defaults into the same one. */
   defaultGminaId?: string | null;
+  /** Forwarded to the create modal's nested GminaSelect — see its own doc comment. */
+  canCreateGmina: boolean;
   value: string | null;
   onChange: (organizationId: string | null) => void;
   required?: boolean;
@@ -41,6 +43,7 @@ export function OrganizationSelect({
   organizations,
   gminas,
   defaultGminaId,
+  canCreateGmina,
   value,
   onChange,
   required = false,
@@ -98,6 +101,7 @@ export function OrganizationSelect({
           mode="create"
           gminas={gminas}
           defaultGminaId={defaultGminaId ?? undefined}
+          canCreateGmina={canCreateGmina}
           onClose={() => setShowCreateModal(false)}
           onSuccess={(organization) => {
             setCreatedOrganizations((prev) => [

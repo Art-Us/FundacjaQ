@@ -33,6 +33,8 @@ interface OrganizationFormModalProps {
   /** create mode only: pre-fills (but doesn't lock) the gmina picker below. */
   defaultGminaId?: string;
   gminas: GminaOption[];
+  /** Forwarded to the nested GminaSelect — see its own doc comment. */
+  canCreateGmina: boolean;
   onClose: () => void;
   /** Called with the created/updated organization right before onClose, once the API call succeeds. */
   onSuccess?: (organization: { id: string; name: string; gminaId: string }) => void;
@@ -43,6 +45,7 @@ export function OrganizationFormModal({
   organization,
   defaultGminaId,
   gminas,
+  canCreateGmina,
   onClose,
   onSuccess,
 }: OrganizationFormModalProps) {
@@ -193,6 +196,7 @@ export function OrganizationFormModal({
               onChange={setGmina}
               required
               newGminaMode="modal"
+              canCreateGmina={canCreateGmina}
             />
           </div>
 

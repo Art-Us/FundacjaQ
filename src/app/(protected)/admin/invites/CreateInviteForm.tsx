@@ -16,6 +16,8 @@ interface CreateInviteFormProps {
   isAdmin: boolean;
   /** Only a global admin (gminaId === null) may grant the ADMIN role — see POST /api/admin/invites. */
   canGrantAdmin: boolean;
+  /** Forwarded to the gmina picker (and its nested organization-create modal) — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
   currentUserOrganizationId: string | null;
   /** Display-only, for the "you're inviting into X" hint shown to a coordinator. */
   currentUserOrganizationName: string | null;
@@ -26,6 +28,7 @@ export function CreateInviteForm({
   organizations,
   isAdmin,
   canGrantAdmin,
+  canCreateGmina,
   currentUserOrganizationId,
   currentUserOrganizationName,
 }: CreateInviteFormProps) {
@@ -166,6 +169,7 @@ export function CreateInviteForm({
               onChange={setGmina}
               required={gminaRequired}
               newGminaMode="modal"
+              canCreateGmina={canCreateGmina}
             />
           </div>
         )}
@@ -182,6 +186,7 @@ export function CreateInviteForm({
               organizations={organizationsInGmina}
               gminas={gminas}
               defaultGminaId={gmina.gminaId}
+              canCreateGmina={canCreateGmina}
               value={organizationId}
               onChange={setOrganizationId}
               required={organizationRequired}

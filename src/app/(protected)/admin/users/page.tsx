@@ -63,7 +63,13 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UsersDirectory gminas={gminas} organizations={organizations} isAdmin={isAdmin} canGrantAdmin={canGrantAdmin} />
+      <UsersDirectory
+        gminas={gminas}
+        organizations={organizations}
+        isAdmin={isAdmin}
+        canGrantAdmin={canGrantAdmin}
+        canCreateGmina={canGrantAdmin}
+      />
     </main>
   );
 }

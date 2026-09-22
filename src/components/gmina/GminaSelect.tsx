@@ -33,6 +33,14 @@ interface GminaSelectProps {
    * the resulting id, so this select never needs to carry newGminaName.
    */
   newGminaMode?: 'inline' | 'modal';
+  /**
+   * Whether "+ Nowa gmina…" is offered at all. POST /api/admin/gminas is
+   * global-admin-only (a gmina-scoped admin is locked out of gmina
+   * management entirely), so pass isGlobalAdmin(actor) here — never true for
+   * a gmina-scoped admin, even in 'inline' mode where nothing is created
+   * until the parent form submits.
+   */
+  canCreateGmina: boolean;
 }
 
 export function GminaSelect({
@@ -43,6 +51,7 @@ export function GminaSelect({
   required = false,
   disabled = false,
   newGminaMode = 'inline',
+  canCreateGmina,
 }: GminaSelectProps) {
   const [creatingNew, setCreatingNew] = useState(Boolean(value.newGminaName));
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -97,7 +106,7 @@ export function GminaSelect({
             {g.name}
           </option>
         ))}
-        <option value={NEW_GMINA_VALUE}>+ Nowa gmina…</option>
+        {canCreateGmina && <option value={NEW_GMINA_VALUE}>+ Nowa gmina…</option>}
       </select>
 
       {creatingNew && newGminaMode === 'inline' && (

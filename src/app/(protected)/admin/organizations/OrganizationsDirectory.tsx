@@ -84,9 +84,11 @@ interface CachedOrganizationsPage {
 
 interface OrganizationsDirectoryProps {
   gminas: GminaFilterOption[];
+  /** Forwarded to the create/edit forms' gmina pickers — see GminaSelect's doc comment. */
+  canCreateGmina: boolean;
 }
 
-export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) {
+export function OrganizationsDirectory({ gminas, canCreateGmina }: OrganizationsDirectoryProps) {
   const [query, setQuery] = useState('');
   // Debounced, and only what's actually sent to the server — search runs as a
   // DB query (name/gmina/city/contact), not a client-side filter, so it
@@ -383,7 +385,13 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {organizations.map((organization) => (
-            <OrganizationCard key={organization.id} organization={organization} gminas={gminas} onChanged={refetch} />
+            <OrganizationCard
+              key={organization.id}
+              organization={organization}
+              gminas={gminas}
+              canCreateGmina={canCreateGmina}
+              onChanged={refetch}
+            />
           ))}
         </div>
       )}
@@ -394,6 +402,7 @@ export function OrganizationsDirectory({ gminas }: OrganizationsDirectoryProps) 
         <OrganizationFormModal
           mode="create"
           gminas={gminas}
+          canCreateGmina={canCreateGmina}
           onClose={() => setShowCreate(false)}
           onSuccess={refetch}
         />

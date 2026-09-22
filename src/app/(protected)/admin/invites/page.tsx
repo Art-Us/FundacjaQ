@@ -90,6 +90,7 @@ export default async function AdminInvitesPage() {
           organizations={organizations}
           isAdmin={isAdmin}
           canGrantAdmin={canGrantAdmin}
+          canCreateGmina={canGrantAdmin}
           currentUserOrganizationId={currentUser.organizationId}
           currentUserOrganizationName={currentUserOrganization?.name ?? null}
         />
