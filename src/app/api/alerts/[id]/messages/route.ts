@@ -120,7 +120,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // THIS alert's detail page open, so it must not trigger a router.refresh()
   // on /map or on every other open alert's page (see adminEvents.ts's
   // AdminEventScope doc comment).
-  await publishAdminEvent({ scope: 'alert-messages', id: params.id, action: 'ALERT_MESSAGE_CREATE' });
+  // gminaId lets /api/events/route.ts's server-side filter keep this out of
+  // another gmina's SSE stream — see that route's own comment on why the
+  // gmina boundary has to be enforced there, not just trusted to the client.
+  await publishAdminEvent({ scope: 'alert-messages', id: params.id, action: 'ALERT_MESSAGE_CREATE', gminaId: alert.gminaId });
 
   return NextResponse.json({ entry }, { status: 201 });
 }

@@ -101,7 +101,23 @@ function getSubscriber(): Redis {
     // Required — see lib/redis.ts's own 'error' listener for why an
     // unhandled one would crash the process instead of just logging.
     subscriberInstance.on('error', (err) => console.error('[adminEvents] subscriber connection error:', err));
-    subscriberInstance.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
+    // Subscribing from 'ready' (fires on the initial connection AND again on
+    // every successful reconnect) instead of once right after creation: if
+    // Redis happens to be mid-restart/unreachable at the moment of THIS
+    // process's very first SSE connection, that one-shot subscribe() call
+    // can reject (see redis.ts's connectTimeout/commandTimeout comment) —
+    // and since subscriberInstance is a module-scope singleton assigned
+    // above, every later getSubscriber() call would just return that same
+    // never-subscribed instance forever, with nothing left to ever retry.
+    // ioredis's own auto-resubscribe-after-reconnect only replays a
+    // subscription that succeeded at least once, so it can't recover from
+    // this either. Re-issuing SUBSCRIBE on an already-subscribed channel is
+    // a harmless no-op for Redis, so doing it on every 'ready' costs
+    // nothing on the normal path and fixes the cold-start-during-an-outage
+    // case: the next time this connection comes up, it subscribes again.
+    subscriberInstance.on('ready', () => {
+      subscriberInstance!.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
+    });
     subscriberInstance.on('message', (_channel, message) => {
       let event: AdminEvent;
       try {

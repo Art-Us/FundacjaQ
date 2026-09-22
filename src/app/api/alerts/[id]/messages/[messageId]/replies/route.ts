@@ -122,7 +122,10 @@ export async function POST(
 
   // See POST /api/alerts/[id]/messages's own comment on why this is its own
   // scope, not 'alerts'.
-  await publishAdminEvent({ scope: 'alert-messages', id: alert.id, action: 'ALERT_MESSAGE_REPLY_CREATE' });
+  // gminaId lets /api/events/route.ts's server-side filter keep this out of
+  // another gmina's SSE stream — see that route's own comment on why the
+  // gmina boundary has to be enforced there, not just trusted to the client.
+  await publishAdminEvent({ scope: 'alert-messages', id: alert.id, action: 'ALERT_MESSAGE_REPLY_CREATE', gminaId: alert.gminaId });
 
   return NextResponse.json({ reply }, { status: 201 });
 }
