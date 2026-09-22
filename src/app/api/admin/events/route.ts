@@ -1,5 +1,6 @@
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { subscribeToAdminEvents } from '@/lib/adminEvents';
+import { acquireSseSlot, releaseSseSlot, touchSseSlot } from '@/lib/sseConnectionLimit';
 
 export const runtime = 'nodejs';
 
@@ -13,6 +14,13 @@ export async function GET() {
   const user = await requireAdminOrCoordinator();
   if (!user) {
     return new Response('Brak dostępu.', { status: 403 });
+  }
+
+  // Shared cap with api/events/route.ts — see sseConnectionLimit.ts's doc
+  // comment for why this is keyed by userId alone, not per-route.
+  const slotId = acquireSseSlot(user.id);
+  if (!slotId) {
+    return new Response('Za dużo otwartych połączeń.', { status: 429 });
   }
 
   const encoder = new TextEncoder();
@@ -35,11 +43,19 @@ export async function GET() {
       unsubscribe = subscribeToAdminEvents((event) => {
         send(`data: ${JSON.stringify(event)}\n\n`);
       });
-      heartbeat = setInterval(() => send(': heartbeat\n\n'), HEARTBEAT_MS);
+      // Also the sseConnectionLimit.ts safety net: a tick here means this
+      // connection is still genuinely alive, so its slot isn't swept as
+      // stale even if cancel() below never runs (see that module's doc
+      // comment on why cancel() firing isn't guaranteed).
+      heartbeat = setInterval(() => {
+        send(': heartbeat\n\n');
+        touchSseSlot(slotId);
+      }, HEARTBEAT_MS);
     },
     cancel() {
       unsubscribe();
       clearInterval(heartbeat);
+      releaseSseSlot(slotId);
     },
   });
 

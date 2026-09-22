@@ -1,5 +1,6 @@
 import { requireUser } from '@/lib/authz';
 import { subscribeToAdminEvents } from '@/lib/adminEvents';
+import { acquireSseSlot, releaseSseSlot, touchSseSlot } from '@/lib/sseConnectionLimit';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,14 @@ export async function GET() {
   const user = await requireUser();
   if (!user) {
     return new Response('Brak dostępu.', { status: 403 });
+  }
+
+  // See sseConnectionLimit.ts's doc comment — without this cap, being
+  // signed in at all (any role, including VOLUNTEER) is enough to open
+  // unboundedly many of these and exhaust server sockets/memory.
+  const slotId = acquireSseSlot(user.id);
+  if (!slotId) {
+    return new Response('Za dużo otwartych połączeń.', { status: 429 });
   }
 
   const encoder = new TextEncoder();
@@ -42,11 +51,19 @@ export async function GET() {
         if (!publicScopes.has(event.scope)) return;
         send(`data: ${JSON.stringify(event)}\n\n`);
       });
-      heartbeat = setInterval(() => send(': heartbeat\n\n'), HEARTBEAT_MS);
+      // Also the sseConnectionLimit.ts safety net: a tick here means this
+      // connection is still genuinely alive, so its slot isn't swept as
+      // stale even if cancel() below never runs (see that module's doc
+      // comment on why cancel() firing isn't guaranteed).
+      heartbeat = setInterval(() => {
+        send(': heartbeat\n\n');
+        touchSseSlot(slotId);
+      }, HEARTBEAT_MS);
     },
     cancel() {
       unsubscribe();
       clearInterval(heartbeat);
+      releaseSseSlot(slotId);
     },
   });
 
