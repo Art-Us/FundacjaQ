@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireUser, canPostAlertJournalEntry } from '@/lib/authz';
 import { ALERT_MESSAGE_TYPES } from '@/lib/alertMessageLabels';
 
@@ -88,5 +89,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Nie udało się dodać wpisu.' }, { status: 500 });
   }
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ entry }, { status: 201 });
 }

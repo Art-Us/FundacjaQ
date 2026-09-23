@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { alertInclude } from '@/lib/alertInclude';
 import type { Role } from '@/types';
+import { AlertsLiveRefresh } from '@/components/AlertsLiveRefresh';
 import AlertsMapView from './AlertsMapView';
 
 export default async function MapPage() {
@@ -51,15 +52,18 @@ export default async function MapPage() {
   ]);
 
   return (
-    <AlertsMapView
-      initialAlerts={alerts}
-      gminy={gminy}
-      canManageAlerts={canManageAlerts}
-      currentUserGminaId={gminaId}
-      currentUserRole={role}
-      currentUserId={session.user.id}
-      currentUserOrganizationId={session.user.organizationId}
-      myResources={myResources}
-    />
+    <>
+      <AlertsLiveRefresh />
+      <AlertsMapView
+        initialAlerts={alerts}
+        gminy={gminy}
+        canManageAlerts={canManageAlerts}
+        currentUserGminaId={gminaId}
+        currentUserRole={role}
+        currentUserId={session.user.id}
+        currentUserOrganizationId={session.user.organizationId}
+        myResources={myResources}
+      />
+    </>
   );
 }

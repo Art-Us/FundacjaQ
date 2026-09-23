@@ -8,7 +8,11 @@ import { redis } from './redis';
 // volume here (admin actions, not chat) never justifies the extra channels.
 const CHANNEL = 'admin-events';
 
-export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organizations';
+// 'alerts' is the odd one out: it isn't an admin-panel scope at all, but a
+// change to an alert or anything hanging off it (needs, allocations, journal
+// entries), fanned out to every logged-in user via /api/events — see
+// lib/alertEvents.ts and components/AlertsLiveRefresh.tsx.
+export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organizations' | 'alerts';
 
 export interface AdminEvent {
   scope: AdminEventScope;
@@ -19,6 +23,9 @@ export interface AdminEvent {
   // (components/NewUserNotifier.tsx) distinguishes 'USER_CREATE' from every
   // other 'users'-scope change.
   action?: string;
+  // Only set on 'alerts' events — which alert changed, so an open alert
+  // details page can ignore changes to every other alert.
+  alertId?: string;
 }
 
 /** Best-effort — a dropped event just means an open tab waits for its own next action or a manual reload, exactly like before this existed. */

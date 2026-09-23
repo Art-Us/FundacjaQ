@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { AuditAction } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import {
   sumReturnEvents,
@@ -225,5 +226,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
   }
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Alert anulowany.', alert: result.updatedAlert });
 }

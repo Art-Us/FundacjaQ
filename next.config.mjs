@@ -17,6 +17,13 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     instrumentationHook: true,
+    // Next 14 otherwise re-serves a dynamic page from the client router
+    // cache for 30s on in-app navigation — e.g. clicking "Mapa" in the
+    // sidebar right after someone else added an alert would still show the
+    // old list. Every page here is session-dependent and dynamic anyway.
+    staleTimes: {
+      dynamic: 0,
+    },
   },
   async headers() {
     return [

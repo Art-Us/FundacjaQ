@@ -9,6 +9,7 @@ import { formatDate } from '@/lib/utils';
 import { ALERT_STATUS_LABELS, getSeverityBadgeInfo, getStatusBadgeInfo, SEVERITY_LABELS } from '@/lib/alertLabels';
 import { ROLE_LABELS } from '@/lib/roleLabels';
 import type { Role } from '@/types';
+import { AlertsLiveRefresh } from '@/components/AlertsLiveRefresh';
 
 const RESOURCE_STATUS_LABELS: Record<string, string> = {
   AVAILABLE: 'Dostępny',
@@ -41,6 +42,7 @@ export default async function HomePage() {
 
   return (
     <main className="flex-1 px-4 sm:px-6 lg:px-8 pt-16 pb-10 lg:pt-8 max-w-7xl w-full mx-auto space-y-8">
+      <AlertsLiveRefresh />
       <div className="rounded-3xl bg-white p-6 sm:p-8 border border-slate-200/80 shadow-xs relative overflow-hidden">
         <div className="relative z-10 max-w-2xl space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">

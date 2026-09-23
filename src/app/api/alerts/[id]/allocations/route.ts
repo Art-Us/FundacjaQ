@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
@@ -241,5 +242,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Zasób przydzielony.', allocation }, { status: 201 });
 }

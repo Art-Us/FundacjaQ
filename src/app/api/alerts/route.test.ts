@@ -11,17 +11,18 @@ vi.mock('@/lib/authz', async () => {
     requireAdminOrCoordinator: vi.fn(),
   };
 });
+vi.mock('@/lib/alertEvents', () => ({ publishAlertChange: vi.fn() }));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { POST } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
 
 // NOTE: this route file only exports POST — there is no GET /api/alerts.
 // The alerts *list* is read directly in the map page server component
-// (src/app/(protected)/map/page.tsx), scoped there via scopedGminaWhere, not
-// through an API route. So there is nothing to test here for GET.
+// (src/app/(protected)/map/page.tsx), not through an API route. So there is nothing to test here for GET.
 
 function baseBody(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -56,6 +57,7 @@ function makeInvalidJsonRequest() {
 beforeEach(() => {
   mockReset(prisma);
   vi.mocked(requireAdminOrCoordinator).mockReset();
+  vi.mocked(publishAlertChange).mockReset();
 });
 
 describe('POST /api/alerts', () => {
@@ -171,6 +173,8 @@ describe('POST /api/alerts', () => {
         data: expect.objectContaining({ gminaId: 'gmina-1', authorId: 'coord-1' }),
       })
     );
+    // Open map/dashboard tabs learn about it (components/AlertsLiveRefresh.tsx).
+    expect(publishAlertChange).toHaveBeenCalledWith('alert-1');
   });
 
   it('lets ADMIN create an alert for any gmina', async () => {
@@ -238,5 +242,6 @@ describe('POST /api/alerts', () => {
 
     expect(res.status).toBe(500);
     expect(body.error).toBe('Nie udało się utworzyć alertu.');
+    expect(publishAlertChange).not.toHaveBeenCalled();
   });
 });

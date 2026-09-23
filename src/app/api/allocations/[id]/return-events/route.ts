@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAllocationRecipient } from '@/lib/authz';
 import { sumReturnEvents, recalculateAllocationStatus, resourceCountersAfterReturnEvent } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
@@ -146,5 +147,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(target.alert.id);
   return NextResponse.json({ allocation: result.allocation, returnEvent: result.returnEvent }, { status: 201 });
 }

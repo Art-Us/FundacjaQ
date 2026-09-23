@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
@@ -136,6 +137,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Nie udało się zaktualizować alertu.' }, { status: 500 });
   }
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Alert zaktualizowany.' });
 }
 
@@ -184,5 +186,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Nie udało się usunąć alertu.' }, { status: 500 });
   }
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Alert usunięty.' });
 }

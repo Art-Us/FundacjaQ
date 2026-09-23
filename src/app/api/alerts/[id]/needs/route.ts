@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 
@@ -120,5 +121,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Zapotrzebowanie dodane.', need }, { status: 201 });
 }

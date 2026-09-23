@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { AllocationStatus, ResourceAllocation } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAllocationDonor, isAllocationRecipient } from '@/lib/authz';
 import { assertAllocationTransition, AllocationTransitionError, type AllocationActor } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
@@ -134,5 +135,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(target.alert.id);
   return NextResponse.json({ allocation });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 
@@ -79,5 +80,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Nie udało się utworzyć alertu.' }, { status: 500 });
   }
 
+  await publishAlertChange(alert.id);
   return NextResponse.json({ message: 'Alert utworzony.', alert });
 }

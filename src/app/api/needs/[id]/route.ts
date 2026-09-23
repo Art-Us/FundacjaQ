@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma, type AlertNeed } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { publishAlertChange } from '@/lib/alertEvents';
 import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
@@ -153,6 +154,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(target.alert.id);
   return NextResponse.json({ need });
 }
 
@@ -202,5 +204,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     meta: requestMeta(req),
   });
 
+  await publishAlertChange(target.alert.id);
   return NextResponse.json({ message: 'Zapotrzebowanie usunięte.' });
 }
