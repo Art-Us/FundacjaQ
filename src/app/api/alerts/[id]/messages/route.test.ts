@@ -52,14 +52,15 @@ describe('GET /api/alerts/[id]/messages', () => {
     expect(res.status).toBe(404);
   });
 
-  it('rejects a VOLUNTEER from a different gmina', async () => {
+  it('allows a VOLUNTEER from a different gmina (alerts are visible to everyone)', async () => {
     vi.mocked(requireUser).mockResolvedValue({ id: 'v1', role: 'VOLUNTEER', gminaId: 'g2' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.alertMessage.findMany.mockResolvedValue([]);
 
     const res = await GET(makeRequest('GET'), ctx);
 
-    expect(res.status).toBe(403);
-    expect(prisma.alertMessage.findMany).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(prisma.alertMessage.findMany).toHaveBeenCalled();
   });
 
   it('allows a VOLUNTEER from the same gmina (read-only forum visibility)', async () => {
@@ -102,14 +103,15 @@ describe('POST /api/alerts/[id]/messages', () => {
     expect(prisma.alertMessage.create).not.toHaveBeenCalled();
   });
 
-  it('rejects a COORDINATOR from a different gmina', async () => {
+  it('allows a COORDINATOR from a different gmina to post a root entry', async () => {
     vi.mocked(requireUser).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g2', organizationId: null });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.alertMessage.create.mockResolvedValue({ id: 'msg1', ...validEntry } as any);
 
     const res = await POST(makeRequest('POST', validEntry), ctx);
 
-    expect(res.status).toBe(403);
-    expect(prisma.alertMessage.create).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(prisma.alertMessage.create).toHaveBeenCalled();
   });
 
   it('rejects an invalid type', async () => {

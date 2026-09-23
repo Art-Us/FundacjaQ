@@ -29,12 +29,13 @@ export function scopedGminaWhere(actor: { role: Role | string; gminaId: string |
 }
 
 /**
- * Same shape as scopedGminaWhere, but for the two areas (alerts, resources —
- * including allocations/needs) the product owner decided should stay
- * ADMIN-unconditional regardless of gminaId, unlike everything else
- * (users/invites/gminas/organizations/audit log) — any ADMIN, global or
- * gmina-scoped, sees every gmina's alerts and resources. Everyone else
+ * Same shape as scopedGminaWhere, but for resources, which the product owner
+ * decided should stay ADMIN-unconditional regardless of gminaId, unlike
+ * everything else (users/invites/gminas/organizations/audit log) — any
+ * ADMIN, global or gmina-scoped, sees every gmina's resources. Everyone else
  * (COORDINATOR/VOLUNTEER) is scoped exactly the same as scopedGminaWhere.
+ * Alerts (with their needs, allocations and journal) are not scoped at all:
+ * every logged-in user sees every alert, in every gmina.
  */
 export function scopedGminaWhereAnyAdmin(actor: { role: Role | string; gminaId: string | null }): { gminaId: string } | Record<string, never> | null {
   if (actor.role === 'ADMIN') return {};

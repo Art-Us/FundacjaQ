@@ -38,12 +38,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  // Same gmina-scoping as GET /api/alerts/[id]/needs — visible to any donor
-  // in the alert's gmina, not only its owner organization.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
-    return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania przydziałów tego alertu.' }, { status: 403 });
-  }
-
+  // Not gmina-scoped, same as GET /api/alerts/[id]/needs.
   const allocations = await prisma.resourceAllocation.findMany({
     where: { alertId: alert.id },
     include: {

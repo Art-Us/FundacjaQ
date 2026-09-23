@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireUser, canPostAlertJournalEntry, canViewAlertJournal } from '@/lib/authz';
+import { requireUser, canPostAlertJournalEntry } from '@/lib/authz';
 import { ALERT_MESSAGE_TYPES } from '@/lib/alertMessageLabels';
 
 export const runtime = 'nodejs';
@@ -15,12 +15,12 @@ const createEntrySchema = z.object({
 async function findAlert(id: string) {
   return prisma.alert.findUnique({
     where: { id },
-    select: { id: true, gminaId: true, organizationId: true },
+    select: { id: true, organizationId: true },
   });
 }
 
-// GET — the list of root journal entries ("wpisy") under an alert. Anyone
-// who can see the alert can read this (including VOLUNTEER); only creating a
+// GET — the list of root journal entries ("wpisy") under an alert. Any
+// logged-in user can read this (including VOLUNTEER); only creating a
 // new one (POST below) is restricted to ADMIN/COORDINATOR.
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const user = await requireUser();
@@ -31,9 +31,6 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const alert = await findAlert(params.id);
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
-  }
-  if (!canViewAlertJournal(alert, user)) {
-    return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania tego alertu.' }, { status: 403 });
   }
 
   const entries = await prisma.alertMessage.findMany({
@@ -67,9 +64,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { error: 'Tylko administrator lub koordynator może dodawać wpisy do dziennika operacyjnego.' },
       { status: 403 }
     );
-  }
-  if (!canViewAlertJournal(alert, user)) {
-    return NextResponse.json({ error: 'Nie masz uprawnień do tego alertu.' }, { status: 403 });
   }
 
   const parsed = createEntrySchema.safeParse(await req.json().catch(() => null));

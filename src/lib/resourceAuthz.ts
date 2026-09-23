@@ -85,26 +85,6 @@ export function canPostAlertJournalEntry(user: { role: string }): boolean {
 }
 
 /**
- * Whether `user` may see an alert's operational journal/forum at all — the
- * same gmina-scoped visibility rule that decides whether the alert itself
- * shows up on the map (scopedGminaWhere, lib/gmina.ts), just re-checked
- * against one already-fetched alert instead of filtering a list. Shared by
- * both journal endpoints (Крок 53's root-entry route and Крок 54's replies
- * route) so the two don't each carry their own copy of this check.
- * Deliberately broader than the rest of the resource module
- * (requireAdminOrCoordinator + the hard /zasoby perimeter, Крок 31) — the
- * journal inherits the alert's own visibility, VOLUNTEER included (see
- * docs/are-you-familiar-with-tidy-blum.md, розділ 4, "Форум алерту — окремий,
- * м'якший периметр").
- */
-export function canViewAlertJournal(
-  alert: { gminaId: string },
-  user: { role: string; gminaId: string | null }
-): boolean {
-  return user.role === 'ADMIN' || alert.gminaId === user.gminaId;
-}
-
-/**
  * Whether `user` may post a reply in the chat thread under an existing
  * journal entry — the same broad group the original flat-forum design (R12)
  * allowed to write: the alert's owner org, any org that donated to it, or

@@ -57,14 +57,16 @@ describe('GET /api/alerts/[id]/messages/[messageId]/replies', () => {
     expect(res.status).toBe(404);
   });
 
-  it('rejects a VOLUNTEER from a different gmina', async () => {
+  it('allows a VOLUNTEER from a different gmina to read the thread', async () => {
     vi.mocked(requireUser).mockResolvedValue({ id: 'v1', role: 'VOLUNTEER', gminaId: 'g2' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.alertMessage.findFirst.mockResolvedValue(rootEntry as any);
+    prisma.alertMessage.findMany.mockResolvedValue([]);
 
     const res = await GET(makeRequest('GET'), ctx);
 
-    expect(res.status).toBe(403);
-    expect(prisma.alertMessage.findFirst).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(prisma.alertMessage.findMany).toHaveBeenCalled();
   });
 
   it('returns 404 when messageId is not a root entry of this alert', async () => {

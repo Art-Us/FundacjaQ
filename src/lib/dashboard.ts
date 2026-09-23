@@ -40,18 +40,16 @@ export async function getDashboardData(role: Role, gminaId: string | null): Prom
   // scopedGminaWhere's doc comment for the bug this replaced.
   const gminaFilter = scopedGminaWhere({ role, gminaId });
   const noAccess = gminaFilter === null;
-  // Alerts and resources stay ADMIN-unconditional (any ADMIN, global or
-  // gmina-scoped, sees every gmina's alerts/resources) — see
-  // scopedGminaWhereAnyAdmin's doc comment. Deliberately a separate filter
-  // from gminaFilter above, which still scopes usersCount/gminyCount/
-  // scopeLabel to a gmina-scoped admin's own gmina.
+  // Resources stay ADMIN-unconditional (any ADMIN, global or gmina-scoped,
+  // sees every gmina's resources) — see scopedGminaWhereAnyAdmin's doc
+  // comment. Deliberately a separate filter from gminaFilter above, which
+  // still scopes usersCount/gminyCount/scopeLabel to a gmina-scoped admin's
+  // own gmina. Alerts aren't scoped at all: everyone sees every gmina's.
   const resourceGminaFilter = scopedGminaWhereAnyAdmin({ role, gminaId });
   const resourceNoAccess = resourceGminaFilter === null;
 
   const [activeAlerts, gminyCount, usersCount, alerts, resources] = await Promise.all([
-    resourceNoAccess
-      ? 0
-      : prisma.alert.count({ where: { ...resourceGminaFilter, status: { in: ['ACTIVE', 'IN_PROGRESS'] } } }),
+    prisma.alert.count({ where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } } }),
     // A gmina-scoped actor (COORDINATOR/VOLUNTEER, or a gmina-scoped ADMIN)
     // WITH a real gmina of their own sees only that one gmina's count, not
     // the system-wide total. The noAccess (no gmina at all) case is left
@@ -60,14 +58,11 @@ export async function getDashboardData(role: Role, gminaId: string | null): Prom
     // behavior for that edge case.
     isGminaScoped && !noAccess ? 1 : prisma.gmina.count(),
     noAccess ? 0 : prisma.user.count(isGminaScoped ? { where: gminaFilter! } : undefined),
-    resourceNoAccess
-      ? Promise.resolve([])
-      : prisma.alert.findMany({
-          where: resourceGminaFilter,
-          include: alertInclude,
-          orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
-          take: role === 'ADMIN' ? 10 : 8,
-        }),
+    prisma.alert.findMany({
+      include: alertInclude,
+      orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
+      take: role === 'ADMIN' ? 10 : 8,
+    }),
     resourceNoAccess
       ? Promise.resolve([])
       : prisma.resource.findMany({

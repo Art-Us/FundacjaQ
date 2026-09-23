@@ -208,5 +208,4 @@ export {
   isAlertDonorOrg,
   canPostAlertJournalEntry,
   canReplyToAlertForum,
-  canViewAlertJournal,
 } from './resourceAuthz';

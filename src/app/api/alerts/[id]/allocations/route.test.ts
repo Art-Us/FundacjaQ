@@ -71,14 +71,15 @@ describe('GET /api/alerts/[id]/allocations', () => {
     expect(res.status).toBe(404);
   });
 
-  it('rejects a COORDINATOR from a different gmina', async () => {
+  it('allows a COORDINATOR from a different gmina (alerts are visible to everyone)', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'other-gmina' });
     prisma.alert.findUnique.mockResolvedValue(baseAlert as any);
+    prisma.resourceAllocation.findMany.mockResolvedValue([]);
 
     const res = await GET(makeRequest('GET'), ctx);
 
-    expect(res.status).toBe(403);
-    expect(prisma.resourceAllocation.findMany).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(prisma.resourceAllocation.findMany).toHaveBeenCalled();
   });
 
   it('allows a COORDINATOR from the same gmina', async () => {

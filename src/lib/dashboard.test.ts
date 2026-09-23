@@ -35,7 +35,6 @@ describe('getDashboardData — ADMIN', () => {
     // ADMIN is not gmina-scoped, so the user count is unfiltered (no `where` at all).
     expect(prisma.user.count).toHaveBeenCalledWith(undefined);
     expect(prisma.alert.findMany).toHaveBeenCalledWith({
-      where: {},
       include: { gmina: true },
       orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
       take: 10,
@@ -62,7 +61,7 @@ describe('getDashboardData — ADMIN', () => {
 });
 
 describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
-  it('scopes COORDINATOR data to their own gmina, including gminyCount (never the system-wide total)', async () => {
+  it('scopes COORDINATOR users/resources/gminyCount to their own gmina, but shows alerts from every gmina', async () => {
     prisma.alert.count.mockResolvedValue(2);
     prisma.user.count.mockResolvedValue(4);
     prisma.alert.findMany.mockResolvedValue([{ id: 'a1' }] as any);
@@ -76,11 +75,10 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
     expect(prisma.gmina.count).not.toHaveBeenCalled();
 
     expect(prisma.alert.count).toHaveBeenCalledWith({
-      where: { gminaId: 'gmina-1', status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
+      where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
     });
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-1' } });
     expect(prisma.alert.findMany).toHaveBeenCalledWith({
-      where: { gminaId: 'gmina-1' },
       include: { gmina: true },
       orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
       take: 8,
@@ -93,7 +91,7 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
     });
   });
 
-  it('scopes VOLUNTEER data to their own gmina but denies invite management', async () => {
+  it('scopes VOLUNTEER users to their own gmina, shows alerts from every gmina, and denies invite management', async () => {
     prisma.alert.count.mockResolvedValue(1);
     prisma.gmina.count.mockResolvedValue(3);
     prisma.user.count.mockResolvedValue(9);
@@ -105,15 +103,16 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
     expect(result.scopeLabel).toBe('Twoja gmina');
     expect(result.canManageInvites).toBe(false);
     expect(prisma.alert.count).toHaveBeenCalledWith({
-      where: { gminaId: 'gmina-2', status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
+      where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
     });
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-2' } });
   });
 
   // A gmina-scoped ADMIN (role === 'ADMIN', gminaId set) is scoped like
-  // COORDINATOR/VOLUNTEER for usersCount/gminyCount/scopeLabel — but alerts
-  // and resources deliberately stay ADMIN-unconditional (product decision:
-  // any ADMIN sees every gmina's alerts/resources, unlike users/gminy).
+  // COORDINATOR/VOLUNTEER for usersCount/gminyCount/scopeLabel — but
+  // resources deliberately stay ADMIN-unconditional (product decision: any
+  // ADMIN sees every gmina's resources, unlike users/gminy), and alerts
+  // aren't scoped for anyone.
   it('scopes a gmina-scoped ADMIN\'s usersCount/gminyCount, but keeps alerts/resources unrestricted like a global ADMIN', async () => {
     prisma.alert.count.mockResolvedValue(2);
     prisma.user.count.mockResolvedValue(4);
@@ -129,7 +128,7 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
       where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
     });
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-1' } });
-    expect(prisma.alert.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    expect(prisma.alert.findMany.mock.calls[0][0]).not.toHaveProperty('where');
     expect(prisma.resource.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
   });
 });
@@ -137,39 +136,41 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
 // Regression coverage mirroring scopedGminaWhere's fail-closed contract
 // (see gmina.ts's doc comment and the 2026-09-10 audit finding, which named
 // dashboard.ts specifically): a gmina-scoped actor with NO gmina of their own
-// must get zeroed-out data, never the unrestricted, all-gminy view.
+// must get zeroed-out users/resources, never the unrestricted, all-gminy
+// view. Alerts are the exception: everyone sees every gmina's alerts.
 describe('getDashboardData — gmina-scoped role with NO gminaId (fail-closed)', () => {
-  it('zeroes out alerts/resources/user counts for COORDINATOR, never falling back to unrestricted data', async () => {
+  it('zeroes out resources/user counts for COORDINATOR, but still shows every alert', async () => {
     prisma.gmina.count.mockResolvedValue(3);
+    prisma.alert.count.mockResolvedValue(2);
+    prisma.alert.findMany.mockResolvedValue([{ id: 'a1' }] as any);
 
     const result = await getDashboardData('COORDINATOR', null);
 
     expect(result.scopeLabel).toBe('Brak przypisanej gminy');
-    expect(result.stats).toEqual({ activeAlerts: 0, gminyCount: 3, usersCount: 0 });
-    expect(result.alerts).toEqual([]);
+    expect(result.stats).toEqual({ activeAlerts: 2, gminyCount: 3, usersCount: 0 });
+    expect(result.alerts).toEqual([{ id: 'a1' }]);
     expect(result.resources).toEqual([]);
     // canManageInvites is role-based, independent of gmina scoping.
     expect(result.canManageInvites).toBe(true);
 
-    expect(prisma.alert.count).not.toHaveBeenCalled();
     expect(prisma.user.count).not.toHaveBeenCalled();
-    expect(prisma.alert.findMany).not.toHaveBeenCalled();
     expect(prisma.resource.findMany).not.toHaveBeenCalled();
   });
 
-  it('zeroes out data for VOLUNTEER with no gmina the same way', async () => {
+  it('zeroes out data for VOLUNTEER with no gmina the same way, alerts excepted', async () => {
     prisma.gmina.count.mockResolvedValue(3);
+    prisma.alert.count.mockResolvedValue(1);
+    prisma.alert.findMany.mockResolvedValue([]);
 
     const result = await getDashboardData('VOLUNTEER', null);
 
     expect(result.scopeLabel).toBe('Brak przypisanej gminy');
-    expect(result.stats).toEqual({ activeAlerts: 0, gminyCount: 3, usersCount: 0 });
-    expect(result.alerts).toEqual([]);
+    expect(result.stats).toEqual({ activeAlerts: 1, gminyCount: 3, usersCount: 0 });
     expect(result.resources).toEqual([]);
     expect(result.canManageInvites).toBe(false);
 
-    expect(prisma.alert.count).not.toHaveBeenCalled();
     expect(prisma.user.count).not.toHaveBeenCalled();
+    expect(prisma.resource.findMany).not.toHaveBeenCalled();
   });
 
   it('still counts the total number of gminy even though this actor has no gmina', async () => {

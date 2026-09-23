@@ -4,7 +4,7 @@ import { ArrowLeft, Building, Calendar, MapPin, MessageSquare, User } from 'luci
 import { getSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { alertInclude } from '@/lib/alertInclude';
-import { canViewAlertJournal, canReplyToAlertForum, canPostAlertJournalEntry, isAlertOwnerOrg } from '@/lib/authz';
+import { canReplyToAlertForum, canPostAlertJournalEntry, isAlertOwnerOrg } from '@/lib/authz';
 import { availableCategoryIds } from '@/lib/resourceMatching';
 import { ALERT_STATUS_LABELS, ALERT_CATEGORY_LABELS, SEVERITY_LABELS, getSeverityBadgeInfo } from '@/lib/alertLabels';
 import { formatDate } from '@/lib/utils';
@@ -31,11 +31,8 @@ export default async function AlertDetailPage({ params }: { params: { alertId: s
     include: alertInclude,
   });
 
-  // Fail closed exactly like the map's own list (scopedGminaWhere) — an
-  // alert that doesn't exist and one the caller isn't allowed to see are
-  // deliberately indistinguishable here, so a stale/guessed link can't be
-  // used to probe for ids.
-  if (!alert || !canViewAlertJournal(alert, currentUser)) {
+  // Every logged-in user may see every alert (same as the /map list).
+  if (!alert) {
     redirect('/map');
   }
 

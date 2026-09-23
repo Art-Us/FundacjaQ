@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireUser, canViewAlertJournal, canReplyToAlertForum } from '@/lib/authz';
+import { requireUser, canReplyToAlertForum } from '@/lib/authz';
 
 export const runtime = 'nodejs';
 
@@ -9,15 +9,13 @@ const createReplySchema = z.object({
   body: z.string().trim().min(1, 'Wiadomość nie może być pusta.').max(2000),
 });
 
-// Includes `allocations` (donor orgs) alongside the plain fields
-// canViewAlertJournal needs — canReplyToAlertForum (POST guard below) needs
-// the fuller shape.
+// Includes `allocations` (donor orgs) — canReplyToAlertForum (POST guard
+// below) needs them.
 async function findAlert(id: string) {
   return prisma.alert.findUnique({
     where: { id },
     select: {
       id: true,
-      gminaId: true,
       organizationId: true,
       allocations: { select: { donorOrgId: true } },
     },
@@ -50,9 +48,6 @@ export async function GET(
   const alert = await findAlert(params.id);
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
-  }
-  if (!canViewAlertJournal(alert, user)) {
-    return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania tego alertu.' }, { status: 403 });
   }
 
   const rootEntry = await findRootEntry(alert.id, params.messageId);

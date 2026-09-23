@@ -31,13 +31,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  // Same gmina-scoping as PATCH /api/alerts/[id]: any donor org (ADMIN, or a
-  // COORDINATOR in the same gmina) needs to see what's needed in order to
-  // offer resources — this is deliberately NOT restricted to the alert's own
-  // owner organization, unlike POST below.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
-    return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania potrzeb tego alertu.' }, { status: 403 });
-  }
+  // Not gmina-scoped: any potential donor org, in any gmina, needs to see
+  // what's needed in order to offer resources (POST /api/alerts/[id]/allocations
+  // accepts donors from any gmina) — unlike POST below, which is restricted
+  // to the alert's own owner organization.
 
   const needs = await prisma.alertNeed.findMany({
     where: { alertId: alert.id },
