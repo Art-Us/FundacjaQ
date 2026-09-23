@@ -79,7 +79,12 @@ az acr create --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" --sku Basic 
 
 ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
 
-docker build -t "$ACR_LOGIN_SERVER/qfundation:v1" .
+# NEXT_PUBLIC_RECAPTCHA_SITE_KEY is inlined into the client bundle at build
+# time, so it must be passed as a build arg here; setting it as an app
+# setting further down has no effect on the already-built image.
+docker build \
+  --build-arg NEXT_PUBLIC_RECAPTCHA_SITE_KEY="$NEXT_PUBLIC_RECAPTCHA_SITE_KEY" \
+  -t "$ACR_LOGIN_SERVER/qfundation:v1" .
 az acr login --name "$ACR_NAME"
 docker push "$ACR_LOGIN_SERVER/qfundation:v1"
 
