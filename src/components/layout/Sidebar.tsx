@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { Home, UserPlus, Users, MapPin, Building2, History, LogOut, ChevronRight, Package } from 'lucide-react';
 import { useHasNewUser } from '@/hooks/useHasNewUser';
+import { closeAllSseConnections } from '@/lib/sseClientRegistry';
 import { ProfileModal } from './ProfileModal';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -219,7 +220,13 @@ export function Sidebar({
             </button>
             <button
               type="button"
-              onClick={() => signOut({ callbackUrl: '/login' })}
+              onClick={() => {
+                // See sseClientRegistry.ts's doc comment — must run BEFORE
+                // signOut()'s own navigation, or that navigation's new
+                // connection can stall behind these still-open ones.
+                closeAllSseConnections();
+                signOut({ callbackUrl: '/login' });
+              }}
               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition shrink-0"
               title="Wyloguj się"
             >

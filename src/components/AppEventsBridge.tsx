@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import type { AdminEvent } from '@/lib/adminEvents';
+import { registerSseConnection } from '@/lib/sseClientRegistry';
 
 /**
  * Mounted once in ProtectedShell for EVERY signed-in user (unlike
@@ -17,6 +18,10 @@ import type { AdminEvent } from '@/lib/adminEvents';
 export function AppEventsBridge() {
   useEffect(() => {
     const source = new EventSource('/api/events');
+    // See sseClientRegistry.ts's doc comment — lets signOut() force this
+    // closed before it navigates, instead of relying on this effect's own
+    // cleanup (below) running in time.
+    const unregister = registerSseConnection(source);
     source.onmessage = (e) => {
       let event: AdminEvent;
       try {
@@ -38,7 +43,10 @@ export function AppEventsBridge() {
         console.error('[AppEventsBridge] SSE connection closed permanently (likely session change)');
       }
     };
-    return () => source.close();
+    return () => {
+      unregister();
+      source.close();
+    };
   }, []);
 
   return null;
