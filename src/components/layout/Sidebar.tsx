@@ -1,10 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { Home, UserPlus, Users, MapPin, Building2, History, LogOut, ChevronRight, Package } from 'lucide-react';
 import { useHasNewUser } from '@/hooks/useHasNewUser';
+import { ProfileModal } from './ProfileModal';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrator',
@@ -41,6 +43,15 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const hasNewUser = useHasNewUser();
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  // Sidebar's `name` prop comes from the server-rendered session (see
+  // layout.tsx/ProtectedShell.tsx) and won't reflect a self-edit until the
+  // next sign-in refreshes the JWT (see auth.ts's jwt callback — it only
+  // re-syncs role/gminaId/organizationId/isActive on each check, not
+  // name/email). This local override lets the sidebar show the new name
+  // immediately after ProfileModal saves, without waiting for that.
+  const [displayName, setDisplayName] = useState(name);
+  useEffect(() => setDisplayName(name), [name]);
 
   const linkClasses = (active: boolean) =>
     `group flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
@@ -190,17 +201,22 @@ export function Sidebar({
 
         <div className="p-3 border-t border-slate-100 bg-slate-50/70 shrink-0">
           <div className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsProfileOpen(true)}
+              className="flex items-center gap-2.5 min-w-0 rounded-xl -m-0.5 p-0.5 hover:bg-slate-50 transition text-left"
+              title="Zarządzaj swoim kontem"
+            >
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-bold text-xs shadow-xs">
-                {getInitials(name)}
+                {getInitials(displayName)}
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-slate-800 truncate leading-tight">{name}</span>
+                <span className="text-xs font-bold text-slate-800 truncate leading-tight">{displayName}</span>
                 <span className="text-[10px] font-semibold text-indigo-600 uppercase truncate">
                   {ROLE_LABELS[role] ?? role}
                 </span>
               </div>
-            </div>
+            </button>
             <button
               type="button"
               onClick={() => signOut({ callbackUrl: '/login' })}
@@ -212,6 +228,13 @@ export function Sidebar({
           </div>
         </div>
       </aside>
+
+      {isProfileOpen && (
+        <ProfileModal
+          onClose={() => setIsProfileOpen(false)}
+          onSaved={(user) => setDisplayName(user.name ?? displayName)}
+        />
+      )}
     </>
   );
 }
