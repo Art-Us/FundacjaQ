@@ -348,8 +348,14 @@ function effectiveAction(step: { action: AuditAction; isRevert: boolean }): Audi
 }
 
 type Failure = { ok: false; status: number; error: string };
-/** Result of reverting a single log entry — used internally by the per-entity step functions. */
-type StepResult = { ok: true } | Failure;
+/**
+ * Result of reverting a single log entry — used internally by the per-entity
+ * step functions. `movedUserIds` is set only by revertOrganization's gmina-
+ * reassignment cascade, whose members' own USER rows never get an audit
+ * entry of their own (see the doc comment above that cascade) — the caller
+ * still needs their ids to invalidate lib/userStatusCache.ts for them.
+ */
+type StepResult = { ok: true; movedUserIds?: string[] } | Failure;
 /** Result of the public revertAuditLog() call — may have cascaded through more than one log entry. */
 export type RevertResult = { ok: true; revertedLogIds: string[] } | Failure;
 
@@ -455,6 +461,7 @@ export async function revertAuditLog(
       // but avoids extracting/re-casting each step's before/after twice.
       const steps = [...chain].reverse();
       const now = new Date();
+      const cascadedUserIds: string[] = [];
 
       for (const step of steps) {
         const before = (step.before ?? {}) as Record<string, unknown>;
@@ -477,6 +484,7 @@ export async function revertAuditLog(
             stepResult = badRequest('Nieobsługiwany typ encji.');
         }
         if (!stepResult.ok) throw new RevertAbort(stepResult);
+        if (stepResult.movedUserIds) cascadedUserIds.push(...stepResult.movedUserIds);
 
         await tx.auditLog.update({
           where: { id: step.id },
@@ -505,7 +513,10 @@ export async function revertAuditLog(
 
       return {
         revertedLogIds: steps.map((step) => step.id),
-        revertedUserIds: steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+        revertedUserIds: [
+          ...steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+          ...cascadedUserIds,
+        ],
         revertedEntityTypes: new Set(steps.map((step) => step.entityType)),
       };
     });
@@ -844,17 +855,19 @@ async function revertOrganization(
     }
   }
 
-  // Same guard PATCH /api/admin/organizations/[id] applies when moving an
-  // organization between gminas: every CURRENT user of this org has their
-  // own gminaId set to the org's CURRENT gmina, so reverting a gmina change
-  // here would silently strand them the same way a fresh reassignment would.
+  // Mirrors PATCH /api/admin/organizations/[id]: moving an organization
+  // between gminas takes its current members along with it (their gminaId
+  // always mirrors the org's CURRENT gmina — see POST/PATCH
+  // /api/admin/users), so reverting a gmina change cascades the same way a
+  // fresh reassignment does. Applied in this same transaction as the org's
+  // own updateMany below — if that one conflicts on a stale state, the whole
+  // transaction throws and rolls back, so members are never moved without
+  // the org actually following.
+  let movedUserIds: string[] | undefined;
   if (beforeGminaId !== target.gminaId) {
-    const usersCount = await tx.user.count({ where: { organizationId: target.id } });
-    if (usersCount > 0) {
-      return conflict(
-        'Nie można cofnąć zmiany gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do obecnej gminy.'
-      );
-    }
+    const members = await tx.user.findMany({ where: { organizationId: target.id }, select: { id: true } });
+    movedUserIds = members.map((m) => m.id);
+    await tx.user.updateMany({ where: { organizationId: target.id }, data: { gminaId: beforeGminaId } });
   }
 
   // Conditioned on the actual admin-managed fields, not `updatedAt` — same
@@ -902,7 +915,7 @@ async function revertOrganization(
     }
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }
-  return { ok: true };
+  return { ok: true, movedUserIds };
 }
 
 async function revertInvite(

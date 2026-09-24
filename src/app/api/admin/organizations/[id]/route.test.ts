@@ -11,10 +11,14 @@ vi.mock('@/lib/authz', async () => {
 vi.mock('@/lib/adminEvents', () => ({
   publishAdminEvent: vi.fn(),
 }));
+vi.mock('@/lib/userStatusCache', () => ({
+  invalidateUserStatusCache: vi.fn(),
+}));
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -56,11 +60,16 @@ function callDelete(id = 'target-1') {
 beforeEach(() => {
   mockReset(prisma);
   // mockReset wipes the $transaction implementation the shared mock installs
-  // at module load — PATCH runs the users-count re-check + organization.update
-  // through prisma.$transaction(async (tx) => ...), so it must be
-  // reinstalled here (see the doc comment on installTransactionMock).
+  // at module load — PATCH runs organization.update (plus, on a gmina
+  // reassignment, the cascading user.updateMany) through
+  // prisma.$transaction(async (tx) => ...), so it must be reinstalled here
+  // (see the doc comment on installTransactionMock).
   installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
+  vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
+  // Default: no members to cascade. Tests that reassign gminaId and care
+  // about the cascade override this with their own list.
+  prisma.user.findMany.mockResolvedValue([]);
 });
 
 describe('PATCH /api/admin/organizations/[id]', () => {
@@ -208,29 +217,39 @@ describe('PATCH /api/admin/organizations/[id]', () => {
   });
 
   // Regression coverage: every current user of an organization has their own
-  // gminaId set to that organization's CURRENT gmina — reassigning it out
-  // from under them would silently strand those users, so it's blocked
-  // whenever the organization still has any dependents, mirroring how a
-  // dependent-having record already blocks deletion elsewhere.
-  it('rejects reassigning gminaId when the organization still has users assigned', async () => {
+  // gminaId set to that organization's CURRENT gmina. Reassigning the org's
+  // gmina now takes its members along with it — a single updateMany, in the
+  // same transaction as the org's own write — instead of being blocked,
+  // so that invariant never goes stale.
+  it('cascades the new gminaId onto every user still assigned to the organization', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g2' } as any);
-    prisma.user.count.mockResolvedValue(1);
+    prisma.organization.update.mockResolvedValue(baseOrganization({ gminaId: 'g2' }) as any);
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }] as any);
 
     const res = await callPatch({ gminaId: 'g2' });
-    const body = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(body.error).toContain('powiązani użytkownicy');
-    expect(prisma.organization.update).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(prisma.organization.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ gmina: { connect: { id: 'g2' } } }) })
+    );
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: 'target-1' },
+      data: { gminaId: 'g2' },
+    });
+    // Every session-revalidation write site must invalidate this cache — see
+    // the doc comment on invalidateUserStatusCache — otherwise a moved
+    // member's session keeps scoping requests to their OLD gmina for up to
+    // its 2-minute TTL.
+    expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-1');
+    expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-2');
   });
 
   it('allows reassigning gminaId when the organization has no users assigned', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
     prisma.gmina.findUnique.mockResolvedValue({ id: 'g2' } as any);
-    prisma.user.count.mockResolvedValue(0);
     prisma.organization.update.mockResolvedValue({} as any);
 
     const res = await callPatch({ gminaId: 'g2' });
@@ -241,21 +260,15 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     );
   });
 
-  // Regression coverage for the org/gmina TOCTOU race: usersCount is
-  // re-checked immediately before the write, inside the transaction, so a
-  // concurrent POST/PATCH /api/admin/users assigning a user to this
-  // organization in between the precheck and the write is caught rather
-  // than silently stranding that user in a now-wrong gmina.
-  it('aborts with 409 when a user gets assigned to the organization between the precheck and the write', async () => {
+  it('does not touch users when the update leaves gminaId unchanged', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
-    prisma.gmina.findUnique.mockResolvedValue({ id: 'g2' } as any);
-    prisma.user.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    prisma.organization.update.mockResolvedValue(baseOrganization({ gminaId: 'g1', city: 'Kraków' }) as any);
 
-    const res = await callPatch({ gminaId: 'g2' });
+    const res = await callPatch({ city: 'Kraków' });
 
-    expect(res.status).toBe(409);
-    expect(prisma.organization.update).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects reassignment to a nonexistent gmina', async () => {

@@ -25,6 +25,8 @@ export interface OrganizationFormValue {
   contactLastName: string | null;
   contactPhone: string | null;
   contactEmail: string | null;
+  /** edit mode only: how many users currently belong to this org — drives the gmina-change warning below. */
+  usersCount?: number;
 }
 
 interface OrganizationFormModalProps {
@@ -198,6 +200,17 @@ export function OrganizationFormModal({
               newGminaMode="modal"
               canCreateGmina={canCreateGmina}
             />
+            {mode === 'edit' &&
+              !!organization &&
+              (organization.usersCount ?? 0) > 0 &&
+              gmina.gminaId &&
+              gmina.gminaId !== organization.gminaId && (
+                <p className="mt-1.5 text-xs text-amber-600">
+                  Ta organizacja ma {organization.usersCount}{' '}
+                  {organization.usersCount === 1 ? 'przypisanego użytkownika' : 'przypisanych użytkowników'} — po
+                  zapisaniu wszyscy zostaną przeniesieni razem z organizacją do nowej gminy.
+                </p>
+              )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
