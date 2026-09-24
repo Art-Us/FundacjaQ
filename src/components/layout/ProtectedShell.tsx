@@ -7,6 +7,7 @@ import { AdminEventsBridge } from '@/components/AdminEventsBridge';
 import { AppEventsBridge } from '@/components/AppEventsBridge';
 import { NewUserNotifier } from '@/components/NewUserNotifier';
 import { ApiUnauthorizedRedirect } from '@/components/ApiUnauthorizedRedirect';
+import { ScopeChangeNoticeModal } from '@/components/layout/ScopeChangeNoticeModal';
 
 interface ProtectedShellProps {
   children: React.ReactNode;
@@ -44,6 +45,9 @@ export function ProtectedShell({
       {/* Every signed-in role (VOLUNTEER included) can be on /map, so this
           is unconditional, unlike AdminEventsBridge above. */}
       <AppEventsBridge />
+      {/* Unconditional for the same reason — a VOLUNTEER can be the one
+          whose org/gmina an admin just moved, not just staff. */}
+      <ScopeChangeNoticeModal />
       {role === 'ADMIN' && <NewUserNotifier />}
       <button
         type="button"

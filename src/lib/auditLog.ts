@@ -5,6 +5,7 @@ import { requiresGmina } from '@/lib/gmina';
 import { parseClientIp } from '@/lib/clientIp';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { publishAdminEvent, type AdminEventScope } from '@/lib/adminEvents';
+import { assignmentChanged, buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
 
 // Which entity types have a live-updating page today. RESOURCE_ALLOCATION
 // maps to BOTH scopes: an allocation change moves a need's fulfilment (the
@@ -410,7 +411,7 @@ export async function revertAuditLog(
   restrictToGminaId?: string
 ): Promise<RevertResult> {
   try {
-    const { revertedLogIds, revertedUserIds, revertedEntityTypes } = await prisma.$transaction(async (tx) => {
+    const { revertedLogIds, revertedUserIds, revertedEntityTypes, assignmentNoticeUserIds } = await prisma.$transaction(async (tx) => {
       const target = await tx.auditLog.findUnique({ where: { id: logId } });
       if (!target) throw new RevertAbort(notFound('Wpis dziennika nie istnieje.'));
       if (target.revertedAt) throw new RevertAbort(conflict('Ta zmiana została już cofnięta.'));
@@ -517,6 +518,11 @@ export async function revertAuditLog(
           ...steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
           ...cascadedUserIds,
         ],
+        // Narrower than revertedUserIds above: only ids that actually got a
+        // pendingScopeChangeNotice written (see StepResult.movedUserIds'
+        // doc comment) — every OTHER reverted USER has nothing new to show,
+        // so nudging their tab to re-fetch would just be wasted work.
+        assignmentNoticeUserIds: cascadedUserIds,
         revertedEntityTypes: new Set(steps.map((step) => step.entityType)),
       };
     });
@@ -525,6 +531,10 @@ export async function revertAuditLog(
     // committed above, so a cache left stale here only costs up to the
     // 2-minute TTL (lib/userStatusCache.ts), not a security hole.
     await Promise.all(revertedUserIds.map((id) => invalidateUserStatusCache(id)));
+    // Same best-effort spirit — see publishAssignmentNoticeEvent's doc
+    // comment — nudges an already-open tab to show the "you were moved"
+    // modal instead of waiting for its next reload.
+    await Promise.all(assignmentNoticeUserIds.map((id) => publishAssignmentNoticeEvent(id)));
 
     // Same best-effort spirit as the cache invalidation above — a dropped
     // event just means an open admin page waits for its next own action or a
@@ -626,21 +636,37 @@ async function revertUser(
     deactivationReason: (after.deactivationReason as string | null | undefined) ?? null,
   };
 
+  const nextOrganizationId = (before.organizationId as string | null | undefined) ?? null;
+  const previousAssignment = { gminaId: target.gminaId, organizationId: target.organizationId };
+  const nextAssignment = { gminaId: nextGminaId, organizationId: nextOrganizationId };
+  const notifiesAssignmentChange = assignmentChanged(previousAssignment, nextAssignment);
+
   try {
+    const data: Prisma.UserUncheckedUpdateManyInput = {
+      name: (before.name as string | null) ?? null,
+      email: before.email as string | undefined,
+      role: nextRole as never,
+      organizationId: (before.organizationId as string | null) ?? null,
+      phone: (before.phone as string | null) ?? null,
+      gminaId: nextGminaId,
+      isActive: nextIsActive,
+      lastActivatedAt: before.lastActivatedAt ? new Date(before.lastActivatedAt as string) : null,
+      lastDeactivatedAt: before.lastDeactivatedAt ? new Date(before.lastDeactivatedAt as string) : null,
+      deactivationReason: (before.deactivationReason as string | null) ?? null,
+    };
+    // Tell the user, next time they're around, that reverting this action
+    // moved their org/gmina — same "fires no matter how" guarantee as the
+    // forward edit in PATCH /api/admin/users/[id] (see lib/scopeChangeNotice.ts).
+    if (notifiesAssignmentChange) {
+      data.pendingScopeChangeNotice = (await buildAssignmentNotice(
+        tx,
+        previousAssignment,
+        nextAssignment
+      )) as Prisma.InputJsonValue;
+    }
     const result = await tx.user.updateMany({
       where: { id: target.id, ...expectedFields },
-      data: {
-        name: (before.name as string | null) ?? null,
-        email: before.email as string | undefined,
-        role: nextRole as never,
-        organizationId: (before.organizationId as string | null) ?? null,
-        phone: (before.phone as string | null) ?? null,
-        gminaId: nextGminaId,
-        isActive: nextIsActive,
-        lastActivatedAt: before.lastActivatedAt ? new Date(before.lastActivatedAt as string) : null,
-        lastDeactivatedAt: before.lastDeactivatedAt ? new Date(before.lastDeactivatedAt as string) : null,
-        deactivationReason: (before.deactivationReason as string | null) ?? null,
-      },
+      data,
     });
     if (result.count === 0) {
       return conflict('Stan użytkownika zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
@@ -658,7 +684,7 @@ async function revertUser(
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }
 
-  return { ok: true };
+  return { ok: true, movedUserIds: notifiesAssignmentChange ? [target.id] : undefined };
 }
 
 async function revertGmina(
@@ -867,7 +893,17 @@ async function revertOrganization(
   if (beforeGminaId !== target.gminaId) {
     const members = await tx.user.findMany({ where: { organizationId: target.id }, select: { id: true } });
     movedUserIds = members.map((m) => m.id);
-    await tx.user.updateMany({ where: { organizationId: target.id }, data: { gminaId: beforeGminaId } });
+    // Same org, only its gmina is reverting — see the forward cascade's
+    // identical reasoning in PATCH /api/admin/organizations/[id].
+    const notice = await buildAssignmentNotice(
+      tx,
+      { gminaId: target.gminaId, organizationId: target.id },
+      { gminaId: beforeGminaId, organizationId: target.id }
+    );
+    await tx.user.updateMany({
+      where: { organizationId: target.id },
+      data: { gminaId: beforeGminaId, pendingScopeChangeNotice: notice },
+    });
   }
 
   // Conditioned on the actual admin-managed fields, not `updatedAt` — same

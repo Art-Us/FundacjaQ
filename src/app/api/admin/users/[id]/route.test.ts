@@ -174,6 +174,43 @@ describe('PATCH /api/admin/users/[id]', () => {
     );
   });
 
+  // Regression coverage: the "you were moved" notice (lib/scopeChangeNotice.ts)
+  // must fire for a DIRECT edit here just like it does for the organization-
+  // gmina cascade and audit-log reverts — this is the one site among those
+  // that had no test exercising it at all.
+  it('sets a pendingScopeChangeNotice and nudges the moved user when gminaId actually changes', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+    prisma.gmina.findUnique.mockResolvedValue({ name: 'Gmina Nowa' } as any);
+    prisma.user.update.mockResolvedValue({ id: 'target-1', gminaId: 'gmina-2' } as any);
+
+    const res = await callPatch({ gminaId: 'gmina-2' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ gminaId: 'gmina-2', pendingScopeChangeNotice: expect.any(Object) }),
+      })
+    );
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'target-1' });
+  });
+
+  it('does not set a pendingScopeChangeNotice when the update leaves gminaId/organizationId unchanged', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.user.findUnique.mockResolvedValue(baseUser({ gminaId: 'gmina-1' }) as any);
+    prisma.user.update.mockResolvedValue({ id: 'target-1', gminaId: 'gmina-1' } as any);
+
+    const res = await callPatch({ name: 'Nowe Imię' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({ pendingScopeChangeNotice: expect.anything() }),
+      })
+    );
+    expect(publishAdminEvent).not.toHaveBeenCalledWith(expect.objectContaining({ scope: 'user-notice' }));
+  });
+
   it('stamps lastActivatedAt when isActive is set to true', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.user.findUnique.mockResolvedValue(baseUser({ isActive: false }) as any);

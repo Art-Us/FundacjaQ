@@ -1239,7 +1239,7 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
     expect(prisma.user.updateMany).toHaveBeenCalledWith({
       where: { organizationId: 'org-1' },
-      data: { gminaId: 'gmina-old' },
+      data: expect.objectContaining({ gminaId: 'gmina-old', pendingScopeChangeNotice: expect.any(Object) }),
     });
     // Same session-revalidation requirement as the forward cascade in
     // PATCH /api/admin/organizations/[id] — these ids never get their own
@@ -1247,6 +1247,11 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     // off revertedUserIds) must still reach them via movedUserIds.
     expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-1');
     expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-2');
+    // And the same best-effort real-time nudge (see
+    // publishAssignmentNoticeEvent's doc comment) so an already-open tab
+    // shows the notice modal without waiting for a reload.
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-1' });
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-2' });
   });
 
   // Gap coverage: the ORGANIZATION_DELETE-revert path's own "already exists"

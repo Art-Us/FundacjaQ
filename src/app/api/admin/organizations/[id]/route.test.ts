@@ -19,6 +19,7 @@ import { prisma as prismaImport } from '@/lib/prisma';
 import { installTransactionMock } from '@/lib/__mocks__/prisma';
 import { requireAdmin } from '@/lib/authz';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
+import { publishAdminEvent } from '@/lib/adminEvents';
 import { PATCH, DELETE } from './route';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -67,6 +68,7 @@ beforeEach(() => {
   installTransactionMock(prisma);
   vi.mocked(requireAdmin).mockReset();
   vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
+  vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
   // Default: no members to cascade. Tests that reassign gminaId and care
   // about the cascade override this with their own list.
   prisma.user.findMany.mockResolvedValue([]);
@@ -236,7 +238,7 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     );
     expect(prisma.user.updateMany).toHaveBeenCalledWith({
       where: { organizationId: 'target-1' },
-      data: { gminaId: 'g2' },
+      data: expect.objectContaining({ gminaId: 'g2', pendingScopeChangeNotice: expect.any(Object) }),
     });
     // Every session-revalidation write site must invalidate this cache — see
     // the doc comment on invalidateUserStatusCache — otherwise a moved
@@ -244,6 +246,11 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     // its 2-minute TTL.
     expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-1');
     expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-2');
+    // Each moved member also gets a best-effort real-time nudge (see
+    // lib/scopeChangeNotice.ts's publishAssignmentNoticeEvent) so an already-
+    // open tab shows the notice modal without waiting for a reload.
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-1' });
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-2' });
   });
 
   it('allows reassigning gminaId when the organization has no users assigned', async () => {

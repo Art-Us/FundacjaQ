@@ -6,6 +6,7 @@ import { requireAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { normalizeOrganizationName } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotOrganization } from '@/lib/auditLog';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
+import { buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
 
 export const runtime = 'nodejs';
 
@@ -147,7 +148,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (isReassigningGmina) {
         const members = await tx.user.findMany({ where: { organizationId: target.id }, select: { id: true } });
         movedUserIds = members.map((m) => m.id);
-        await tx.user.updateMany({ where: { organizationId: target.id }, data: { gminaId } });
+        // Every moved member shares the exact same before/after pair (same
+        // org — only its gmina changed — see the invariant comment above),
+        // so one notice built here covers the whole batch instead of
+        // resolving names once per member.
+        const notice = await buildAssignmentNotice(
+          tx,
+          { gminaId: target.gminaId, organizationId: target.id },
+          { gminaId, organizationId: target.id }
+        );
+        await tx.user.updateMany({
+          where: { organizationId: target.id },
+          data: { gminaId, pendingScopeChangeNotice: notice },
+        });
       }
       return updated;
     });
@@ -156,7 +169,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // keeps scoping requests to their OLD gmina for up to the cache's 2-minute
     // TTL, silently, since the jwt() callback re-derives gminaId from this
     // Redis cache before ever falling back to Postgres.
-    await Promise.all(movedUserIds.map((id) => invalidateUserStatusCache(id)));
+    await Promise.all(
+      movedUserIds.map(async (id) => {
+        await invalidateUserStatusCache(id);
+        await publishAssignmentNoticeEvent(id);
+      })
+    );
     await recordAudit({
       actor: admin,
       action: 'ORGANIZATION_UPDATE',

@@ -184,6 +184,14 @@ model User {
   failedAttempts     Int           @default(0)
   lockedUntil        DateTime?
   passwordChangedAt  DateTime      @default(now())
+  // Set (never merged — always overwritten wholesale) by every write site
+  // that changes THIS user's gminaId/organizationId, whether directly (PATCH
+  // /api/admin/users/[id]) or by cascade (an organization's own gmina
+  // reassignment, or an audit-log revert of either — see
+  // lib/scopeChangeNotice.ts). Read/cleared only by the user themselves via
+  // GET/DELETE /api/user/scope-change-notice, which is what shows and then
+  // dismisses the "you were moved" modal — a one-shot mailbox, not a log.
+  pendingScopeChangeNotice Json?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 

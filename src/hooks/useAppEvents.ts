@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { AdminEvent, AdminEventScope } from '@/lib/adminEvents';
 
-type AppEventScope = Extract<AdminEventScope, 'alerts' | 'resources' | 'alert-messages'>;
+type AppEventScope = Extract<AdminEventScope, 'alerts' | 'resources' | 'alert-messages' | 'user-notice'>;
 
 interface UseAppEventsOptions {
   // When set, an event tagged with a DIFFERENT gminaId is silently ignored —
@@ -18,8 +18,8 @@ interface UseAppEventsOptions {
 }
 
 /**
- * Runs `onEvent` whenever an 'alerts'/'resources'/'alert-messages' change of
- * `scope` (or, given an array, any of them) arrives over the shared SSE
+ * Runs `onEvent` whenever an 'alerts'/'resources'/'alert-messages'/'user-notice'
+ * change of `scope` (or, given an array, any of them) arrives over the shared SSE
  * connection — see components/AppEventsBridge.tsx (mounted once in ProtectedShell for every
  * signed-in user), which re-dispatches server events as a window CustomEvent
  * so each page can subscribe independently without opening its own

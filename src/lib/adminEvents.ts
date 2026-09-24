@@ -24,6 +24,11 @@ const CHANNEL = 'admin-events';
 // Keeping it separate means a busy forum thread never triggers a
 // router.refresh() on /map or on every OTHER alert's detail page — only
 // AlertOperationalJournal.tsx subscribes to it at all.
+// 'user-notice' is deliberately its own scope, not folded into 'users' —
+// 'users' only ever reaches the admin-only stream (api/admin/events/route.ts),
+// but the affected user here can be a VOLUNTEER, who only ever has the public
+// stream (api/events/route.ts) open. See targetUserId below for how that
+// route narrows it to the one connection it's actually for.
 export type AdminEventScope =
   | 'users'
   | 'invites'
@@ -32,7 +37,8 @@ export type AdminEventScope =
   | 'organizations'
   | 'alerts'
   | 'resources'
-  | 'alert-messages';
+  | 'alert-messages'
+  | 'user-notice';
 
 export interface AdminEvent {
   scope: AdminEventScope;
@@ -60,6 +66,14 @@ export interface AdminEvent {
   // org's gmina) — an unset gminaId always passes every viewer's filter, so
   // this only ever under-narrows, never drops an event someone needed.
   gminaId?: string;
+  // Set ONLY on 'user-notice' — the one recipient this event is for, checked
+  // by api/events/route.ts before forwarding it over that user's own
+  // connection. Every other scope stays broadcast-to-everyone-who-can-see-
+  // the-scope, same as before this field existed; a 'user-notice' event with
+  // no matching connection open just means the recipient sees it on their
+  // next page load via the persisted notice instead (see
+  // lib/scopeChangeNotice.ts).
+  targetUserId?: string;
 }
 
 /** Best-effort — a dropped event just means an open tab waits for its own next action or a manual reload, exactly like before this existed. */

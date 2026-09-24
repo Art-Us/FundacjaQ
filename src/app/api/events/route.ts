@@ -49,12 +49,15 @@ export async function GET(req: NextRequest) {
         }
       };
 
-      const publicScopes: Set<string> = new Set(['alerts', 'resources', 'alert-messages']);
+      const publicScopes: Set<string> = new Set(['alerts', 'resources', 'alert-messages', 'user-notice']);
       unsubscribe = subscribeToAdminEvents((event) => {
         // Never forward admin-only scopes ('users'/'invites'/'logs'/
         // 'gminas'/'organizations') to a connection any signed-in user can
         // open — this route has no ADMIN/COORDINATOR check.
         if (!publicScopes.has(event.scope)) return;
+        // 'user-notice' is targeted, not broadcast — see AdminEvent.targetUserId's
+        // doc comment. Every other scope has no targetUserId set and skips this.
+        if (event.scope === 'user-notice' && event.targetUserId !== user.id) return;
         // The gmina boundary MUST be enforced here, not just trusted to
         // hooks/useAppEvents's client-side gminaId filter — that filter is a
         // UI convenience only, trivially bypassed by reading this raw SSE
