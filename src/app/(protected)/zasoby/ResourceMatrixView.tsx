@@ -21,6 +21,7 @@ import { MATRIX_HORIZONS, type MatrixTile, type MatrixCategoryRow, type MatrixGr
 import ResourceMatrixCellDrawer from './ResourceMatrixCellDrawer';
 import ResourceFormModal from './ResourceFormModal';
 import { apiFetch } from '@/lib/apiClient';
+import { useAppEvents } from '@/hooks/useAppEvents';
 
 const GROUP_ICON_COMPONENTS: Record<MatrixGroup, typeof Users> = {
   PEOPLE: Users,
@@ -41,6 +42,11 @@ interface ResourceMatrixViewProps {
   organizations: { id: string; name: string }[];
   currentUserOrganizationId: string | null;
   isAdmin: boolean;
+  // undefined for a viewer who should react to every gmina's resource
+  // activity (a global ADMIN); the viewer's own gminaId otherwise — passed
+  // straight through to useAppEvents below (page.tsx computes it the same
+  // way it does for its own AppEventsRefresh).
+  viewerGminaId?: string | null;
 }
 
 interface SelectedCell {
@@ -62,6 +68,7 @@ export default function ResourceMatrixView({
   organizations,
   currentUserOrganizationId,
   isAdmin,
+  viewerGminaId,
 }: ResourceMatrixViewProps) {
   const [tiles, setTiles] = useState(initialTiles);
   const [categories, setCategories] = useState(initialCategories);
@@ -109,6 +116,13 @@ export default function ResourceMatrixView({
   function handleRefresh() {
     refreshMatrix(selectedOrganizationId);
   }
+
+  // Another organization donating/returning/editing a resource lands here
+  // the same way this org's own edits already do (refreshMatrix), instead of
+  // waiting for a manual "Odśwież" — the matrix is client-fetched (tiles/
+  // categories are copied into state above, not read straight from props),
+  // so router.refresh() on the server page alone wouldn't update it.
+  useAppEvents('resources', () => refreshMatrix(selectedOrganizationId), { gminaId: viewerGminaId });
 
   // "Posiadacz" refetches live the moment it changes — passing the new value
   // directly (not reading selectedOrganizationId back from state, which

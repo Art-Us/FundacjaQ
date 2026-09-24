@@ -127,6 +127,11 @@ export function UsersDirectory({ gminas, organizations, isAdmin, canGrantAdmin, 
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  // Set only around the initial mount/filter-change fetch (which legitimately
+  // has nothing to show yet) — a background SSE/onChanged refetch uses this
+  // instead, so the current cards stay on screen and just get swapped in
+  // place once the new data lands, instead of the grid blanking out.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -244,8 +249,8 @@ export function UsersDirectory({ gminas, organizations, isAdmin, canGrantAdmin, 
   }, [page, fetchUsers]);
 
   function refetch() {
-    setLoading(true);
-    fetchUsers(page).finally(() => setLoading(false));
+    setRefreshing(true);
+    fetchUsers(page).finally(() => setRefreshing(false));
   }
 
   // Another admin/coordinator's own create/activate/deactivate/edit/delete —
@@ -356,7 +361,10 @@ export function UsersDirectory({ gminas, organizations, isAdmin, canGrantAdmin, 
             />
           </div>
 
-          <span className="text-xs font-semibold text-slate-400 whitespace-nowrap lg:order-3">{rangeLabel}</span>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 whitespace-nowrap lg:order-3">
+            {rangeLabel}
+            {refreshing && <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" aria-hidden />}
+          </span>
 
           {/* On mobile this is a real row of its own (toggle, add, clear all
               on one line) — on lg+ it collapses to `contents` so its children

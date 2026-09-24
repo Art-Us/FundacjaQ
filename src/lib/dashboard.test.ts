@@ -110,11 +110,10 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-2' } });
   });
 
-  // A gmina-scoped ADMIN (role === 'ADMIN', gminaId set) is scoped like
-  // COORDINATOR/VOLUNTEER for usersCount/gminyCount/scopeLabel — but alerts
-  // and resources deliberately stay ADMIN-unconditional (product decision:
-  // any ADMIN sees every gmina's alerts/resources, unlike users/gminy).
-  it('scopes a gmina-scoped ADMIN\'s usersCount/gminyCount, but keeps alerts/resources unrestricted like a global ADMIN', async () => {
+  // A gmina-scoped ADMIN (role === 'ADMIN', gminaId set) is scoped exactly
+  // like COORDINATOR/VOLUNTEER everywhere now, alerts/resources included —
+  // only a global ADMIN (gminaId === null) sees every gmina's.
+  it('scopes a gmina-scoped ADMIN\'s usersCount/gminyCount/alerts/resources to their own gmina', async () => {
     prisma.alert.count.mockResolvedValue(2);
     prisma.user.count.mockResolvedValue(4);
     prisma.alert.findMany.mockResolvedValue([{ id: 'a1' }] as any);
@@ -126,11 +125,11 @@ describe('getDashboardData — gmina-scoped role WITH a gminaId', () => {
     expect(result.stats).toEqual({ activeAlerts: 2, gminyCount: 1, usersCount: 4 });
     expect(prisma.gmina.count).not.toHaveBeenCalled();
     expect(prisma.alert.count).toHaveBeenCalledWith({
-      where: { status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
+      where: { gminaId: 'gmina-1', status: { in: ['ACTIVE', 'IN_PROGRESS'] } },
     });
     expect(prisma.user.count).toHaveBeenCalledWith({ where: { gminaId: 'gmina-1' } });
-    expect(prisma.alert.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
-    expect(prisma.resource.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    expect(prisma.alert.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { gminaId: 'gmina-1' } }));
+    expect(prisma.resource.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { gminaId: 'gmina-1' } }));
   });
 });
 

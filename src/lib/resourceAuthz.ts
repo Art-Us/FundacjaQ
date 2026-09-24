@@ -13,6 +13,21 @@
 // caller, so this split is invisible to them.
 
 /**
+ * Whether `user` is an ADMIN empowered to act on something that belongs to
+ * `gminaId` — true for a global ADMIN (gminaId === null on the user)
+ * unconditionally, true for a gmina-scoped ADMIN only when it matches their
+ * own gminaId, false for every other role. Every call site below combines
+ * this with its own org/ownership check for COORDINATOR (and, where
+ * relevant, VOLUNTEER) — this only ever narrows what used to be a blanket
+ * `role === 'ADMIN'` bypass, it never widens anyone else's access.
+ */
+export function isAdminForGmina(user: { role: string; gminaId?: string | null }, gminaId: string | null): boolean {
+  if (user.role !== 'ADMIN') return false;
+  if (!user.gminaId) return true;
+  return user.gminaId === gminaId;
+}
+
+/**
  * Whether `user`'s organization is the one that owns `alert` — i.e. the
  * "recipient" side of every resource-allocation decision (R2/R7): the
  * organization that can mark a delivery received, agree to a return, or see
@@ -87,54 +102,63 @@ export function canPostAlertJournalEntry(user: { role: string }): boolean {
 /**
  * Whether `user` may see an alert's operational journal/forum at all — the
  * same gmina-scoped visibility rule that decides whether the alert itself
- * shows up on the map (scopedGminaWhere, lib/gmina.ts), just re-checked
- * against one already-fetched alert instead of filtering a list. Shared by
- * both journal endpoints (Крок 53's root-entry route and Крок 54's replies
- * route) so the two don't each carry their own copy of this check.
- * Deliberately broader than the rest of the resource module
- * (requireAdminOrCoordinator + the hard /zasoby perimeter, Крок 31) — the
- * journal inherits the alert's own visibility, VOLUNTEER included (see
- * docs/are-you-familiar-with-tidy-blum.md, розділ 4, "Форум алерту — окремий,
- * м'якший периметр").
+ * shows up on the map (scopedGminaWhere, lib/gmina.ts; a global admin
+ * unconditionally, a gmina-scoped one only within their own gmina via
+ * isAdminForGmina), just re-checked against one already-fetched alert
+ * instead of filtering a list. Shared by both journal endpoints (Крок 53's
+ * root-entry route and Крок 54's replies route) so the two don't each carry
+ * their own copy of this check. Deliberately broader than the rest of the
+ * resource module (requireAdminOrCoordinator + the hard /zasoby perimeter,
+ * Крок 31) — the journal inherits the alert's own visibility, VOLUNTEER
+ * included (see docs/are-you-familiar-with-tidy-blum.md, розділ 4, "Форум
+ * алерту — окремий, м'якший периметр").
  */
 export function canViewAlertJournal(
   alert: { gminaId: string },
   user: { role: string; gminaId: string | null }
 ): boolean {
-  return user.role === 'ADMIN' || alert.gminaId === user.gminaId;
+  return isAdminForGmina(user, alert.gminaId) || alert.gminaId === user.gminaId;
 }
 
 /**
  * Whether `user` may post a reply in the chat thread under an existing
  * journal entry — the same broad group the original flat-forum design (R12)
- * allowed to write: the alert's owner org, any org that donated to it, or
- * ADMIN/COORDINATOR. Deliberately not role-gated for org members (a
- * VOLUNTEER whose organization owns or donated to the alert can still
- * reply) — only creating the root entry itself is restricted to
- * ADMIN/COORDINATOR (canPostAlertJournalEntry above).
+ * allowed to write: the alert's owner org, any org that donated to it (in
+ * EITHER case regardless of gmina — crisis response crosses gmina
+ * boundaries, same as donating in the first place), a COORDINATOR in the
+ * alert's own gmina, or an ADMIN empowered for that gmina (isAdminForGmina).
+ * Deliberately not role-gated for org members (a VOLUNTEER whose
+ * organization owns or donated to the alert can still reply) — only
+ * creating the root entry itself is restricted to ADMIN/COORDINATOR
+ * (canPostAlertJournalEntry above), and that route additionally checks
+ * canViewAlertJournal for the gmina gate this function applies inline
+ * instead (this one has no separate caller-side check to lean on).
  */
 export function canReplyToAlertForum(
-  alert: { organizationId: string | null; allocations: { donorOrgId: string }[] },
-  user: { role: string; organizationId?: string | null }
+  alert: { gminaId: string; organizationId: string | null; allocations: { donorOrgId: string }[] },
+  user: { role: string; gminaId?: string | null; organizationId?: string | null }
 ): boolean {
-  return canPostAlertJournalEntry(user) || isAlertOwnerOrg(alert, user) || isAlertDonorOrg(alert, user);
+  if (isAdminForGmina(user, alert.gminaId)) return true;
+  if (user.role === 'COORDINATOR' && alert.gminaId === user.gminaId) return true;
+  return isAlertOwnerOrg(alert, user) || isAlertDonorOrg(alert, user);
 }
 
 /**
  * Whether `user` may manage (edit/resolve/cancel) `alert` — gates "Edytuj",
  * "Rozwiąż" and "Odwołaj" on the alert's card (client, AlertsMapView.tsx) and
  * PATCH /api/alerts/[id] (server) alike, from this single source of truth.
- * ADMIN always can; VOLUNTEER never can. A COORDINATOR can manage it only if
- * their own organization created it (isAlertOwnerOrg) — deliberately
+ * A global ADMIN always can; a gmina-scoped ADMIN only within their own
+ * gmina (isAdminForGmina); VOLUNTEER never can. A COORDINATOR can manage it
+ * only if their own organization created it (isAlertOwnerOrg) — deliberately
  * narrower than the original gmina-wide rule (any coordinator in the same
  * gmina could manage any alert there), which predates the organization model
  * and let coordinators edit/resolve/cancel alerts that weren't theirs.
  */
 export function canManageAlert(
-  alert: { organizationId: string | null },
-  user: { role: string; organizationId?: string | null }
+  alert: { organizationId: string | null; gminaId: string },
+  user: { role: string; organizationId?: string | null; gminaId?: string | null }
 ): boolean {
-  if (user.role === 'ADMIN') return true;
+  if (isAdminForGmina(user, alert.gminaId)) return true;
   if (user.role !== 'COORDINATOR') return false;
   return isAlertOwnerOrg(alert, user);
 }

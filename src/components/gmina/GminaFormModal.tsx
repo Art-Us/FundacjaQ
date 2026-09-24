@@ -3,15 +3,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
+import { dynamicClientOnly } from '@/lib/dynamicClientOnly';
 import { X, LoaderCircle, MapPin, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useBackdropDismiss } from '@/components/ui/useBackdropDismiss';
 import { NOWA_DEBA_CENTER } from '@/lib/mapDefaults';
 import { bareCounty, bareState } from '@/lib/geocode';
 
-const LocationPicker = dynamic(() => import('@/app/(protected)/map/LocationPicker'), {
-  ssr: false,
+// dynamicClientOnly, not next/dynamic({ ssr: false }) — see its own doc
+// comment: the Suspense wrapping next/dynamic adds around a lazy import
+// turned a react-leaflet lifecycle bug into a crash that took down this
+// whole modal (and the page behind it) instead of staying contained to the
+// map widget. AlertForm/AlertEditModal/AlertsMapView already made this
+// switch; this was the one spot that still hadn't.
+const LocationPicker = dynamicClientOnly(() => import('@/app/(protected)/map/LocationPicker'), {
   loading: () => (
     <div
       className="flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400"

@@ -6,9 +6,39 @@ import { redis } from './redis';
 // manual reload. One Redis channel carries every scope — the SSE route and
 // each page filter locally — rather than one channel per scope, since the
 // volume here (admin actions, not chat) never justifies the extra channels.
+//
+// 'alerts'/'resources' ride the same channel but are consumed by a SEPARATE
+// route (api/events/route.ts, gated by requireUser — any signed-in user,
+// not just ADMIN/COORDINATOR) so a VOLUNTEER on /map can get live alert
+// updates without ever touching the admin-only /api/admin/events route. An
+// ADMIN/COORDINATOR tab still gets these same events a second time over its
+// existing admin connection (subscribeToAdminEvents forwards every scope to
+// every listener) — harmless, since AppEventsRefresh's router.refresh() is
+// idempotent either way.
 const CHANNEL = 'admin-events';
 
-export type AdminEventScope = 'users' | 'invites' | 'logs' | 'gminas' | 'organizations';
+// 'alert-messages' is deliberately its OWN scope, not folded into 'alerts' —
+// a chat/journal message is much higher-frequency than an alert's own
+// lifecycle (create/status/needs/allocations) and, unlike those, only ever
+// matters to whoever has THAT ONE alert's detail page open (see `id` below).
+// Keeping it separate means a busy forum thread never triggers a
+// router.refresh() on /map or on every OTHER alert's detail page — only
+// AlertOperationalJournal.tsx subscribes to it at all.
+// 'user-notice' is deliberately its own scope, not folded into 'users' —
+// 'users' only ever reaches the admin-only stream (api/admin/events/route.ts),
+// but the affected user here can be a VOLUNTEER, who only ever has the public
+// stream (api/events/route.ts) open. See targetUserId below for how that
+// route narrows it to the one connection it's actually for.
+export type AdminEventScope =
+  | 'users'
+  | 'invites'
+  | 'logs'
+  | 'gminas'
+  | 'organizations'
+  | 'alerts'
+  | 'resources'
+  | 'alert-messages'
+  | 'user-notice';
 
 export interface AdminEvent {
   scope: AdminEventScope;
@@ -19,6 +49,31 @@ export interface AdminEvent {
   // (components/NewUserNotifier.tsx) distinguishes 'USER_CREATE' from every
   // other 'users'-scope change.
   action?: string;
+  // The specific entity this event is about — currently only set for
+  // 'alert-messages' (the alertId), so AlertOperationalJournal.tsx can ignore
+  // every alert except its own instead of refetching on ANY alert's chat
+  // activity. Every other scope stays id-less (a plain "something in this
+  // scope changed, go re-fetch your list" signal) since those lists don't
+  // have a single entity to filter down to.
+  id?: string;
+  // Which gmina this 'alerts'/'resources' change belongs to, when the
+  // publisher can name exactly one — lets a gmina-scoped viewer's
+  // useAppEvents({gminaId}) filter ignore another gmina's activity instead
+  // of refetching a list a gmina-scoped ADMIN/COORDINATOR/VOLUNTEER can't
+  // even see into. Left unset when a single write could plausibly touch
+  // more than one gmina at once (e.g. releasing several allocations' donor
+  // resources on alert delete/cancel, each potentially a different donor
+  // org's gmina) — an unset gminaId always passes every viewer's filter, so
+  // this only ever under-narrows, never drops an event someone needed.
+  gminaId?: string;
+  // Set ONLY on 'user-notice' — the one recipient this event is for, checked
+  // by api/events/route.ts before forwarding it over that user's own
+  // connection. Every other scope stays broadcast-to-everyone-who-can-see-
+  // the-scope, same as before this field existed; a 'user-notice' event with
+  // no matching connection open just means the recipient sees it on their
+  // next page load via the persisted notice instead (see
+  // lib/scopeChangeNotice.ts).
+  targetUserId?: string;
 }
 
 /** Best-effort — a dropped event just means an open tab waits for its own next action or a manual reload, exactly like before this existed. */
@@ -60,15 +115,50 @@ function getSubscriber(): Redis {
     // Required — see lib/redis.ts's own 'error' listener for why an
     // unhandled one would crash the process instead of just logging.
     subscriberInstance.on('error', (err) => console.error('[adminEvents] subscriber connection error:', err));
-    subscriberInstance.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
+    // Subscribing from 'ready' (fires on the initial connection AND again on
+    // every successful reconnect) instead of once right after creation: if
+    // Redis happens to be mid-restart/unreachable at the moment of THIS
+    // process's very first SSE connection, that one-shot subscribe() call
+    // can reject (see redis.ts's connectTimeout/commandTimeout comment) —
+    // and since subscriberInstance is a module-scope singleton assigned
+    // above, every later getSubscriber() call would just return that same
+    // never-subscribed instance forever, with nothing left to ever retry.
+    // ioredis's own auto-resubscribe-after-reconnect only replays a
+    // subscription that succeeded at least once, so it can't recover from
+    // this either. Re-issuing SUBSCRIBE on an already-subscribed channel is
+    // a harmless no-op for Redis, so doing it on every 'ready' costs
+    // nothing on the normal path and fixes the cold-start-during-an-outage
+    // case: the next time this connection comes up, it subscribes again.
+    subscriberInstance.on('ready', () => {
+      subscriberInstance!.subscribe(CHANNEL).catch((err) => console.error('[adminEvents] subscribe failed:', err));
+    });
     subscriberInstance.on('message', (_channel, message) => {
       let event: AdminEvent;
       try {
-        event = JSON.parse(message);
+        const parsed: unknown = JSON.parse(message);
+        // Guards the `.scope` access every listener does next — a stray
+        // PUBLISH on this channel from outside this module (a debugging
+        // `redis-cli PUBLISH admin-events null`, a future bug, a shared Redis
+        // instance) must not reach listener code with a non-object payload.
+        if (typeof parsed !== 'object' || parsed === null || typeof (parsed as AdminEvent).scope !== 'string') {
+          return;
+        }
+        event = parsed as AdminEvent;
       } catch {
         return;
       }
-      listeners.forEach((listener) => listener(event));
+      // Each listener runs in its own try/catch: this fires from inside
+      // ioredis's own 'message' emission, with no Next.js request boundary
+      // around it — one listener throwing here would otherwise be an
+      // uncaught exception that crashes the whole process (every open
+      // connection, not just the one at fault), not just fail one request.
+      listeners.forEach((listener) => {
+        try {
+          listener(event);
+        } catch (err) {
+          console.error('[adminEvents] listener threw (non-fatal):', err);
+        }
+      });
     });
     if (process.env.NODE_ENV !== 'production') globalForAdminEvents.adminEventsSubscriber = subscriberInstance;
   }

@@ -8,6 +8,12 @@ vi.mock('@/lib/authz', async () => {
   const actual = await vi.importActual<typeof import('@/lib/authz')>('@/lib/authz');
   return { ...actual, requireAdminOrCoordinator: vi.fn() };
 });
+// Auto-mocked: every export becomes a vi.fn() returning undefined, i.e. an
+// always-miss cache / no-op set+invalidate, so these tests exercise the same
+// mandatory-Postgres-read path as before this cache existed — without this,
+// rejectEarlyIfDenied() would hit the real Redis client and leak state
+// across tests.
+vi.mock('@/lib/resourceAccessCache');
 
 import { prisma as prismaImport } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
@@ -83,13 +89,34 @@ describe('GET /api/resources/[id]', () => {
     expect(res.status).toBe(200);
   });
 
-  it('allows ADMIN regardless of organization', async () => {
+  it('allows a global ADMIN (gminaId null) regardless of organization or gmina', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
     prisma.resource.findUnique.mockResolvedValue(baseResource as any);
 
     const res = await GET(makeRequest('GET'), ctx);
 
     expect(res.status).toBe(200);
+  });
+
+  // canManageResource (isAdminForGmina), local to this route file — a
+  // gmina-scoped ADMIN (gminaId set) may only manage resources in their own
+  // gmina; baseResource is 'g1'.
+  it('allows a gmina-scoped ADMIN for a resource in their own gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+    prisma.resource.findUnique.mockResolvedValue(baseResource as any);
+
+    const res = await GET(makeRequest('GET'), ctx);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a gmina-scoped ADMIN for a resource in a different gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2' });
+    prisma.resource.findUnique.mockResolvedValue(baseResource as any);
+
+    const res = await GET(makeRequest('GET'), ctx);
+
+    expect(res.status).toBe(403);
   });
 });
 
@@ -119,6 +146,30 @@ describe('PATCH /api/resources/[id]', () => {
 
     expect(res.status).toBe(403);
     expect(prisma.resource.update).not.toHaveBeenCalled();
+  });
+
+  // canManageResource (isAdminForGmina) — a gmina-scoped ADMIN may only
+  // manage resources in their own gmina; baseResource is 'g1'.
+  it('rejects a gmina-scoped ADMIN from a different gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2' });
+    prisma.resource.findUnique.mockResolvedValue(baseResource as any);
+
+    const res = await PATCH(makeRequest('PATCH', { name: 'Nowa nazwa' }), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.resource.update).not.toHaveBeenCalled();
+  });
+
+  it('lets a gmina-scoped ADMIN manage a resource in their own gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g1' });
+    prisma.resource.findUnique.mockResolvedValue(baseResource as any);
+    prisma.resource.update.mockResolvedValue({ ...baseResource, name: 'Nowa nazwa' } as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
+
+    const res = await PATCH(makeRequest('PATCH', { name: 'Nowa nazwa' }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(prisma.resource.update).toHaveBeenCalled();
   });
 
   it('rejects an empty body', async () => {
@@ -173,6 +224,18 @@ describe('PATCH /api/resources/[id]', () => {
 describe('DELETE /api/resources/[id]', () => {
   it('rejects a COORDINATOR from a different organization', async () => {
     vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'c1', role: 'COORDINATOR', gminaId: 'g1', organizationId: 'other-org' });
+    prisma.resource.findUnique.mockResolvedValue(baseResource as any);
+
+    const res = await DELETE(makeRequest('DELETE'), ctx);
+
+    expect(res.status).toBe(403);
+    expect(prisma.resource.delete).not.toHaveBeenCalled();
+  });
+
+  // canManageResource (isAdminForGmina) — a gmina-scoped ADMIN may only
+  // delete resources in their own gmina; baseResource is 'g1'.
+  it('rejects a gmina-scoped ADMIN from a different gmina', async () => {
+    vi.mocked(requireAdminOrCoordinator).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: 'g2' });
     prisma.resource.findUnique.mockResolvedValue(baseResource as any);
 
     const res = await DELETE(makeRequest('DELETE'), ctx);

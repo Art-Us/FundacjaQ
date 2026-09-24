@@ -19,6 +19,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, not
+# read at runtime, so the site key must be passed in as a build arg here —
+# setting it as an App Service setting after the image is built has no effect.
+ARG NEXT_PUBLIC_RECAPTCHA_SITE_KEY=""
+ENV NEXT_PUBLIC_RECAPTCHA_SITE_KEY=$NEXT_PUBLIC_RECAPTCHA_SITE_KEY
+
 RUN npx prisma generate
 RUN npm run build
 

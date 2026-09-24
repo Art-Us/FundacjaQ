@@ -5,19 +5,40 @@ import { requiresGmina } from '@/lib/gmina';
 import { parseClientIp } from '@/lib/clientIp';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { publishAdminEvent, type AdminEventScope } from '@/lib/adminEvents';
+import { assignmentChanged, buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
 
-// Which entity types have a live-updating admin page today — RESOURCE/
-// ALERT_NEED/RESOURCE_ALLOCATION/ORGANIZATION audit entries still get
-// written as usual, just without a matching page to push them to yet
-// (see the SSE plan for alerts/resources/chat). Extending coverage later
-// is exactly one new entry here — recordAudit and revertAuditLog both key
-// off this single map, nothing else needs to change.
-const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScope>> = {
+// Which entity types have a live-updating page today. RESOURCE_ALLOCATION
+// maps to BOTH scopes: an allocation change moves a need's fulfilment (the
+// /map alert detail page) AND a resource's reserved/available quantity (the
+// /zasoby matrix) at once.
+const ENTITY_TYPE_TO_ADMIN_SCOPE: Partial<Record<AuditEntityType, AdminEventScope | AdminEventScope[]>> = {
   USER: 'users',
   GMINA: 'gminas',
   INVITE_TOKEN: 'invites',
   ORGANIZATION: 'organizations',
+  RESOURCE: 'resources',
+  ALERT_NEED: 'alerts',
+  RESOURCE_ALLOCATION: ['alerts', 'resources'],
 };
+
+/**
+ * Publishes to one or several AdminEventScopes — RESOURCE_ALLOCATION's entry
+ * above is the one case with more than one. Concurrent, not sequential:
+ * publishAdminEvent never rejects (it catches its own errors), so there's
+ * nothing an await-in-series here would protect against, only latency it
+ * would add — recordAudit's cancel-with-return caller (Крок 28) already runs
+ * this once per allocation being cancelled, so a sequential two-Redis-round-
+ * trips-per-scope cost would otherwise stack up across every allocation in
+ * that one request.
+ */
+async function publishScopeEvents(
+  scope: AdminEventScope | AdminEventScope[],
+  action?: AuditAction,
+  gminaId?: string | null
+): Promise<void> {
+  const scopes = Array.isArray(scope) ? scope : [scope];
+  await Promise.all(scopes.map((s) => publishAdminEvent({ scope: s, action, gminaId: gminaId ?? undefined })));
+}
 
 /** Builds the {ipAddress, userAgent} pair recordAudit expects, from an incoming request. */
 export function requestMeta(req: Request): RequestMeta {
@@ -89,8 +110,16 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 
   const entityScope = ENTITY_TYPE_TO_ADMIN_SCOPE[input.entityType];
   if (entityScope) {
-    await publishAdminEvent({ scope: 'logs', action: input.action });
-    await publishAdminEvent({ scope: entityScope, action: input.action });
+    // 'logs' stays gmina-unscoped on purpose (out of scope for this pass —
+    // see requireGlobalAdmin's doc comment on why the audit log view itself
+    // is deliberately not gmina-restricted); only the 'alerts'/'resources'
+    // scopes below get input.gminaId, so a gmina-scoped viewer's
+    // useAppEvents({gminaId}) can ignore another gmina's alert/resource
+    // activity.
+    await Promise.all([
+      publishAdminEvent({ scope: 'logs', action: input.action }),
+      publishScopeEvents(entityScope, input.action, input.gminaId),
+    ]);
   }
 }
 
@@ -320,8 +349,14 @@ function effectiveAction(step: { action: AuditAction; isRevert: boolean }): Audi
 }
 
 type Failure = { ok: false; status: number; error: string };
-/** Result of reverting a single log entry — used internally by the per-entity step functions. */
-type StepResult = { ok: true } | Failure;
+/**
+ * Result of reverting a single log entry — used internally by the per-entity
+ * step functions. `movedUserIds` is set only by revertOrganization's gmina-
+ * reassignment cascade, whose members' own USER rows never get an audit
+ * entry of their own (see the doc comment above that cascade) — the caller
+ * still needs their ids to invalidate lib/userStatusCache.ts for them.
+ */
+type StepResult = { ok: true; movedUserIds?: string[] } | Failure;
 /** Result of the public revertAuditLog() call — may have cascaded through more than one log entry. */
 export type RevertResult = { ok: true; revertedLogIds: string[] } | Failure;
 
@@ -376,7 +411,7 @@ export async function revertAuditLog(
   restrictToGminaId?: string
 ): Promise<RevertResult> {
   try {
-    const { revertedLogIds, revertedUserIds, revertedEntityTypes } = await prisma.$transaction(async (tx) => {
+    const { revertedLogIds, revertedUserIds, revertedEntityTypes, assignmentNoticeUserIds } = await prisma.$transaction(async (tx) => {
       const target = await tx.auditLog.findUnique({ where: { id: logId } });
       if (!target) throw new RevertAbort(notFound('Wpis dziennika nie istnieje.'));
       if (target.revertedAt) throw new RevertAbort(conflict('Ta zmiana została już cofnięta.'));
@@ -427,6 +462,7 @@ export async function revertAuditLog(
       // but avoids extracting/re-casting each step's before/after twice.
       const steps = [...chain].reverse();
       const now = new Date();
+      const cascadedUserIds: string[] = [];
 
       for (const step of steps) {
         const before = (step.before ?? {}) as Record<string, unknown>;
@@ -449,6 +485,7 @@ export async function revertAuditLog(
             stepResult = badRequest('Nieobsługiwany typ encji.');
         }
         if (!stepResult.ok) throw new RevertAbort(stepResult);
+        if (stepResult.movedUserIds) cascadedUserIds.push(...stepResult.movedUserIds);
 
         await tx.auditLog.update({
           where: { id: step.id },
@@ -477,7 +514,15 @@ export async function revertAuditLog(
 
       return {
         revertedLogIds: steps.map((step) => step.id),
-        revertedUserIds: steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+        revertedUserIds: [
+          ...steps.filter((step) => step.entityType === 'USER').map((step) => step.entityId),
+          ...cascadedUserIds,
+        ],
+        // Narrower than revertedUserIds above: only ids that actually got a
+        // pendingScopeChangeNotice written (see StepResult.movedUserIds'
+        // doc comment) — every OTHER reverted USER has nothing new to show,
+        // so nudging their tab to re-fetch would just be wasted work.
+        assignmentNoticeUserIds: cascadedUserIds,
         revertedEntityTypes: new Set(steps.map((step) => step.entityType)),
       };
     });
@@ -486,6 +531,10 @@ export async function revertAuditLog(
     // committed above, so a cache left stale here only costs up to the
     // 2-minute TTL (lib/userStatusCache.ts), not a security hole.
     await Promise.all(revertedUserIds.map((id) => invalidateUserStatusCache(id)));
+    // Same best-effort spirit — see publishAssignmentNoticeEvent's doc
+    // comment — nudges an already-open tab to show the "you were moved"
+    // modal instead of waiting for its next reload.
+    await Promise.all(assignmentNoticeUserIds.map((id) => publishAssignmentNoticeEvent(id)));
 
     // Same best-effort spirit as the cache invalidation above — a dropped
     // event just means an open admin page waits for its next own action or a
@@ -496,7 +545,7 @@ export async function revertAuditLog(
     await publishAdminEvent({ scope: 'logs' });
     for (const entityType of Array.from(revertedEntityTypes)) {
       const scope = ENTITY_TYPE_TO_ADMIN_SCOPE[entityType];
-      if (scope) await publishAdminEvent({ scope });
+      if (scope) await publishScopeEvents(scope);
     }
 
     return { ok: true, revertedLogIds };
@@ -587,21 +636,37 @@ async function revertUser(
     deactivationReason: (after.deactivationReason as string | null | undefined) ?? null,
   };
 
+  const nextOrganizationId = (before.organizationId as string | null | undefined) ?? null;
+  const previousAssignment = { gminaId: target.gminaId, organizationId: target.organizationId };
+  const nextAssignment = { gminaId: nextGminaId, organizationId: nextOrganizationId };
+  const notifiesAssignmentChange = assignmentChanged(previousAssignment, nextAssignment);
+
   try {
+    const data: Prisma.UserUncheckedUpdateManyInput = {
+      name: (before.name as string | null) ?? null,
+      email: before.email as string | undefined,
+      role: nextRole as never,
+      organizationId: (before.organizationId as string | null) ?? null,
+      phone: (before.phone as string | null) ?? null,
+      gminaId: nextGminaId,
+      isActive: nextIsActive,
+      lastActivatedAt: before.lastActivatedAt ? new Date(before.lastActivatedAt as string) : null,
+      lastDeactivatedAt: before.lastDeactivatedAt ? new Date(before.lastDeactivatedAt as string) : null,
+      deactivationReason: (before.deactivationReason as string | null) ?? null,
+    };
+    // Tell the user, next time they're around, that reverting this action
+    // moved their org/gmina — same "fires no matter how" guarantee as the
+    // forward edit in PATCH /api/admin/users/[id] (see lib/scopeChangeNotice.ts).
+    if (notifiesAssignmentChange) {
+      data.pendingScopeChangeNotice = (await buildAssignmentNotice(
+        tx,
+        previousAssignment,
+        nextAssignment
+      )) as Prisma.InputJsonValue;
+    }
     const result = await tx.user.updateMany({
       where: { id: target.id, ...expectedFields },
-      data: {
-        name: (before.name as string | null) ?? null,
-        email: before.email as string | undefined,
-        role: nextRole as never,
-        organizationId: (before.organizationId as string | null) ?? null,
-        phone: (before.phone as string | null) ?? null,
-        gminaId: nextGminaId,
-        isActive: nextIsActive,
-        lastActivatedAt: before.lastActivatedAt ? new Date(before.lastActivatedAt as string) : null,
-        lastDeactivatedAt: before.lastDeactivatedAt ? new Date(before.lastDeactivatedAt as string) : null,
-        deactivationReason: (before.deactivationReason as string | null) ?? null,
-      },
+      data,
     });
     if (result.count === 0) {
       return conflict('Stan użytkownika zmienił się od tego czasu — cofnięcie nie jest już bezpieczne.');
@@ -619,7 +684,7 @@ async function revertUser(
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }
 
-  return { ok: true };
+  return { ok: true, movedUserIds: notifiesAssignmentChange ? [target.id] : undefined };
 }
 
 async function revertGmina(
@@ -816,17 +881,29 @@ async function revertOrganization(
     }
   }
 
-  // Same guard PATCH /api/admin/organizations/[id] applies when moving an
-  // organization between gminas: every CURRENT user of this org has their
-  // own gminaId set to the org's CURRENT gmina, so reverting a gmina change
-  // here would silently strand them the same way a fresh reassignment would.
+  // Mirrors PATCH /api/admin/organizations/[id]: moving an organization
+  // between gminas takes its current members along with it (their gminaId
+  // always mirrors the org's CURRENT gmina — see POST/PATCH
+  // /api/admin/users), so reverting a gmina change cascades the same way a
+  // fresh reassignment does. Applied in this same transaction as the org's
+  // own updateMany below — if that one conflicts on a stale state, the whole
+  // transaction throws and rolls back, so members are never moved without
+  // the org actually following.
+  let movedUserIds: string[] | undefined;
   if (beforeGminaId !== target.gminaId) {
-    const usersCount = await tx.user.count({ where: { organizationId: target.id } });
-    if (usersCount > 0) {
-      return conflict(
-        'Nie można cofnąć zmiany gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do obecnej gminy.'
-      );
-    }
+    const members = await tx.user.findMany({ where: { organizationId: target.id }, select: { id: true } });
+    movedUserIds = members.map((m) => m.id);
+    // Same org, only its gmina is reverting — see the forward cascade's
+    // identical reasoning in PATCH /api/admin/organizations/[id].
+    const notice = await buildAssignmentNotice(
+      tx,
+      { gminaId: target.gminaId, organizationId: target.id },
+      { gminaId: beforeGminaId, organizationId: target.id }
+    );
+    await tx.user.updateMany({
+      where: { organizationId: target.id },
+      data: { gminaId: beforeGminaId, pendingScopeChangeNotice: notice },
+    });
   }
 
   // Conditioned on the actual admin-managed fields, not `updatedAt` — same
@@ -874,7 +951,7 @@ async function revertOrganization(
     }
     return { ok: false, status: 500, error: 'Nie udało się cofnąć zmiany.' };
   }
-  return { ok: true };
+  return { ok: true, movedUserIds };
 }
 
 async function revertInvite(

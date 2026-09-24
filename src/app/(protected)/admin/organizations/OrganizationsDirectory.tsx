@@ -109,6 +109,11 @@ export function OrganizationsDirectory({ gminas, canCreateGmina }: Organizations
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  // Set only around the initial mount/filter-change fetch (which legitimately
+  // has nothing to show yet) — a background SSE/onChanged refetch uses this
+  // instead, so the current cards stay on screen and just get swapped in
+  // place once the new data lands, instead of the grid blanking out.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -252,8 +257,8 @@ export function OrganizationsDirectory({ gminas, canCreateGmina }: Organizations
   useAdminEvents('organizations', refetch);
 
   function refetch() {
-    setLoading(true);
-    fetchOrganizations(page).finally(() => setLoading(false));
+    setRefreshing(true);
+    fetchOrganizations(page).finally(() => setRefreshing(false));
   }
 
   const hasActiveFilters =
@@ -338,7 +343,10 @@ export function OrganizationsDirectory({ gminas, canCreateGmina }: Organizations
             />
           </div>
 
-          <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">{rangeLabel}</span>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 whitespace-nowrap">
+            {rangeLabel}
+            {refreshing && <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" aria-hidden />}
+          </span>
 
           <div className="flex items-stretch gap-2 lg:gap-3 w-full lg:w-auto">
             {hasActiveFilters && (

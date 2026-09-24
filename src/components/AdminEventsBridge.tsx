@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import type { AdminEvent } from '@/lib/adminEvents';
 import { invalidateCachedList } from '@/lib/adminListCache';
+import { registerSseConnection } from '@/lib/sseClientRegistry';
 
 /**
  * Mounted once in admin/layout.tsx — the single SSE connection for the whole
@@ -17,6 +18,10 @@ import { invalidateCachedList } from '@/lib/adminListCache';
 export function AdminEventsBridge() {
   useEffect(() => {
     const source = new EventSource('/api/admin/events');
+    // See sseClientRegistry.ts's doc comment — lets signOut() force this
+    // closed before it navigates, instead of relying on this effect's own
+    // cleanup (below) running in time.
+    const unregister = registerSseConnection(source);
     source.onmessage = (e) => {
       let event: AdminEvent;
       try {
@@ -39,7 +44,10 @@ export function AdminEventsBridge() {
         console.error('[AdminEventsBridge] SSE connection closed permanently (likely session/role change)');
       }
     };
-    return () => source.close();
+    return () => {
+      unregister();
+      source.close();
+    };
   }, []);
 
   return null;

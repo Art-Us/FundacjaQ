@@ -1,10 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg, isAdminForGmina } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
+import { getCachedAlertAccess, setCachedAlertAccess, type CachedAlertAccess } from '@/lib/alertAccessCache';
 
 export const runtime = 'nodejs';
+
+// Redis-fast-path/Postgres-fallback for the alert lookup below — this route
+// only ever needs gminaId/organizationId/status to authorize the request,
+// never the rest of the alert record (see alertAccessCache.ts's doc comment).
+async function findAlertAccess(id: string): Promise<CachedAlertAccess | null> {
+  const cached = await getCachedAlertAccess(id);
+  if (cached) return cached;
+
+  const alert = await prisma.alert.findUnique({
+    where: { id },
+    select: { gminaId: true, organizationId: true, status: true },
+  });
+  if (!alert) return null;
+
+  await setCachedAlertAccess(id, alert);
+  return alert;
+}
 
 const NEED_URGENCIES = ['NORMAL', 'PILNE', 'KRYTYCZNY'] as const;
 
@@ -23,24 +42,22 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const alert = await prisma.alert.findUnique({
-    where: { id: params.id },
-    select: { id: true, gminaId: true, organizationId: true },
-  });
+  const alert = await findAlertAccess(params.id);
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
 
-  // Same gmina-scoping as PATCH /api/alerts/[id]: any donor org (ADMIN, or a
-  // COORDINATOR in the same gmina) needs to see what's needed in order to
-  // offer resources — this is deliberately NOT restricted to the alert's own
-  // owner organization, unlike POST below.
-  if (user.role !== 'ADMIN' && alert.gminaId !== user.gminaId) {
+  // Same gmina-scoping as PATCH /api/alerts/[id]: any donor org (a global
+  // ADMIN, a gmina-scoped ADMIN in the same gmina, or a COORDINATOR in the
+  // same gmina) needs to see what's needed in order to offer resources —
+  // this is deliberately NOT restricted to the alert's own owner
+  // organization, unlike POST below.
+  if (!isAdminForGmina(user, alert.gminaId) && alert.gminaId !== user.gminaId) {
     return NextResponse.json({ error: 'Nie masz uprawnień do przeglądania potrzeb tego alertu.' }, { status: 403 });
   }
 
   const needs = await prisma.alertNeed.findMany({
-    where: { alertId: alert.id },
+    where: { alertId: params.id },
     include: { category: { select: { id: true, name: true, group: true } } },
     orderBy: { createdAt: 'asc' },
   });
@@ -57,11 +74,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
 
-  const alert = await prisma.alert.findUnique({ where: { id: params.id } });
+  const alert = await findAlertAccess(params.id);
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
   }
-  if (user.role !== 'ADMIN' && !isAlertOwnerOrg(alert, user)) {
+  if (!isAdminForGmina(user, alert.gminaId) && !isAlertOwnerOrg(alert, user)) {
     return NextResponse.json(
       { error: 'Tylko organizacja właściciela alertu może zgłaszać zapotrzebowanie.' },
       { status: 403 }
@@ -85,7 +102,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     need = await prisma.alertNeed.create({
       data: {
-        alertId: alert.id,
+        alertId: params.id,
         categoryId: parsed.data.categoryId,
         title: parsed.data.title,
         description: parsed.data.description || null,
@@ -95,7 +112,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         createdById: user.id,
       },
     });
-  } catch {
+  } catch (err) {
+    // The alert lookup above can come from the cache (findAlertAccess) and
+    // go stale if the alert was deleted right after its cache entry was last
+    // written — alertId's foreign key is the real, live source of truth, so
+    // that specific failure means "alert doesn't exist" (404), not a generic
+    // server error.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
+    }
     return NextResponse.json({ error: 'Nie udało się dodać zapotrzebowania.' }, { status: 500 });
   }
 

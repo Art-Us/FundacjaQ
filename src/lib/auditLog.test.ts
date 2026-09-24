@@ -154,6 +154,9 @@ beforeEach(() => {
   vi.mocked(isLastActiveAdmin).mockResolvedValue(false);
   vi.mocked(invalidateUserStatusCache).mockReset().mockResolvedValue(undefined);
   vi.mocked(publishAdminEvent).mockReset().mockResolvedValue(undefined);
+  // Default: no organization members to cascade on a gmina-change revert.
+  // Tests exercising that cascade override this with their own list.
+  prisma.user.findMany.mockResolvedValue([]);
 });
 
 describe('snapshot*', () => {
@@ -1214,11 +1217,11 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     expect(prisma.auditLog.update).not.toHaveBeenCalled();
   });
 
-  // Regression coverage: mirrors the same guard PATCH
-  // /api/admin/organizations/[id] applies — every CURRENT user of this org
-  // has their own gminaId set to the org's CURRENT gmina, so reverting a
-  // gmina change here must not silently strand them either.
-  it('blocks reverting an ORGANIZATION_UPDATE gmina change when the organization still has users assigned', async () => {
+  // Regression coverage: mirrors PATCH /api/admin/organizations/[id] — every
+  // CURRENT user of this org has their own gminaId set to the org's CURRENT
+  // gmina, so reverting a gmina change cascades onto them the same way a
+  // fresh reassignment does, instead of being blocked.
+  it('cascades the reverted gminaId onto users still assigned to the organization', async () => {
     const before = { name: 'Caritas', gminaId: 'gmina-old' };
     const after = { name: 'Caritas', gminaId: 'gmina-new' };
     const log = baseLog({ action: 'ORGANIZATION_UPDATE', entityType: 'ORGANIZATION', entityId: 'org-1', before, after });
@@ -1226,12 +1229,29 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     mockChain([log]);
     prisma.organization.findUnique.mockResolvedValue(fullOrganization({ gminaId: 'gmina-new' }) as any);
     prisma.organization.findFirst.mockResolvedValue(null);
-    prisma.user.count.mockResolvedValue(1);
+    prisma.organization.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.findMany.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }] as any);
+    prisma.auditLog.update.mockResolvedValue({} as any);
+    prisma.auditLog.create.mockResolvedValue({} as any);
 
     const result = await revertAuditLog('log-1', ACTOR);
 
-    expect(result).toEqual({ ok: false, status: 409, error: expect.any(String) });
-    expect(prisma.organization.updateMany).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, revertedLogIds: ['log-1'] });
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-1' },
+      data: expect.objectContaining({ gminaId: 'gmina-old', pendingScopeChangeNotice: expect.any(Object) }),
+    });
+    // Same session-revalidation requirement as the forward cascade in
+    // PATCH /api/admin/organizations/[id] — these ids never get their own
+    // USER audit entry, so revertAuditLog's own cache invalidation (keyed
+    // off revertedUserIds) must still reach them via movedUserIds.
+    expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-1');
+    expect(invalidateUserStatusCache).toHaveBeenCalledWith('user-2');
+    // And the same best-effort real-time nudge (see
+    // publishAssignmentNoticeEvent's doc comment) so an already-open tab
+    // shows the notice modal without waiting for a reload.
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-1' });
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-2' });
   });
 
   // Gap coverage: the ORGANIZATION_DELETE-revert path's own "already exists"
@@ -1351,10 +1371,6 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
       fullOrganization({ id: 'org-1', name: 'Caritas', gminaId: 'gmina-new' }) as any
     );
     prisma.organization.findFirst.mockResolvedValue(null);
-    // The org is being moved back to gmina-old, which no longer has any
-    // users currently assigned, so the "would strand current users" guard
-    // passes and the write itself is what races into the FK failure.
-    prisma.user.count.mockResolvedValue(0);
     prisma.organization.updateMany.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', { code: 'P2003', clientVersion: '5.19.1' })
     );

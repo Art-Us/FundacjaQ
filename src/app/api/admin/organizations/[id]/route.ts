@@ -5,6 +5,8 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, isGminaScopedAdmin } from '@/lib/authz';
 import { normalizeOrganizationName } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotOrganization } from '@/lib/auditLog';
+import { invalidateUserStatusCache } from '@/lib/userStatusCache';
+import { buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
 
 export const runtime = 'nodejs';
 
@@ -117,24 +119,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!gmina) {
       return NextResponse.json({ error: 'Wybrana gmina nie istnieje.' }, { status: 400 });
     }
-    // Every current user of this organization has their OWN gminaId set to
-    // this organization's CURRENT gmina (enforced when each user was
-    // created/edited — see POST/PATCH /api/admin/users). Reassigning the
-    // organization to a different gmina here would silently break that
-    // invariant for every one of them without touching their own records,
-    // so it's blocked the same way deleting a dependent-having record
-    // already is elsewhere in this codebase, rather than left to corrupt
-    // silently.
-    const usersCount = await prisma.user.count({ where: { organizationId: target.id } });
-    if (usersCount > 0) {
-      return NextResponse.json(
-        {
-          error:
-            'Nie można zmienić gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do poprzedniej gminy.',
-        },
-        { status: 409 }
-      );
-    }
     data.gmina = { connect: { id: gminaId } };
   }
   if (street !== undefined) data.street = street;
@@ -148,25 +132,49 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (contactEmail !== undefined) data.contactEmail = contactEmail || null;
 
   try {
+    let movedUserIds: string[] = [];
     const organization = await prisma.$transaction(async (tx) => {
-      // Re-check right before the write: a concurrent POST/PATCH
-      // /api/admin/users could have assigned a user to this organization in
-      // the time since the usersCount check above (e.g. while this request
-      // was still validating the new gmina/name). Doesn't eliminate the race
-      // (no lock is held), but closes all but a same-transaction-sized
-      // window, matching the same accepted-risk posture as
-      // isLastActiveAdmin's count-then-act check.
+      const updated = await tx.organization.update({ where: { id: target.id }, data });
+      // Every current member of this organization has their OWN gminaId set
+      // to this organization's CURRENT gmina (enforced when each user was
+      // created/edited — see POST/PATCH /api/admin/users). Moving the
+      // organization is moving its members: cascade the same new gminaId
+      // onto everyone whose organizationId still points here, in the same
+      // transaction as the org's own write, so a concurrent POST/PATCH
+      // /api/admin/users either lands entirely before this (old org gmina,
+      // old membership) or entirely after (new gmina, sees the moved org) —
+      // never a half-moved state where a user's gminaId disagrees with the
+      // org it belongs to.
       if (isReassigningGmina) {
-        const usersCount = await tx.user.count({ where: { organizationId: target.id } });
-        if (usersCount > 0) {
-          throw new TransactionAbort(
-            409,
-            'Nie można zmienić gminy tej organizacji, ponieważ są z nią powiązani użytkownicy przypisani do poprzedniej gminy.'
-          );
-        }
+        const members = await tx.user.findMany({ where: { organizationId: target.id }, select: { id: true } });
+        movedUserIds = members.map((m) => m.id);
+        // Every moved member shares the exact same before/after pair (same
+        // org — only its gmina changed — see the invariant comment above),
+        // so one notice built here covers the whole batch instead of
+        // resolving names once per member.
+        const notice = await buildAssignmentNotice(
+          tx,
+          { gminaId: target.gminaId, organizationId: target.id },
+          { gminaId, organizationId: target.id }
+        );
+        await tx.user.updateMany({
+          where: { organizationId: target.id },
+          data: { gminaId, pendingScopeChangeNotice: notice },
+        });
       }
-      return tx.organization.update({ where: { id: target.id }, data });
+      return updated;
     });
+    // Mirrors every other gminaId-mutating write site (see the doc comment on
+    // invalidateUserStatusCache) — without this, each moved member's session
+    // keeps scoping requests to their OLD gmina for up to the cache's 2-minute
+    // TTL, silently, since the jwt() callback re-derives gminaId from this
+    // Redis cache before ever falling back to Postgres.
+    await Promise.all(
+      movedUserIds.map(async (id) => {
+        await invalidateUserStatusCache(id);
+        await publishAssignmentNoticeEvent(id);
+      })
+    );
     await recordAudit({
       actor: admin,
       action: 'ORGANIZATION_UPDATE',
@@ -179,9 +187,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     });
     return NextResponse.json({ organization });
   } catch (err) {
-    if (err instanceof TransactionAbort) {
-      return NextResponse.json({ error: err.error }, { status: err.status });
-    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return NextResponse.json({ error: 'Organizacja o tej nazwie już istnieje w tej gminie.' }, { status: 409 });
     }
@@ -189,16 +194,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       { error: 'Nie udało się zaktualizować organizacji. Sprawdź podane dane.' },
       { status: 400 }
     );
-  }
-}
-
-/** Thrown from inside a $transaction callback to abort+rollback it while carrying a typed HTTP response back out. */
-class TransactionAbort extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly error: string
-  ) {
-    super(error);
   }
 }
 

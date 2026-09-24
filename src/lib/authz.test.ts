@@ -26,6 +26,7 @@ import {
   requireAdmin,
   requireAdminOrCoordinator,
   requireGlobalAdmin,
+  isAdminForGmina,
 } from './authz';
 
 const prisma = prismaImport as unknown as DeepMockProxy<PrismaClient>;
@@ -173,10 +174,18 @@ describe('isAllocationRecipient', () => {
 });
 
 describe('canManageAlert', () => {
-  const alert = { organizationId: 'org-owner' };
+  const alert = { organizationId: 'org-owner', gminaId: 'gmina-1' };
 
-  it('is always true for ADMIN, regardless of organization', () => {
-    expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null })).toBe(true);
+  it('is always true for a global ADMIN (gminaId null), regardless of organization or gmina', () => {
+    expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null, gminaId: null })).toBe(true);
+  });
+
+  it('is true for a gmina-scoped ADMIN in the alert\'s own gmina', () => {
+    expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null, gminaId: 'gmina-1' })).toBe(true);
+  });
+
+  it('is false for a gmina-scoped ADMIN from a different gmina', () => {
+    expect(canManageAlert(alert, { role: 'ADMIN', organizationId: null, gminaId: 'gmina-2' })).toBe(false);
   });
 
   it('is true for a COORDINATOR whose organization owns the alert', () => {
@@ -213,9 +222,13 @@ describe('isAlertDonorOrg', () => {
 });
 
 describe('canViewAlertJournal', () => {
-  it('is true for ADMIN regardless of gmina', () => {
-    expect(canViewAlertJournal({ gminaId: 'gmina-1' }, { role: 'ADMIN', gminaId: 'gmina-2' })).toBe(true);
+  it('is true for a global ADMIN (gminaId null), regardless of the alert\'s gmina', () => {
     expect(canViewAlertJournal({ gminaId: 'gmina-1' }, { role: 'ADMIN', gminaId: null })).toBe(true);
+  });
+
+  it('is true for a gmina-scoped ADMIN in the alert\'s own gmina, false from a different one', () => {
+    expect(canViewAlertJournal({ gminaId: 'gmina-1' }, { role: 'ADMIN', gminaId: 'gmina-1' })).toBe(true);
+    expect(canViewAlertJournal({ gminaId: 'gmina-1' }, { role: 'ADMIN', gminaId: 'gmina-2' })).toBe(false);
   });
 
   it('is true for non-ADMIN when user and alert share the same gmina', () => {
@@ -249,11 +262,30 @@ describe('canPostAlertJournalEntry', () => {
 });
 
 describe('canReplyToAlertForum', () => {
-  const alert = { organizationId: 'org-owner', allocations: [{ donorOrgId: 'org-donor' }] };
+  const alert = { gminaId: 'gmina-1', organizationId: 'org-owner', allocations: [{ donorOrgId: 'org-donor' }] };
 
-  it('is true for ADMIN/COORDINATOR regardless of organization', () => {
-    expect(canReplyToAlertForum(alert, { role: 'ADMIN', organizationId: null })).toBe(true);
-    expect(canReplyToAlertForum(alert, { role: 'COORDINATOR', organizationId: null })).toBe(true);
+  it('is true for a global ADMIN (gminaId null), regardless of organization or gmina', () => {
+    expect(canReplyToAlertForum(alert, { role: 'ADMIN', gminaId: null, organizationId: null })).toBe(true);
+  });
+
+  it('is true for a gmina-scoped ADMIN in the alert\'s own gmina', () => {
+    expect(canReplyToAlertForum(alert, { role: 'ADMIN', gminaId: 'gmina-1', organizationId: null })).toBe(true);
+  });
+
+  it('is false for a gmina-scoped ADMIN from a different gmina, with no org relation to the alert', () => {
+    expect(canReplyToAlertForum(alert, { role: 'ADMIN', gminaId: 'gmina-2', organizationId: null })).toBe(false);
+  });
+
+  it('is true for a COORDINATOR in the alert\'s own gmina, regardless of organization', () => {
+    expect(canReplyToAlertForum(alert, { role: 'COORDINATOR', gminaId: 'gmina-1', organizationId: null })).toBe(true);
+  });
+
+  it('is false for a COORDINATOR from a different gmina, with no org relation to the alert', () => {
+    expect(canReplyToAlertForum(alert, { role: 'COORDINATOR', gminaId: 'gmina-2', organizationId: null })).toBe(false);
+  });
+
+  it('is true for a COORDINATOR from a different gmina whose organization donated to the alert (crisis response crosses gminas)', () => {
+    expect(canReplyToAlertForum(alert, { role: 'COORDINATOR', gminaId: 'gmina-2', organizationId: 'org-donor' })).toBe(true);
   });
 
   it('is true for a VOLUNTEER whose organization owns the alert', () => {
@@ -270,6 +302,24 @@ describe('canReplyToAlertForum', () => {
 
   it('is false when the user has no organization and isn\'t ADMIN/COORDINATOR', () => {
     expect(canReplyToAlertForum(alert, { role: 'VOLUNTEER' })).toBe(false);
+  });
+});
+
+describe('isAdminForGmina', () => {
+  it('is true for a global ADMIN (gminaId null), for any gmina including null', () => {
+    expect(isAdminForGmina({ role: 'ADMIN', gminaId: null }, 'gmina-1')).toBe(true);
+    expect(isAdminForGmina({ role: 'ADMIN', gminaId: null }, null)).toBe(true);
+  });
+
+  it('is true for a gmina-scoped ADMIN only when it matches the target gmina', () => {
+    expect(isAdminForGmina({ role: 'ADMIN', gminaId: 'gmina-1' }, 'gmina-1')).toBe(true);
+    expect(isAdminForGmina({ role: 'ADMIN', gminaId: 'gmina-1' }, 'gmina-2')).toBe(false);
+    expect(isAdminForGmina({ role: 'ADMIN', gminaId: 'gmina-1' }, null)).toBe(false);
+  });
+
+  it('is false for every non-ADMIN role, regardless of gmina', () => {
+    expect(isAdminForGmina({ role: 'COORDINATOR', gminaId: 'gmina-1' }, 'gmina-1')).toBe(false);
+    expect(isAdminForGmina({ role: 'VOLUNTEER', gminaId: 'gmina-1' }, 'gmina-1')).toBe(false);
   });
 });
 

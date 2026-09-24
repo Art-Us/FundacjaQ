@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma, type AlertNeed } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAlertOwnerOrg } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg, isAdminForGmina } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
 
@@ -61,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!target) {
     return NextResponse.json({ error: 'Zapotrzebowanie nie istnieje.' }, { status: 404 });
   }
-  if (user.role !== 'ADMIN' && !isAlertOwnerOrg(target.alert, user)) {
+  if (!isAdminForGmina(user, target.alert.gminaId) && !isAlertOwnerOrg(target.alert, user)) {
     return NextResponse.json(
       { error: 'Tylko organizacja właściciela alertu może edytować to zapotrzebowanie.' },
       { status: 403 }
@@ -166,7 +166,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!target) {
     return NextResponse.json({ error: 'Zapotrzebowanie nie istnieje.' }, { status: 404 });
   }
-  if (user.role !== 'ADMIN' && !isAlertOwnerOrg(target.alert, user)) {
+  if (!isAdminForGmina(user, target.alert.gminaId) && !isAlertOwnerOrg(target.alert, user)) {
     return NextResponse.json(
       { error: 'Tylko organizacja właściciela alertu może usunąć to zapotrzebowanie.' },
       { status: 403 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAdminOrCoordinator } from '@/lib/authz';
-import { scopedGminaWhereAnyAdmin } from '@/lib/gmina';
+import { scopedGminaWhere } from '@/lib/gmina';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 
 export const runtime = 'nodejs';
@@ -36,10 +36,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Nieprawidłowe parametry filtrowania.' }, { status: 400 });
   }
 
-  // Resources stay ADMIN-unconditional (any ADMIN, global or gmina-scoped,
-  // sees every gmina's resources) — see scopedGminaWhereAnyAdmin's doc
-  // comment. Must still fail closed for a gmina-scoped role with no gmina.
-  const gminaFilter = scopedGminaWhereAnyAdmin(user);
+  // A gmina-scoped ADMIN sees only their own gmina's resources, same as
+  // COORDINATOR/VOLUNTEER (scopedGminaWhere) — a global ADMIN (gminaId ===
+  // null) still sees every gmina's. Must still fail closed for a
+  // gmina-scoped role with no gmina.
+  const gminaFilter = scopedGminaWhere(user);
   if (gminaFilter === null) {
     return NextResponse.json({ resources: [] });
   }

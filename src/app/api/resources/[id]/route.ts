@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { Prisma, type Resource } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, type AuthorizedUser } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAdminForGmina, type AuthorizedUser } from '@/lib/authz';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
+import {
+  getCachedResourceAccess,
+  setCachedResourceAccess,
+  invalidateResourceAccessCache,
+} from '@/lib/resourceAccessCache';
 
 export const runtime = 'nodejs';
 
@@ -20,12 +25,32 @@ const updateResourceSchema = z.object({
   location: z.string().trim().max(200).nullable().optional(),
 });
 
-// Own organization or ADMIN — mirrors the "власна організація або ADMIN"
-// guard from docs/resource_management_plan.md Крок 19. A COORDINATOR from a
-// DIFFERENT organization gets the same 403 a VOLUNTEER would from the module
-// guard one level up, even though both pass requireAdminOrCoordinator().
-function canManageResource(resource: Pick<Resource, 'organizationId'>, user: AuthorizedUser): boolean {
-  return user.role === 'ADMIN' || (!!user.organizationId && user.organizationId === resource.organizationId);
+// Own organization, or ADMIN (a global admin unconditionally, a gmina-scoped
+// one only within their own gmina — isAdminForGmina) — mirrors the "власна
+// організація або ADMIN" guard from docs/resource_management_plan.md Крок 19.
+// A COORDINATOR from a DIFFERENT organization gets the same 403 a VOLUNTEER
+// would from the module guard one level up, even though both pass
+// requireAdminOrCoordinator().
+function canManageResource(resource: Pick<Resource, 'organizationId' | 'gminaId'>, user: AuthorizedUser): boolean {
+  return isAdminForGmina(user, resource.gminaId) || (!!user.organizationId && user.organizationId === resource.organizationId);
+}
+
+/**
+ * Fast pre-check ahead of the mandatory full findUnique below — a resource's
+ * gminaId/organizationId never change after creation (not in
+ * updateResourceSchema), so a cache hit that already disagrees with the
+ * caller's organization is a reliable early 403, no Postgres round trip
+ * needed. A cache MISS (or a hit that doesn't rule the caller out) still
+ * falls through to the real findUnique + canManageResource check below,
+ * exactly as before — this never widens access, only sometimes rejects
+ * sooner. See resourceAccessCache.ts's doc comment for why this can't also
+ * skip that full read on the ALLOWED path (quantity/reservedQuantity/status
+ * are genuinely mutable and must come from Postgres every time).
+ */
+async function rejectEarlyIfDenied(resourceId: string, user: AuthorizedUser): Promise<boolean> {
+  if (user.role === 'ADMIN') return false;
+  const cached = await getCachedResourceAccess(resourceId);
+  return !!cached && cached.organizationId !== user.organizationId;
 }
 
 function inlineSnapshot(resource: Resource): Record<string, unknown> {
@@ -52,6 +77,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!user) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
+  if (await rejectEarlyIfDenied(params.id, user)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do tego zasobu.' }, { status: 403 });
+  }
 
   const resource = await prisma.resource.findUnique({
     where: { id: params.id },
@@ -67,6 +95,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Nie masz uprawnień do tego zasobu.' }, { status: 403 });
   }
 
+  await setCachedResourceAccess(resource.id, { gminaId: resource.gminaId, organizationId: resource.organizationId });
+
   return NextResponse.json({ resource });
 }
 
@@ -74,6 +104,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const user = await requireAdminOrCoordinator();
   if (!user) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
+  }
+  if (await rejectEarlyIfDenied(params.id, user)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do tego zasobu.' }, { status: 403 });
   }
 
   const target = await prisma.resource.findUnique({ where: { id: params.id } });
@@ -83,6 +116,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!canManageResource(target, user)) {
     return NextResponse.json({ error: 'Nie masz uprawnień do tego zasobu.' }, { status: 403 });
   }
+  await setCachedResourceAccess(target.id, { gminaId: target.gminaId, organizationId: target.organizationId });
 
   const parsed = updateResourceSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -151,6 +185,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   if (!user) {
     return NextResponse.json({ error: 'Brak dostępu.' }, { status: 403 });
   }
+  if (await rejectEarlyIfDenied(params.id, user)) {
+    return NextResponse.json({ error: 'Nie masz uprawnień do tego zasobu.' }, { status: 403 });
+  }
 
   const target = await prisma.resource.findUnique({ where: { id: params.id } });
   if (!target) {
@@ -175,6 +212,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   } catch {
     return NextResponse.json({ error: 'Nie udało się usunąć zasobu.' }, { status: 500 });
   }
+
+  await invalidateResourceAccessCache(target.id);
 
   await recordAudit({
     actor: user,

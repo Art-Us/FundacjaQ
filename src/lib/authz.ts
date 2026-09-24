@@ -209,4 +209,5 @@ export {
   canPostAlertJournalEntry,
   canReplyToAlertForum,
   canViewAlertJournal,
+  isAdminForGmina,
 } from './resourceAuthz';

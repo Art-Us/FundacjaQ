@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAlertOwnerOrg, canManageAlert, isAdminForGmina } from '@/lib/authz';
 import { ALERT_CATEGORIES, EVENT_CATEGORIES, isCategoryValidForKind } from '@/lib/alertLabels';
 import type { AlertKindValue } from '@/lib/alertLabels';
 import { recalculateNeedFulfillment } from '@/lib/allocations';
+import { invalidateAlertAccessCache } from '@/lib/alertAccessCache';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -136,6 +138,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'Nie udało się zaktualizować alertu.' }, { status: 500 });
   }
 
+  // Only alert-access-cache-relevant field that can ever change here — see
+  // alertAccessCache.ts's doc comment (gminaId/organizationId are immutable).
+  if (parsed.data.status) {
+    await invalidateAlertAccessCache(alert.id);
+  }
+
+  await publishAdminEvent({ scope: 'alerts', gminaId: alert.gminaId });
+
   return NextResponse.json({ message: 'Alert zaktualizowany.' });
 }
 
@@ -155,6 +165,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const alert = await prisma.alert.findUnique({ where: { id: params.id } });
   if (!alert) {
     return NextResponse.json({ error: 'Alert nie istnieje.' }, { status: 404 });
+  }
+
+  // A gmina-scoped admin may only hard-delete alerts in their own gmina — a
+  // global admin (gminaId === null) is unrestricted.
+  if (!isAdminForGmina(user, alert.gminaId)) {
+    return NextResponse.json({ error: 'Możesz usuwać tylko alerty ze swojej gminy.' }, { status: 403 });
   }
 
   try {
@@ -183,6 +199,19 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     console.error('[alerts] delete failed:', err);
     return NextResponse.json({ error: 'Nie udało się usunąć alertu.' }, { status: 500 });
   }
+
+  await invalidateAlertAccessCache(alert.id);
+  // Also touches 'resources': the transaction above released every active
+  // allocation's reserved quantity back onto its donor's resource — no
+  // gminaId on that one, since those donors can span more than one gmina
+  // (crisis response crosses gmina boundaries, same as donating in the
+  // first place) and a single event can only ever name one. Run
+  // concurrently — publishAdminEvent never rejects, so there's nothing a
+  // sequential await here would protect against, only latency it'd add.
+  await Promise.all([
+    publishAdminEvent({ scope: 'alerts', gminaId: alert.gminaId }),
+    publishAdminEvent({ scope: 'resources' }),
+  ]);
 
   return NextResponse.json({ message: 'Alert usunięty.' });
 }

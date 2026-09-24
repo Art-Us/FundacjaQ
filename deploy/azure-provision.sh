@@ -79,7 +79,12 @@ az acr create --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" --sku Basic 
 
 ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
 
-docker build -t "$ACR_LOGIN_SERVER/qfundation:v1" .
+# NEXT_PUBLIC_RECAPTCHA_SITE_KEY is inlined into the client bundle at build
+# time, so it must be passed as a build arg here; setting it as an app
+# setting further down has no effect on the already-built image.
+docker build \
+  --build-arg NEXT_PUBLIC_RECAPTCHA_SITE_KEY="$NEXT_PUBLIC_RECAPTCHA_SITE_KEY" \
+  -t "$ACR_LOGIN_SERVER/qfundation:v1" .
 az acr login --name "$ACR_NAME"
 docker push "$ACR_LOGIN_SERVER/qfundation:v1"
 
@@ -180,7 +185,7 @@ az webapp config appsettings set \
   --resource-group "$RESOURCE_GROUP" \
   --name "$APP_NAME" \
   --settings \
-    DATABASE_URL="postgresql://$DB_ADMIN_USER:$DB_ADMIN_PASSWORD@$DB_SERVER_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require" \
+    DATABASE_URL="postgresql://$DB_ADMIN_USER:$DB_ADMIN_PASSWORD@$DB_SERVER_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require&connection_limit=10" \
     REDIS_URL="rediss://:$REDIS_KEY@$REDIS_HOST:$REDIS_PORT" \
     NEXTAUTH_URL="https://$APP_NAME.azurewebsites.net" \
     NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \

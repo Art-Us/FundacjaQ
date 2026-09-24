@@ -28,6 +28,12 @@ export function AuditLogDirectory() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Set only around the initial mount/filter-change fetch (which legitimately
+  // has nothing to show yet) — a background SSE-triggered reload (another
+  // admin's revert) uses this instead, so the current rows stay on screen and
+  // just get swapped in place once the new data lands, instead of the list
+  // blanking out.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Guards against two hazards inherent to "fire a request, then set state
@@ -87,8 +93,8 @@ export function AuditLogDirectory() {
     // Simplest correct refresh after a revert: the acted-on row's canRevert
     // flips and a brand-new "revert" row appears at the top — reloading the
     // first page picks up both without trying to patch state by hand.
-    setLoading(true);
-    fetchPage(null, true).finally(() => setLoading(false));
+    setRefreshing(true);
+    fetchPage(null, true).finally(() => setRefreshing(false));
   }
 
   // Another admin's own revert (or any other admin-panel mutation, since
@@ -134,6 +140,13 @@ export function AuditLogDirectory() {
             </option>
           ))}
         </select>
+
+        {refreshing && (
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 whitespace-nowrap">
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" aria-hidden />
+            Aktualizowanie…
+          </span>
+        )}
       </div>
 
       {error && (

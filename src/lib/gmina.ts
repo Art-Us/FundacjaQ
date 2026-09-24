@@ -28,20 +28,6 @@ export function scopedGminaWhere(actor: { role: Role | string; gminaId: string |
   return { gminaId: actor.gminaId };
 }
 
-/**
- * Same shape as scopedGminaWhere, but for the two areas (alerts, resources —
- * including allocations/needs) the product owner decided should stay
- * ADMIN-unconditional regardless of gminaId, unlike everything else
- * (users/invites/gminas/organizations/audit log) — any ADMIN, global or
- * gmina-scoped, sees every gmina's alerts and resources. Everyone else
- * (COORDINATOR/VOLUNTEER) is scoped exactly the same as scopedGminaWhere.
- */
-export function scopedGminaWhereAnyAdmin(actor: { role: Role | string; gminaId: string | null }): { gminaId: string } | Record<string, never> | null {
-  if (actor.role === 'ADMIN') return {};
-  if (!actor.gminaId) return null;
-  return { gminaId: actor.gminaId };
-}
-
 interface ResolveGminaInput {
   gminaId?: string;
   newGminaName?: string;

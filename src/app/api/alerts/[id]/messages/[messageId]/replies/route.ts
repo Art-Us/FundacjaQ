@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser, canViewAlertJournal, canReplyToAlertForum } from '@/lib/authz';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -118,6 +119,13 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: 'Nie udało się wysłać wiadomości.' }, { status: 500 });
   }
+
+  // See POST /api/alerts/[id]/messages's own comment on why this is its own
+  // scope, not 'alerts'.
+  // gminaId lets /api/events/route.ts's server-side filter keep this out of
+  // another gmina's SSE stream — see that route's own comment on why the
+  // gmina boundary has to be enforced there, not just trusted to the client.
+  await publishAdminEvent({ scope: 'alert-messages', id: alert.id, action: 'ALERT_MESSAGE_REPLY_CREATE', gminaId: alert.gminaId });
 
   return NextResponse.json({ reply }, { status: 201 });
 }

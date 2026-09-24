@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { requireAdminOrCoordinator, isAllocationRecipient } from '@/lib/authz';
+import { requireAdminOrCoordinator, isAllocationRecipient, isAdminForGmina } from '@/lib/authz';
 import { sumReturnEvents, recalculateAllocationStatus, resourceCountersAfterReturnEvent } from '@/lib/allocations';
 import { recordAudit, requestMeta } from '@/lib/auditLog';
 import { describeCheckViolation } from '@/lib/dbErrors';
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!target) {
     return NextResponse.json({ error: 'Przydział nie istnieje.' }, { status: 404 });
   }
-  if (user.role !== 'ADMIN' && !isAllocationRecipient(target, user)) {
+  if (!isAdminForGmina(user, target.alert.gminaId) && !isAllocationRecipient(target, user)) {
     return NextResponse.json({ error: 'Tylko odbiorca może rejestrować zwrot tego przydziału.' }, { status: 403 });
   }
 

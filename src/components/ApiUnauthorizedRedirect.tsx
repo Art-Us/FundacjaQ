@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { signOut } from 'next-auth/react';
 import { isProtectedApiPath } from '@/lib/apiUnauthorized';
+import { closeAllSseConnections } from '@/lib/sseClientRegistry';
 
 /**
  * Mounted once in ProtectedShell, so every fetch() call anywhere in the app
@@ -29,6 +30,10 @@ export function ApiUnauthorizedRedirect() {
         const { pathname } = new URL(url, window.location.origin);
         if (isProtectedApiPath(pathname)) {
           redirecting = true;
+          // See sseClientRegistry.ts's doc comment — must run BEFORE
+          // signOut()'s own navigation, or that navigation's new connection
+          // can stall behind these still-open ones.
+          closeAllSseConnections();
           // signOut() makes its own network call (POST /api/auth/signout)
           // which can itself fail — left unguarded, that would leave
           // `redirecting` wedged true forever (silently swallowing every

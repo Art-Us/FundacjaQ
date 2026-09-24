@@ -14,6 +14,7 @@ import { adminUserSelect } from '@/lib/users';
 import { requiresGmina, resolveGminaId } from '@/lib/gmina';
 import { recordAudit, requestMeta, snapshotUser, auditInlineGminaCreation } from '@/lib/auditLog';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
+import { assignmentChanged, buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
 
 export const runtime = 'nodejs';
 
@@ -196,6 +197,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   try {
+    const previousAssignment = { gminaId: target.gminaId, organizationId: target.organizationId };
+    const nextAssignment = { gminaId: effectiveGminaId, organizationId: effectiveOrganizationId };
+    const notifiesAssignmentChange = assignmentChanged(previousAssignment, nextAssignment);
+
     const user = await prisma.$transaction(async (tx) => {
       // Re-check the organization's gmina one more time, right before the
       // write: the precheck above ran before the email-collision lookup,
@@ -215,6 +220,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           );
         }
       }
+      // Tell the user, next time they're around, that their org/gmina
+      // changed — no matter whether this PATCH touched gminaId,
+      // organizationId, or both at once (see lib/scopeChangeNotice.ts).
+      if (notifiesAssignmentChange) {
+        data.pendingScopeChangeNotice = (await buildAssignmentNotice(
+          tx,
+          previousAssignment,
+          nextAssignment
+        )) as Prisma.InputJsonValue;
+      }
       return tx.user.update({
         where: { id: target.id },
         data,
@@ -222,6 +237,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       });
     });
     await invalidateUserStatusCache(user.id);
+    if (notifiesAssignmentChange) await publishAssignmentNoticeEvent(user.id);
     await recordAudit({
       actor: admin,
       action: 'USER_UPDATE',

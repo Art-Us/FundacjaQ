@@ -63,9 +63,15 @@ export interface ResolvedLocation {
   label: string | null;
 }
 
+// Bez tego zawieszony/powolny Nominatim trzymałby handler Node.js (i jego
+// socket) w nieskończoność — przy do 3 kolejnych zapytaniach na wyszukiwanie
+// wystarczyłoby kilka równoległych żądań, żeby wyczerpać pulę wolnych socketów.
+const NOMINATIM_TIMEOUT_MS = 5000;
+
 export async function fetchNominatim(url: URL): Promise<unknown> {
   const res = await fetch(url, {
     headers: { 'User-Agent': NOMINATIM_USER_AGENT, 'Accept-Language': 'pl' },
+    signal: AbortSignal.timeout(NOMINATIM_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Nominatim responded with ${res.status}`);
   return res.json();

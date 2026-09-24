@@ -96,6 +96,11 @@ export function GminasDirectory() {
   // shows up without a full page reload.
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loading, setLoading] = useState(true);
+  // Set only around the initial mount/filter-change fetch (which legitimately
+  // has nothing to show yet) — a background SSE/onChanged refetch uses this
+  // instead, so the current cards stay on screen and just get swapped in
+  // place once the new data lands, instead of the grid blanking out.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -219,8 +224,8 @@ export function GminasDirectory() {
   }, [page, fetchGminas]);
 
   function refetch() {
-    setLoading(true);
-    Promise.all([fetchGminas(page), fetchLocations()]).finally(() => setLoading(false));
+    setRefreshing(true);
+    Promise.all([fetchGminas(page), fetchLocations()]).finally(() => setRefreshing(false));
   }
 
   // Another admin's own create/edit/delete — see AdminEventsBridge (mounted
@@ -294,7 +299,10 @@ export function GminasDirectory() {
             />
           </div>
 
-          <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">{rangeLabel}</span>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 whitespace-nowrap">
+            {rangeLabel}
+            {refreshing && <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" aria-hidden />}
+          </span>
 
           <div className="flex items-stretch gap-2 lg:gap-3 w-full lg:w-auto">
             {hasActiveFilters && (
