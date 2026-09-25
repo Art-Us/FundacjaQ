@@ -251,6 +251,26 @@ describe('PATCH /api/admin/organizations/[id]', () => {
     // open tab shows the notice modal without waiting for a reload.
     expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-1' });
     expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-2' });
+    // None of the moved members get their own USER_UPDATE audit entry (the
+    // cascade bypasses recordAudit for them — see the comment above the
+    // updateMany), so recordAudit's own 'organizations' publish below is the
+    // only other signal this request sends. Without this explicit 'users'
+    // publish, an open /admin/users tab would never hear that these users'
+    // gminaId just changed.
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'users' });
+  });
+
+  it('does not publish a users-scope refresh when the reassignment has no members to move', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'admin-1', role: 'ADMIN', gminaId: null });
+    prisma.organization.findUnique.mockResolvedValue(baseOrganization({ gminaId: 'g1' }) as any);
+    prisma.gmina.findUnique.mockResolvedValue({ id: 'g2' } as any);
+    prisma.organization.update.mockResolvedValue({} as any);
+    prisma.user.findMany.mockResolvedValue([]);
+
+    const res = await callPatch({ gminaId: 'g2' });
+
+    expect(res.status).toBe(200);
+    expect(publishAdminEvent).not.toHaveBeenCalledWith({ scope: 'users' });
   });
 
   it('allows reassigning gminaId when the organization has no users assigned', async () => {

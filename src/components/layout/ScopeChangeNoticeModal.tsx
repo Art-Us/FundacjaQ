@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { ArrowRight, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppEvents } from '@/hooks/useAppEvents';
@@ -30,6 +31,7 @@ function formatAssignment(organizationName: string | null, gminaName: string | n
  * already-open tab instead of waiting for its next reload.
  */
 export function ScopeChangeNoticeModal() {
+  const router = useRouter();
   const [notice, setNotice] = useState<ScopeChangeNotice | null>(null);
   const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +74,15 @@ export function ScopeChangeNoticeModal() {
         return;
       }
       setNotice(null);
+      // The org/gmina change already took effect server-side (session cache
+      // was invalidated at write time — see lib/userStatusCache.ts) — this
+      // just makes the CURRENTLY MOUNTED page catch up without a manual
+      // reload: router.refresh() re-fetches every server component on this
+      // route (the dashboard's stats, /map's or /zasoby's gmina-scoped data,
+      // the sidebar's role-derived props in the layout) and clears the
+      // Router Cache, so the next navigation elsewhere also fetches fresh
+      // instead of serving an already-visited segment from before the move.
+      router.refresh();
     } catch (err) {
       console.error('[ScopeChangeNoticeModal] dismiss failed:', err);
       setError('Nie udało się połączyć z serwerem. Spróbuj ponownie.');
