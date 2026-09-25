@@ -7,6 +7,7 @@ import { normalizeOrganizationName } from '@/lib/organization';
 import { recordAudit, requestMeta, snapshotOrganization } from '@/lib/auditLog';
 import { invalidateUserStatusCache } from '@/lib/userStatusCache';
 import { buildAssignmentNotice, publishAssignmentNoticeEvent } from '@/lib/scopeChangeNotice';
+import { publishAdminEvent } from '@/lib/adminEvents';
 
 export const runtime = 'nodejs';
 
@@ -175,6 +176,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         await publishAssignmentNoticeEvent(id);
       })
     );
+    // recordAudit below only publishes the 'organizations' scope (this is an
+    // ORGANIZATION_UPDATE) — none of the moved members got their own
+    // USER_UPDATE audit entry (see the cascade above), so an open
+    // /admin/users page would otherwise never hear about their new gminaId
+    // until a manual reload. One signal covers the whole batch; UsersDirectory's
+    // refetch() re-fetches its current page/filter regardless of which users moved.
+    if (movedUserIds.length > 0) await publishAdminEvent({ scope: 'users' });
     await recordAudit({
       actor: admin,
       action: 'ORGANIZATION_UPDATE',

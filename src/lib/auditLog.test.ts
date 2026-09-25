@@ -1252,6 +1252,11 @@ describe('revertAuditLog — ORGANIZATION (single step)', () => {
     // shows the notice modal without waiting for a reload.
     expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-1' });
     expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'user-notice', targetUserId: 'user-2' });
+    // This revert's own audit-log step is entityType ORGANIZATION only —
+    // none of the cascaded users got their own USER step — so without
+    // 'USER' being added to revertedEntityTypes here, an open /admin/users
+    // tab would never hear that these users' gminaId changed back.
+    expect(publishAdminEvent).toHaveBeenCalledWith({ scope: 'users', action: undefined, gminaId: undefined });
   });
 
   // Gap coverage: the ORGANIZATION_DELETE-revert path's own "already exists"

@@ -523,7 +523,15 @@ export async function revertAuditLog(
         // doc comment) — every OTHER reverted USER has nothing new to show,
         // so nudging their tab to re-fetch would just be wasted work.
         assignmentNoticeUserIds: cascadedUserIds,
-        revertedEntityTypes: new Set(steps.map((step) => step.entityType)),
+        // 'USER' is added here even when no step's OWN entityType was USER —
+        // revertOrganization's gmina-revert cascade moves users without
+        // giving any of them their own audit entry (same reasoning as
+        // cascadedUserIds above), so without this an open /admin/users page
+        // would never hear that their gminaId just changed back.
+        revertedEntityTypes: new Set([
+          ...steps.map((step) => step.entityType),
+          ...(cascadedUserIds.length > 0 ? (['USER'] as const) : []),
+        ]),
       };
     });
 
