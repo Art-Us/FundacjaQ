@@ -92,6 +92,17 @@ describe('assertAllocationTransition', () => {
   it('throws for a transition out of a terminal status', () => {
     expect(() => assertAllocationTransition('RETURNED', 'DELIVERED', 'DONOR')).toThrow(AllocationTransitionError);
   });
+
+  it('allows only the donor to cancel a still-unconfirmed (DELIVERY_AGREED) allocation', () => {
+    expect(() => assertAllocationTransition('DELIVERY_AGREED', 'CANCELLED', 'DONOR')).not.toThrow();
+    expect(() => assertAllocationTransition('DELIVERY_AGREED', 'CANCELLED', 'RECIPIENT')).toThrow(
+      AllocationTransitionError
+    );
+  });
+
+  it('throws when trying to cancel an allocation that has already been delivered', () => {
+    expect(() => assertAllocationTransition('DELIVERED', 'CANCELLED', 'DONOR')).toThrow(AllocationTransitionError);
+  });
 });
 
 describe('recalculateNeedFulfillment', () => {

@@ -64,20 +64,23 @@ export function resourceCountersAfterReturnEvent(event: ReturnEventLike): {
   };
 }
 
-// Scoped to exactly the two manual transitions /api/allocations/[id] (Крок
-// 24) exposes via PATCH. PARTIALLY_RETURNED/RETURNED are reached
-// automatically through recalculateAllocationStatus above, never through
-// this manual gate — and CANCELLED has no route anywhere in this plan yet,
-// so it's deliberately left out rather than guessed at.
+// Scoped to exactly the manual transitions /api/allocations/[id] (Крок 24)
+// exposes via PATCH. PARTIALLY_RETURNED/RETURNED are reached automatically
+// through recalculateAllocationStatus above, never through this manual gate.
+// DELIVERY_AGREED -> CANCELLED (donor-only) lets a donor withdraw its own
+// still-unconfirmed offer — e.g. a wrong quantity — before the other side has
+// acted on it; once DELIVERED, the recipient may already be relying on it, so
+// there's no cancel path out of any later status.
 const ALLOWED_TRANSITIONS: Partial<Record<AllocationStatus, Partial<Record<AllocationStatus, AllocationActor[]>>>> = {
-  DELIVERY_AGREED: { DELIVERED: ['DONOR', 'RECIPIENT'] },
+  DELIVERY_AGREED: { DELIVERED: ['DONOR', 'RECIPIENT'], CANCELLED: ['DONOR'] },
   DELIVERED: { RETURN_AGREED: ['RECIPIENT'] },
 };
 
 /**
  * Throws unless `actor` may move an allocation from `current` to `next` —
  * decision #3 (docs/are-you-familiar-with-tidy-blum.md): either side may
- * confirm delivery, but only the recipient may agree to a return.
+ * confirm delivery, but only the recipient may agree to a return; only the
+ * donor may withdraw its own still-unconfirmed offer (CANCELLED).
  */
 export function assertAllocationTransition(
   current: AllocationStatus,
@@ -90,7 +93,11 @@ export function assertAllocationTransition(
   }
   if (!allowedActors.includes(actor)) {
     throw new AllocationTransitionError(
-      actor === 'DONOR' ? 'Tylko odbiorca może wykonać tę zmianę statusu.' : 'Tylko dawca może wykonać tę zmianę statusu.'
+      allowedActors.length === 1 && allowedActors[0] === 'DONOR'
+        ? 'Tylko dawca może wykonać tę zmianę statusu.'
+        : actor === 'DONOR'
+          ? 'Tylko odbiorca może wykonać tę zmianę statusu.'
+          : 'Tylko dawca może wykonać tę zmianę statusu.'
     );
   }
 }

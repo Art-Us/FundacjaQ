@@ -204,6 +204,7 @@ export {
   isAlertOwnerOrg,
   isAllocationDonor,
   isAllocationRecipient,
+  canEditAllocationQuantity,
   canManageAlert,
   isAlertDonorOrg,
   canPostAlertJournalEntry,

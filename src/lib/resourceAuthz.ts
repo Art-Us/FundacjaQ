@@ -55,6 +55,27 @@ export function isAllocationDonor(
 }
 
 /**
+ * Whether `user` may edit the quantity of `alloc` — fixing a typo'd digit
+ * before the other side has acted on it. Deliberately narrower than
+ * isAllocationDonor alone: allowed only while the allocation still sits in
+ * DELIVERY_AGREED (the donor's own initial declaration, not yet confirmed by
+ * either side per decision #3) — once DELIVERED, the recipient may already be
+ * relying on that exact amount, so a correction past that point has to go
+ * through a fresh allocation/return instead of silently rewriting history.
+ * Same gmina-scoped admin carve-out as the rest of the module
+ * (isAdminForGmina); the recipient side is never allowed to edit someone
+ * else's declared donation.
+ */
+export function canEditAllocationQuantity(
+  alloc: { status: string; donorOrgId: string; alert: { gminaId: string } },
+  user: { role: string; gminaId?: string | null; organizationId?: string | null }
+): boolean {
+  if (alloc.status !== 'DELIVERY_AGREED') return false;
+  if (isAdminForGmina(user, alloc.alert.gminaId)) return true;
+  return isAllocationDonor(alloc, user);
+}
+
+/**
  * Whether `user`'s organization is the recipient on `alloc` — i.e. the
  * organization that owns the alert this allocation was made for. Reuses
  * isAlertOwnerOrg rather than comparing against `alloc.recipientOrgId`
